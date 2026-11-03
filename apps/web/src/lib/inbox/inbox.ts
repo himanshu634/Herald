@@ -93,13 +93,18 @@ export function countByView(emails: Email[]): Record<ViewId, number> {
 	return counts;
 }
 
-export type Action = 'on-it' | 'not-urgent' | 'done';
+export type Action = 'on-it' | 'not-urgent' | 'to-inbox' | 'done';
 
 export const ACTIONS: Record<Action, { label: string; key: string; done: string }> = {
 	'on-it': { label: 'On it', key: 'O', done: 'Moved to In progress.' },
 	'not-urgent': {
 		label: 'Not urgent',
 		key: 'N',
+		done: 'Moved to Inbox. Herald saved this as a correction.'
+	},
+	'to-inbox': {
+		label: 'Move to Inbox',
+		key: 'I',
 		done: 'Moved to Inbox. Herald saved this as a correction.'
 	},
 	done: { label: 'Done', key: 'D', done: 'Marked done.' }
@@ -115,6 +120,8 @@ export function actionsFor(status: EmailStatus): Action[] {
 			return ['on-it', 'done'];
 		case 'in_progress':
 			return ['done'];
+		case 'closed':
+			return ['to-inbox'];
 		default:
 			return [];
 	}

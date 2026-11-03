@@ -95,7 +95,12 @@ describe('actionsFor', () => {
 		expect(actionsFor('alerted')).toEqual(['on-it', 'not-urgent']);
 		expect(actionsFor('inbox')).not.toContain('not-urgent');
 		expect(actionsFor('in_progress')).toEqual(['done']);
-		expect(actionsFor('closed')).toEqual([]);
+	});
+
+	it('offers Move to Inbox only on closed emails, as the API allows', () => {
+		expect(actionsFor('closed')).toEqual(['to-inbox']);
+		expect(actionsFor('inbox')).not.toContain('to-inbox');
+		expect(actionsFor('alerted')).not.toContain('to-inbox');
 	});
 });
 

@@ -224,6 +224,7 @@
 			ArrowUp: () => move(-1),
 			o: () => act('on-it'),
 			n: () => act('not-urgent'),
+			i: () => act('to-inbox'),
 			d: () => act('done'),
 			'/': () => search?.focus()
 		};

@@ -119,7 +119,7 @@ A raised face sits `--press-depth` (3 px) above a darker base. On click it drops
 | `secondary` | Every other action (**Not urgent**, **Done**, **Test on past emails**) | White face, 3:1 edge |
 | `quiet` | Low-stakes actions and links in toolbars (**Open thread**) | No base, no press |
 
-- Pass `kbd` to show the shortcut. The owner actions are fixed: **O** On it, **N** Not urgent, **D** Done, **/** Search, **J** and **K** next and previous email. Wiring the key is the screen's job; the button only shows it.
+- Pass `kbd` to show the shortcut. The owner actions are fixed: **O** On it, **N** Not urgent, **I** Move to Inbox, **D** Done, **/** Search, **J** and **K** next and previous email. Wiring the key is the screen's job; the button only shows it.
 - Labels say what happens, and the result uses the same words: the button **Not urgent** gives the message "Moved to Inbox. Herald saved this as a correction."
 - There is no destructive red button. Herald never deletes; closing is reversible.
 

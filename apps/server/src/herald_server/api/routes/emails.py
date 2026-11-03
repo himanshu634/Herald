@@ -51,6 +51,10 @@ def _store_received(
         return _out(email), to_bus(event)
 
 
+# The route decide chose, for each status the owner can send back to the inbox.
+_OVERRIDDEN_ROUTE = {EmailStatus.ALERTED: "alert", EmailStatus.CLOSED: "closed"}
+
+
 def _move(
     services: Services,
     workspace_id: str,
@@ -68,13 +72,15 @@ def _move(
         event = add_event(
             session, workspace_id, EMAIL_STATUS, {"email_id": email.id, "from": previous, "to": to}
         )
-        if previous is EmailStatus.ALERTED and to is EmailStatus.INBOX:
+        # The owner overrode the decide step. Saved so the model sees it on later emails.
+        overridden = _OVERRIDDEN_ROUTE.get(previous) if to is EmailStatus.INBOX else None
+        if overridden is not None:
             session.add(
                 Correction(
                     workspace_id=workspace_id,
                     email_id=email.id,
                     field="route",
-                    from_value="alert",
+                    from_value=overridden,
                     to_value="inbox",
                 )
             )
@@ -144,3 +150,12 @@ async def mark_not_urgent(
 @router.post("/{email_id}/done")
 async def mark_done(workspace: WorkspaceDep, services: ServicesDep, email_id: EmailId) -> EmailOut:
     return await _act(services, workspace.id, email_id, EmailStatus.DONE)
+
+
+@router.post("/{email_id}/to-inbox")
+async def move_to_inbox(
+    workspace: WorkspaceDep, services: ServicesDep, email_id: EmailId
+) -> EmailOut:
+    return await _act(
+        services, workspace.id, email_id, EmailStatus.INBOX, only_from=EmailStatus.CLOSED
+    )
