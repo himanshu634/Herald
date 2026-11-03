@@ -4,10 +4,16 @@ import time
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlsplit
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
-from herald_server.connectors.base import AuthRevoked, InboundMessage, MissingRefreshToken
-from herald_server.models import Email, Mailbox, MailboxStatus
+from herald_server.connectors.base import (
+    AuthRevoked,
+    InboundMessage,
+    MissingRefreshToken,
+    Subscription,
+)
+from herald_server.events import MAILBOX_STATUS
+from herald_server.models import Email, Event, Mailbox, MailboxStatus
 
 WEB_URL = "http://localhost:5173"
 
@@ -36,6 +42,17 @@ def mailboxes_of(app, workspace_id: str) -> list[Mailbox]:
 def emails_of(app, workspace_id: str) -> list[Email]:
     with Session(app.state.services.engine) as session:
         return list(session.exec(select(Email).where(Email.workspace_id == workspace_id)).all())
+
+
+def status_events(app, workspace_id: str) -> list[str]:
+    """The `status` of each `mailbox.status` event in the workspace, oldest first."""
+    with Session(app.state.services.engine) as session:
+        events = session.exec(
+            select(Event)
+            .where(Event.workspace_id == workspace_id, Event.type == MAILBOX_STATUS)
+            .order_by(col(Event.id))
+        ).all()
+        return [e.data["status"] for e in events]
 
 
 async def start_connect(client, workspace_id: str) -> str:
@@ -94,6 +111,24 @@ async def test_callback_creates_active_mailbox_and_backfills(app, client, fake_c
     assert mailbox.email_address == "owner@shop.in"
     assert len(emails_of(app, ws)) == 1
     assert "subscribe" in fake_connector.calls
+    assert status_events(app, ws) == ["active"]
+
+
+async def test_connect_commits_status_event_with_the_status_change(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    seen_at_subscribe: list[list[str]] = []
+
+    async def subscribe(credentials, provider_state) -> Subscription:
+        # The provider call comes after the commit: the event is stored with the change.
+        seen_at_subscribe.append(status_events(app, ws))
+        return Subscription(expires_at=None, provider_state={})
+
+    fake_connector.subscribe = subscribe
+
+    await connect(app, client, ws)
+
+    assert seen_at_subscribe == [["active"]]
+    assert status_events(app, ws) == ["active"]
 
 
 async def test_callback_with_forged_state_is_rejected(app, client, fake_connector):
@@ -265,3 +300,5 @@ async def test_pause_resume_and_disconnect(app, client, fake_connector):
     assert (await client.delete(base)).status_code == 409
     [mailbox] = mailboxes_of(app, ws)
     assert mailbox.credentials_enc is None
+    # One event per change; the 409s add none.
+    assert status_events(app, ws) == ["active", "paused", "active", "disconnected"]

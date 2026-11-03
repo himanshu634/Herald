@@ -109,9 +109,10 @@ def open_credentials(services: Services, mailbox: Mailbox) -> dict[str, str] | N
 
 def upsert_connected(
     services: Services, workspace_id: str, provider: str, account: ConnectedAccount
-) -> Mailbox:
+) -> tuple[Mailbox, BusEvent]:
     """Save a freshly authorized account as an ACTIVE mailbox, reusing its row on reconnect.
 
+    Stages `mailbox.status` in the same transaction; publish the returned event.
     The cursor is kept, so a mailbox that was needs_reauth or disconnected resumes where its
     last sync stopped and no mail in the gap is skipped.
     """
@@ -133,9 +134,11 @@ def upsert_connected(
         mailbox.credentials_enc = services.secrets.seal(account.credentials)
         mailbox.status = MailboxStatus.ACTIVE
         session.add(mailbox)
+        event = stage_status_event(session, mailbox)
         session.commit()
         session.refresh(mailbox)
-        return mailbox
+        session.refresh(event)
+        return mailbox, to_bus(event)
 
 
 def _save_subscription(services: Services, mailbox_id: str, subscription: Subscription) -> None:
@@ -189,32 +192,22 @@ async def unsubscribe_mailbox(services: Services, mailbox: Mailbox) -> None:
         await _unsubscribe(connector, mailbox, credentials)
 
 
-def _record_status(services: Services, mailbox_id: str) -> tuple[Mailbox, BusEvent]:
-    with Session(services.engine) as session:
-        # By id alone: the mailbox was just saved for a workspace the caller checked.
-        mailbox = session.get(Mailbox, mailbox_id)
-        if mailbox is None:
-            raise LookupError(f"mailbox {mailbox_id} not found")
-        event = stage_status_event(session, mailbox)
-        session.commit()
-        session.refresh(mailbox)
-        session.refresh(event)
-        return mailbox, to_bus(event)
-
-
 async def connect_mailbox(
     services: Services, workspace_id: str, connector: MailConnector, code: str
 ) -> Mailbox:
-    """Finish OAuth: save the account as an ACTIVE mailbox, subscribe, publish the status.
+    """Finish OAuth: save the account as an ACTIVE mailbox, publish the status, subscribe.
 
     The caller has checked that `workspace_id` exists and queues the first sync.
     Raises the connector's `MissingRefreshToken` or `AuthRevoked` for a code that cannot be used.
     """
     account = await connector.complete_authorization(code)
-    mailbox = await asyncify(upsert_connected)(services, workspace_id, connector.provider, account)
-    await subscribe_mailbox(services, mailbox)
-    mailbox, event = await asyncify(_record_status)(services, mailbox.id)
+    mailbox, event = await asyncify(upsert_connected)(
+        services, workspace_id, connector.provider, account
+    )
+    # Publish before subscribing: the change is committed, and a slow provider should not
+    # hold back the status the owner's open tabs are waiting for.
     await services.bus.publish(event)
+    await subscribe_mailbox(services, mailbox)
     return mailbox
 
 
