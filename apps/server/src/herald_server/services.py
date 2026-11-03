@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import httpx
 from langgraph.graph.state import CompiledStateGraph
-from sqlalchemy import Engine
+from sqlalchemy import Engine, inspect
 from sqlmodel import Session, SQLModel, col, create_engine, select
 
 from herald_core.graph import build_graph
@@ -27,6 +27,27 @@ class Services:
     http: httpx.AsyncClient
     secrets: SecretBox | None  # None when token_key is unset
     connectors: dict[str, MailConnector]
+
+
+def _check_schema(engine: Engine) -> None:
+    """Fail startup when the database is missing a column the models expect.
+
+    create_all only creates missing tables. It never adds a column to a table that already
+    exists, so a database made before a model change would fail every query on that table
+    with a bare 500. There are no migrations yet, so the fix is to recreate the database.
+    """
+    inspector = inspect(engine)
+    missing = []
+    for table in SQLModel.metadata.sorted_tables:
+        have = {column["name"] for column in inspector.get_columns(table.name)}
+        missing += [f"{table.name}.{c.name}" for c in table.columns if c.name not in have]
+    if missing:
+        raise RuntimeError(
+            f"Database schema is out of date, missing: {', '.join(missing)}. "
+            "There are no migrations yet: delete apps/server/herald-dev.db (lite mode), "
+            "or reset Postgres with docker compose -f infra/docker-compose.yml down -v "
+            "(this deletes its data)."
+        )
 
 
 def _check_token_key(engine: Engine, secrets: SecretBox) -> None:
@@ -64,6 +85,7 @@ def build_services(settings: Settings) -> Services:
     engine = create_engine(settings.database_url, connect_args=connect_args)
     # Skeleton only: swap for Alembic migrations before the schema settles.
     SQLModel.metadata.create_all(engine)
+    _check_schema(engine)
     secrets = SecretBox(settings.token_key) if settings.token_key else None
     if secrets is not None:
         _check_token_key(engine, secrets)

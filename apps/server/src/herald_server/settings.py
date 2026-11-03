@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     model_provider: Literal["anthropic", "fake"] = "fake"
     model_name: str = DEFAULT_MODEL
 
+    # Send the traceback in 500 responses, so the web app shows it. Dev only: it leaks internals.
+    debug: bool = False
+
     web_url: str = "http://localhost:5173"
 
     # Fernet key that encrypts mailbox credentials and signs OAuth state.

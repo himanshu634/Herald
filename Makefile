@@ -31,7 +31,7 @@ dev: ## Start Postgres and Redis (Docker), then the API, worker and web app toge
 	$(MAKE) -j3 api worker web
 
 api: ## Run the API on :8000 (needs make infra)
-	$(SERVER) uv run fastapi dev --port 8000
+	$(SERVER) HERALD_DEBUG=1 uv run fastapi dev --port 8000
 
 worker: ## Run the pipeline worker (needs make infra)
 	$(SERVER) uv run arq herald_server.worker.main.WorkerSettings
@@ -40,7 +40,7 @@ web: ## Run the web app on :5173 (proxies /api to :8000)
 	pnpm -C apps/web dev
 
 lite: ## Run the API with no Docker: SQLite, in-memory bus, inline pipeline
-	$(SERVER) $(LITE) uv run fastapi dev --port 8000
+	$(SERVER) $(LITE) HERALD_DEBUG=1 uv run fastapi dev --port 8000
 
 docker-dev: ## Run the full stack in Docker with hot reload (web :5173, API :8000)
 	docker compose -f infra/docker-compose.dev.yml up --build

@@ -37,7 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await services.http.aclose()
         services.engine.dispose()
 
-    app = FastAPI(title="Herald", lifespan=lifespan)
+    app = FastAPI(title="Herald", debug=settings.debug, lifespan=lifespan)
     for module in (health, workspaces, emails, events, mailboxes, oauth, providers, webhooks):
         app.include_router(module.router)
     return app
