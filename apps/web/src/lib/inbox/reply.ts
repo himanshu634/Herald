@@ -129,6 +129,15 @@ export function keepsKey(error: unknown): boolean {
 	return !(error instanceof ApiError) || error.status >= 500;
 }
 
+/**
+ * Whether a 200 answer spends the draft's client_key. A settled reply does: the next press is
+ * a new send. A `sending` one does not: it may belong to a process that died mid-send, and the
+ * server expires such a row (as unknown) only on a POST with the same key.
+ */
+export function spendsKey(reply: Reply): boolean {
+	return reply.status !== 'sending';
+}
+
 /** The line for a POST that saved no reply, or none we know of. */
 export function failedCopy(error: unknown): string {
 	if (keepsKey(error)) return REPLY_COPY.no_answer;

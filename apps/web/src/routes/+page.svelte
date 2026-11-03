@@ -91,12 +91,19 @@
 	const questions = $derived(questionsFor(emails));
 	// Closes by itself once the email stops asking, say after On it from another tab.
 	const asking = $derived(questions.find((e) => e.id === askingId) ?? null);
+	// The email the owner just replied to stays open, even once "Send and mark done" drops it
+	// from the view, so its "Your replies" shows. J/K, a row click or a tab lets it go.
+	let pinnedId = $state<string | null>(null);
+	const pinned = $derived(emails.find((e) => e.id === pinnedId) ?? null);
 	// Keep the owner's choice while it is in view; otherwise open the top email.
-	const selected = $derived(visible.find((e) => e.id === params.email) ?? visible[0] ?? null);
+	const selected = $derived(
+		pinned ?? visible.find((e) => e.id === params.email) ?? visible[0] ?? null
+	);
 
 	const replies = new ReplyDesk({
-		onsent: (message) => {
+		onsent: (message, emailId) => {
 			toast = message;
+			pinnedId = emailId;
 			if (workspaceId) refresh(workspaceId);
 		},
 		onmailbox: () => workspaceId && refreshMailboxes(workspaceId),
@@ -269,12 +276,14 @@
 	// Another business's email id means nothing here, so switching drops it.
 	function chooseWorkspace(id: string | null) {
 		replies.close();
+		pinnedId = null;
 		params.update({ workspace: id ?? '', email: '' });
 	}
 
 	// A tab means the owner wants the list back. The draft stays for when they return.
 	function chooseView(id: string) {
 		replies.close();
+		pinnedId = null;
 		params.view = id;
 	}
 
@@ -319,7 +328,10 @@
 	function move(step: number) {
 		// The list is hidden while composing; moving would change the panel under the draft.
 		if (composing || !visible.length) return;
-		const index = selected ? visible.indexOf(selected) : -1;
+		// Step from the open email, pinned or not. One that left the view starts from the top.
+		const from = selected;
+		pinnedId = null;
+		const index = from ? visible.indexOf(from) : -1;
 		params.email = visible[Math.min(visible.length - 1, Math.max(0, index + step))].id;
 	}
 
@@ -466,6 +478,7 @@
 							state={canReply}
 							bind:body={draft.body}
 							sending={draft.sending}
+							waiting={!!draft.waiting}
 							last={draft.last}
 							problem={draft.problem}
 							{connecting}
@@ -497,7 +510,10 @@
 							<EmailTable
 								emails={visible}
 								selectedId={selected?.id ?? null}
-								onselect={(id) => (params.email = id)}
+								onselect={(id) => {
+									pinnedId = null;
+									params.email = id;
+								}}
 							/>
 						{:else}
 							<div

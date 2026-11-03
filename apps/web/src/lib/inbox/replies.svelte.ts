@@ -1,7 +1,7 @@
 // The inbox's reply wiring: one draft per email, the composer that is open, sending, and the
 // open email's replies. Kept out of +page.svelte so the page only connects it to the screen.
 import { api, type Email, type Reply } from '#lib/api/client.js';
-import { failedCopy, keepsKey, sentToast } from './reply';
+import { failedCopy, keepsKey, sentToast, spendsKey } from './reply';
 
 export interface Draft {
 	body: string;
@@ -10,7 +10,7 @@ export interface Draft {
 	 * the server answers for it; see `keepsKey` for which failures count as no answer.
 	 */
 	key: string;
-	/** A POST is out, or the server said this draft's reply is still sending. */
+	/** A POST is out. The buttons and Discard wait for it. */
 	sending: boolean;
 	/** The button the owner pressed last, for the toast. */
 	markDone: boolean;
@@ -18,7 +18,11 @@ export interface Draft {
 	last: Reply | null;
 	/** A send that saved no reply we know of: refused, or no answer. */
 	problem: string | null;
-	/** The reply the server said is still sending. Its reply.status event settles the draft. */
+	/**
+	 * The reply the server said is still sending. Its reply.status event settles the draft.
+	 * The box says "Sending…" but stays usable: a press resends with the same key, which can
+	 * only return that row or expire it as unknown on the server, never send a second email.
+	 */
 	waiting: string | null;
 }
 
@@ -35,8 +39,8 @@ function newDraft(): Draft {
 }
 
 export interface ReplyHooks {
-	/** A reply was sent: show this toast and refresh the emails. */
-	onsent: (toast: string) => void;
+	/** A reply to this email was sent: show this toast and refresh the emails. */
+	onsent: (toast: string, emailId: string) => void;
 	/** The mailbox may have changed (refused, or Gmail took access away): refresh it. */
 	onmailbox: () => void;
 	onerror: (error: unknown) => void;
@@ -121,25 +125,28 @@ export class ReplyDesk {
 			}
 			return;
 		}
-		// The server answered for this key, so it is spent. A new one is what lets "Send again
-		// anyway" really send after an unknown outcome: the old key would only return that row.
-		draft.key = crypto.randomUUID();
+		// A settled answer spends the key. A new one is what lets "Send again anyway" really
+		// send after an unknown outcome: the old key would only return that row. A `sending`
+		// answer keeps it: only a POST with that key can expire the row if its process died.
+		if (spendsKey(reply)) draft.key = crypto.randomUUID();
 		this.#settle(email, reply);
-		this.load(email);
+		// Only for the email in the panel: the owner may have moved on while the POST was out,
+		// and loading this one would put its replies under another customer's email.
+		if (this.#listFor === email.id) this.load(email);
 	}
 
 	#settle(email: Email, reply: Reply) {
 		const draft = this.drafts[email.id];
 		if (reply.status === 'sending') {
 			// Another request with this key is still out. Wait for its reply.status event.
-			if (draft) Object.assign(draft, { sending: true, waiting: reply.id });
+			if (draft) Object.assign(draft, { sending: false, waiting: reply.id });
 			return;
 		}
 		if (reply.status === 'sent') {
 			const done = draft?.markDone ?? false;
 			delete this.drafts[email.id];
 			if (this.composingId === email.id) this.composingId = null;
-			this.#hooks.onsent(sentToast(reply.to_address, done));
+			this.#hooks.onsent(sentToast(reply.to_address, done), email.id);
 			return;
 		}
 		// Not sent, or not confirmed: the draft stays in the box with the outcome under it.

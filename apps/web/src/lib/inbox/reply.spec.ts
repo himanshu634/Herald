@@ -10,6 +10,7 @@ import {
 	replyState,
 	replySubject,
 	sentToast,
+	spendsKey,
 	toLine
 } from './reply';
 
@@ -228,5 +229,17 @@ describe('failedCopy', () => {
 		expect(failedCopy(refusal('no_mailbox'))).toBe(REPLY_COPY.no_mailbox);
 		expect(failedCopy(refusal('send_not_allowed'))).toBe(REPLY_COPY.reconnect);
 		expect(failedCopy(refusal('mailbox_inactive'))).toBe(REPLY_COPY.refused);
+	});
+});
+
+describe('spendsKey', () => {
+	it('spends the key once the reply has settled', () => {
+		for (const status of ['sent', 'not_sent', 'unknown'] as const) {
+			expect(spendsKey(reply({ status }))).toBe(true);
+		}
+	});
+
+	it('keeps it while the reply is still sending: only that key can expire the row', () => {
+		expect(spendsKey(reply({ status: 'sending', sent_at: null }))).toBe(false);
 	});
 });

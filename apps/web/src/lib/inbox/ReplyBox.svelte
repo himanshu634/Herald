@@ -21,6 +21,7 @@
 		state,
 		body = $bindable(),
 		sending,
+		waiting,
 		last,
 		problem,
 		connecting,
@@ -34,7 +35,10 @@
 		from: string | undefined;
 		state: ReplyState;
 		body: string;
+		/** A POST is out: the buttons wait for it. */
 		sending: boolean;
+		/** The server said the reply is still sending. Shown, but the buttons stay on. */
+		waiting: boolean;
 		/** The last outcome that kept the draft here: not sent, or not confirmed. */
 		last: Reply | null;
 		/** A send that saved no reply: refused, or no answer. */
@@ -124,6 +128,8 @@
 			<ReplyLine look={STATUS_LOOK.sending} text={REPLY_COPY.sending} />
 		{:else if problem}
 			<ReplyLine look={STATUS_LOOK.not_sent} text={problem} alert />
+		{:else if waiting}
+			<ReplyLine look={STATUS_LOOK.sending} text={REPLY_COPY.sending} />
 		{:else if last}
 			<ReplyLine look={STATUS_LOOK[last.status]} text={replyNotice(last)} alert />
 		{/if}
