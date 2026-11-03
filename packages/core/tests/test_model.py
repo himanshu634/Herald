@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
+from herald_core.history import CorrectionExample, Corrections, History
 from herald_core.model import AnthropicModel, _Verdicts
-from herald_core.prompt import email_block, system_prompt
+from herald_core.prompt import email_block, history_block, system_prompt
 from herald_core.schema import Email, Notes, Rule, RuleAction, Urgency, WorkspaceConfig
 
 CONFIG = WorkspaceConfig(
@@ -11,6 +12,21 @@ CONFIG = WorkspaceConfig(
     important_contacts=["bigcorp.example"],
 )
 NOTES = Notes(topic="Orders and delivery", urgency=Urgency.NORMAL, anger=1, summary="s", sure=True)
+
+HISTORY = History(
+    corrections=Corrections(
+        items=[
+            CorrectionExample(
+                id="c1",
+                subject="Late bag",
+                summary="Asks where the bag is",
+                field="urgency",
+                from_value="normal",
+                to_value="high",
+            )
+        ]
+    )
+)
 
 
 def email(sender: str = "a@customer.in") -> Email:
@@ -65,3 +81,24 @@ async def test_important_sender_is_marked():
     model, calls = stub_model(NOTES)
     await model.write_notes(email("corporate-gifts@bigcorp.example"), "Tripfold", CONFIG)
     assert "(important contact)" in calls[0]["messages"][0]["content"]
+
+
+async def test_no_history_sends_exactly_the_email_block():
+    model, calls = stub_model(NOTES)
+    await model.write_notes(email(), "Tripfold", CONFIG, History())
+    assert calls[0]["messages"][0]["content"] == email_block(email(), important=False)
+
+
+async def test_notes_call_sends_history_before_the_email():
+    model, calls = stub_model(NOTES)
+    await model.write_notes(email(), "Tripfold", CONFIG, HISTORY)
+    assert calls[0]["messages"][0]["content"].startswith(history_block(HISTORY) + "\n\n<email>")
+    assert calls[0]["system"][0]["text"] == system_prompt("Tripfold", CONFIG)
+
+
+async def test_rules_call_sends_history_before_the_email():
+    model, calls = stub_model(_Verdicts(verdicts=[]))
+    await model.judge_rules(email(), "Tripfold", CONFIG, HISTORY)
+    content = calls[0]["messages"][0]["content"]
+    assert content.startswith(history_block(HISTORY) + "\n\n<email>")
+    assert content.endswith("Answer each rule in the <business> block.")
