@@ -145,12 +145,13 @@ The owner gets an alert only when an email is urgent, when the customer is extre
 | Order | Check (first match wins) | What happens |
 | --- | --- | --- |
 | 1 | Safety floor: violence or self-harm, hacked account or data leak, legal threat | Alert now, always, even in quiet hours |
-| 2 | The owner's rules | Whatever the rule says; the most urgent result wins |
-| 3 | Urgent, or anger 5 | Alert now |
-| 4 | Anger 4 from an important contact, a customer about to cancel, or a third email about the same thing | Alert now |
-| 5 | The AI could not read the email, or is unsure | "Needs a look" list, no alert |
-| 6 | Spam or not for me | Closed, still findable |
-| 7 | Everything else | Inbox, sorted by urgency, then anger, then age |
+| 2 | Not about the business (the AI is sure, and the sender is not an important contact) | Closed, still findable |
+| 3 | The owner's rules | Whatever the rule says; the most urgent result wins |
+| 4 | Urgent, or anger 5 | Alert now |
+| 5 | Anger 4 from an important contact, a customer about to cancel, or a third email about the same thing | Alert now |
+| 6 | The AI could not read the email, or is unsure | "Needs a look" list, no alert |
+| 7 | Spam or not for me (when step 2 did not apply) | Closed, still findable |
+| 8 | Everything else | Inbox, sorted by urgency, then anger, then age |
 
 Making alerts work for one person:
 

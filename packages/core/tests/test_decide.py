@@ -1,6 +1,6 @@
 import pytest
 
-from herald_core.decide import decide
+from herald_core.decide import decide, not_for_business
 from herald_core.schema import (
     SPAM_TOPIC,
     Notes,
@@ -95,6 +95,46 @@ def test_no_notes_or_unsure_needs_a_look():
 
 def test_spam_is_closed():
     assert run(notes(topic=SPAM_TOPIC)).route is Route.CLOSED
+
+
+@pytest.mark.parametrize(
+    ("overrides", "matched"),
+    [
+        ({}, ["r-travel"]),  # an alert rule fired on a newsletter
+        ({"urgency": Urgency.URGENT}, []),  # "sale ends today"
+        ({"anger": 5}, []),  # SALE IS LIVE in capitals
+        ({"risk_flags": [RiskFlag.ABOUT_TO_CANCEL]}, []),  # "cancel anytime"
+    ],
+)
+def test_sure_spam_closes_before_rules_and_defaults(overrides, matched):
+    decision = run(notes(topic=SPAM_TOPIC, **overrides), matched=matched)
+    assert decision.route is Route.CLOSED
+    assert decision.reason == SPAM_TOPIC
+    assert decision.fired_rule_ids == []
+
+
+def test_spam_topic_matches_loosely():
+    assert run(notes(topic=" spam OR not for me "), matched=["r-travel"]).route is Route.CLOSED
+
+
+def test_safety_floor_still_alerts_on_spam():
+    decision = run(notes(topic=SPAM_TOPIC), word_flags={RiskFlag.LEGAL_THREAT})
+    assert decision.route is Route.ALERT
+
+
+def test_unsure_spam_takes_the_normal_path():
+    assert run(notes(topic=SPAM_TOPIC, sure=False)).route is Route.NEEDS_A_LOOK
+    assert run(notes(topic=SPAM_TOPIC, sure=False), matched=["r-travel"]).route is Route.ALERT
+
+
+def test_spam_from_an_important_contact_takes_the_normal_path():
+    sender = "hr@bigcorp.com"
+    assert run(notes(topic=SPAM_TOPIC), matched=["r-travel"], sender=sender).route is Route.ALERT
+    assert run(notes(topic=SPAM_TOPIC), sender=sender).route is Route.CLOSED
+
+
+def test_not_for_business_needs_notes():
+    assert not not_for_business(None, CONFIG, "a@customer.in")
 
 
 def test_notes_have_no_status_field():
