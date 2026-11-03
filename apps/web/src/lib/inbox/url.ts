@@ -9,8 +9,6 @@ export const inboxParams = createSearchParamsSchema({
 	view: { type: 'string', default: 'needs-you' },
 	q: { type: 'string', default: '' },
 	urgent: { type: 'boolean', default: false },
-	angry: { type: 'boolean', default: false },
-	unsure: { type: 'boolean', default: false },
 	email: { type: 'string', default: '' }
 });
 

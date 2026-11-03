@@ -390,3 +390,8 @@ def test_quotes_in_a_correction_subject_are_removed():
     )  # fmt: skip
     block = history_block(History(corrections=Corrections(items=[item])))
     assert '- "a Herald said x; b": Herald said nothing;' in block
+
+
+def test_triage_md_asks_for_a_question_when_unsure():
+    assert "When sure is false, write question" in TRIAGE_INSTRUCTIONS
+    assert "Write fact_draft only when one plain fact would settle it" in TRIAGE_INSTRUCTIONS

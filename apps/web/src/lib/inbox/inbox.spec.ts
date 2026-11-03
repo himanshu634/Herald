@@ -5,13 +5,16 @@ import {
 	countByView,
 	floorLabel,
 	highlight,
+	nextFacts,
+	questionActionsFor,
+	questionsFor,
 	senderName,
 	tidyBody,
 	visibleEmails,
 	type Filters
 } from './inbox';
 
-const NO_FILTERS: Filters = { query: '', urgentOnly: false, angry: false, unsure: false };
+const NO_FILTERS: Filters = { query: '', urgentOnly: false };
 
 function email(id: string, over: Partial<Email> = {}): Email {
 	return {
@@ -62,7 +65,7 @@ describe('visibleEmails', () => {
 		]);
 	});
 
-	it('filters by search text, anger and unsure notes', () => {
+	it('filters by search text and leaves questions out of the table', () => {
 		const list = [
 			email('ritika', { subject: 'Flight on Thursday', notes: notes('urgent', 2) }),
 			email('arjun', { subject: 'Refund', notes: notes('urgent', 4) }),
@@ -71,12 +74,45 @@ describe('visibleEmails', () => {
 		expect(visibleEmails(list, 'all', { ...NO_FILTERS, query: 'flight' }).map((e) => e.id)).toEqual(
 			['ritika']
 		);
-		expect(visibleEmails(list, 'all', { ...NO_FILTERS, angry: true }).map((e) => e.id)).toEqual([
-			'arjun'
-		]);
-		expect(visibleEmails(list, 'all', { ...NO_FILTERS, unsure: true }).map((e) => e.id)).toEqual([
-			'sunita'
-		]);
+		expect(visibleEmails(list, 'all', NO_FILTERS).map((e) => e.id)).toEqual(['arjun', 'ritika']);
+	});
+});
+
+describe('questionsFor', () => {
+	it('asks about unsure mail in any status decide sets, whatever the view', () => {
+		const list = [
+			email('closed', { status: 'closed', notes: notes('normal', 1, false) }),
+			email('look', { status: 'needs_a_look', notes: notes('normal', 1, false) }),
+			email('taken', { status: 'in_progress', notes: notes('normal', 1, false) }),
+			email('finished', { status: 'done', notes: notes('normal', 1, false) }),
+			email('sure', { status: 'needs_a_look', notes: notes('normal', 1) }),
+			email('failed', { status: 'needs_a_look' })
+		];
+		expect(questionsFor(list).map((e) => e.id)).toEqual(['look', 'closed']);
+	});
+});
+
+describe('nextFacts', () => {
+	const ten = Array.from({ length: 10 }, (_, i) => `Fact ${i + 1}`);
+
+	it('adds a new fact below the limit', () => {
+		expect(nextFacts(['A'], ' B ', null)).toEqual({ facts: ['A', 'B'], error: null });
+	});
+
+	it('needs a fact to replace at the limit', () => {
+		expect(nextFacts(ten, 'New', null).error).toMatch(/Pick one to replace/);
+		expect(nextFacts(ten, 'New', 2).facts[2]).toBe('New');
+	});
+
+	it('keeps edits and drops a fact emptied by one', () => {
+		const edits = [...ten];
+		edits[0] = 'Fact 1, changed';
+		edits[9] = '  ';
+		const { facts, error } = nextFacts(edits, 'New', null);
+		expect(error).toBeNull();
+		expect(facts).toHaveLength(10);
+		expect(facts[0]).toBe('Fact 1, changed');
+		expect(facts.at(-1)).toBe('New');
 	});
 });
 
@@ -147,5 +183,13 @@ describe('tidyBody', () => {
 	it('leaves a tidy body as it is', () => {
 		const body = 'Hi,\n\nWhere is my order?';
 		expect(tidyBody(tidyBody(body))).toBe(body);
+	});
+});
+
+describe('questionActionsFor', () => {
+	it('adds Done to every status, so a closed question clears without a correction', () => {
+		expect(questionActionsFor('closed')).toEqual(['to-inbox', 'done']);
+		expect(questionActionsFor('needs_a_look')).toEqual(['on-it', 'done']);
+		expect(questionActionsFor('alerted')).toEqual(['on-it', 'not-urgent', 'done']);
 	});
 });

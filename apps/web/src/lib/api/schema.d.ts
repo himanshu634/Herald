@@ -168,6 +168,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/emails/{email_id}/reread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reread
+         * @description Run the email through triage again, with the business's current facts and rules.
+         */
+        post: operations["reread_api_workspaces__workspace_id__emails__email_id__reread_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/emails/{email_id}/on-it": {
         parameters: {
             query?: never;
@@ -557,6 +577,16 @@ export interface components {
              * @description False when the AI is not confident in these notes.
              */
             sure: boolean;
+            /**
+             * Question
+             * @description When unsure: the one question the owner could answer to settle it.
+             */
+            question?: string | null;
+            /**
+             * Fact Draft
+             * @description When unsure: a fact that would settle it, for the owner to check.
+             */
+            fact_draft?: string | null;
         };
         /** Quote */
         Quote: {
@@ -1020,6 +1050,38 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reread_api_workspaces__workspace_id__emails__email_id__reread_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                email_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
