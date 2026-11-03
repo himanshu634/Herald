@@ -79,3 +79,14 @@ def test_long_body_is_cut_to_limit():
 def test_missing_subject_and_body():
     msg = _msg("x@y.com", subject=None, body=None)
     assert parse_raw_message(_raw(msg)) == ("x@y.com", "", "")
+
+
+def test_unknown_charset_falls_back_to_utf8():
+    raw = b"From: a@b.com\r\nContent-Type: text/plain; charset=bogus\r\n\r\nhello"
+    assert parse_raw_message(base64.urlsafe_b64encode(raw).decode()).body == "hello"
+
+
+def test_empty_plain_part_falls_back_to_html():
+    msg = _msg(body="  ")
+    msg.add_alternative("<p>Refund please</p>", subtype="html")
+    assert parse_raw_message(_raw(msg)).body == "Refund please"

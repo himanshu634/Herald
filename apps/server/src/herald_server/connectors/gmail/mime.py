@@ -53,12 +53,26 @@ def parse_raw_message(raw: str) -> ParsedMessage:
     sender = parseaddr(str(msg.get("From", "")))[1].lower()
     subject = str(msg.get("Subject", ""))
 
-    part = msg.get_body(preferencelist=("plain", "html"))
-    body = ""
-    if part is not None:
-        content = part.get_content()
-        # Only reduce to text when we fell back to HTML. A plain part is used as is,
-        # because stripping "tags" from plain text would eat literal "<...>" content.
-        body = _html_to_text(content) if part.get_content_type() == "text/html" else content
-        body = body.strip()  # drop the newline mail clients append
+    body = _body_text(msg, ("plain", "html"))
+    if not body:
+        # An empty text/plain part must not hide a populated text/html alternative.
+        body = _body_text(msg, ("html",))
     return ParsedMessage(sender, subject, body[:BODY_LIMIT])
+
+
+def _body_text(msg: email.message.Message, preference: tuple[str, ...]) -> str:
+    part = msg.get_body(preferencelist=preference)
+    if part is None:
+        return ""
+    try:
+        content = part.get_content()
+    except LookupError:
+        # Untrusted mail can name a charset Python does not know; decode as UTF-8
+        # instead of letting one bad message abort the caller.
+        payload = part.get_payload(decode=True)
+        content = payload.decode("utf-8", errors="replace") if payload else ""
+    # Only reduce to text when we fell back to HTML. A plain part is used as is,
+    # because stripping "tags" from plain text would eat literal "<...>" content.
+    if part.get_content_type() == "text/html":
+        content = _html_to_text(content)
+    return content.strip()  # drop the newline mail clients append
