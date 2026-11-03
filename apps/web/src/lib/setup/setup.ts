@@ -1,10 +1,13 @@
 // Pure helpers for the setup editor. Limits match WorkspaceConfig on the server, so the editor
 // blocks what the server would reject with a 422.
-import type { Rule, RuleAction, WorkspaceConfig } from '#lib/api/client.js';
+import type { Rule, RuleAction, Topic, WorkspaceConfig } from '#lib/api/client.js';
 
 export const SPAM_TOPIC = 'Spam or not for me';
 export const MAX_TOPICS = 12;
 export const MAX_TOPIC_LENGTH = 60;
+export const MAX_MEANING_LENGTH = 120;
+export const MAX_FACTS = 10;
+export const MAX_FACT_LENGTH = 200;
 export const MAX_GUIDANCE = 8;
 export const MAX_GUIDANCE_LENGTH = 300;
 export const MAX_RULES = 20;
@@ -17,11 +20,11 @@ export const ACTIONS: { id: RuleAction; label: string }[] = [
 ];
 
 /** Topics with one more, or the same list when it is empty, a repeat, spam or over the cap. */
-export function addTopic(topics: string[], text: string): string[] {
-	const topic = text.trim().slice(0, MAX_TOPIC_LENGTH);
-	const taken = [...topics, SPAM_TOPIC].map((t) => t.toLowerCase());
-	if (!topic || taken.includes(topic.toLowerCase()) || topics.length >= MAX_TOPICS) return topics;
-	return [...topics, topic];
+export function addTopic(topics: Topic[], text: string): Topic[] {
+	const name = text.trim().slice(0, MAX_TOPIC_LENGTH);
+	const taken = [...topics.map((t) => t.name), SPAM_TOPIC].map((t) => t.toLowerCase());
+	if (!name || taken.includes(name.toLowerCase()) || topics.length >= MAX_TOPICS) return topics;
+	return [...topics, { name, meaning: null }];
 }
 
 /** A new, empty rule whose id is not taken. Verdicts are matched to rules by id. */
@@ -43,6 +46,12 @@ export function problems(config: WorkspaceConfig): string[] {
 	const found: string[] = [];
 	if (!config.business_profile.trim()) found.push('Describe your business.');
 	if (!config.topics.length) found.push('Add at least one topic.');
+	for (const topic of config.topics) {
+		if ((topic.meaning?.length ?? 0) > MAX_MEANING_LENGTH)
+			found.push(`${topic.name}'s meaning is too long.`);
+	}
+	if (config.facts?.some((f) => !f.trim())) found.push('Fill in or remove the empty fact.');
+	if ((config.facts?.length ?? 0) > MAX_FACTS) found.push(`Keep to ${MAX_FACTS} facts.`);
 	if (config.guidance?.some((g) => !g.trim()))
 		found.push('Fill in or remove the empty guidance line.');
 	for (const rule of config.rules ?? []) {

@@ -4,8 +4,11 @@
 	import { Button, Icon, Panel, URGENCY, type Urgency } from '#lib/ui/index.js';
 	import {
 		ACTIONS,
+		MAX_FACT_LENGTH,
+		MAX_FACTS,
 		MAX_GUIDANCE,
 		MAX_GUIDANCE_LENGTH,
+		MAX_MEANING_LENGTH,
 		MAX_RULES,
 		MAX_TOPIC_LENGTH,
 		MAX_TOPICS,
@@ -21,6 +24,7 @@
 	let topicText = $state('');
 	let editor = $state<HTMLElement>();
 
+	const facts = $derived(config.facts ?? []);
 	const guidance = $derived(config.guidance ?? []);
 	const rules = $derived(config.rules ?? []);
 
@@ -47,6 +51,11 @@
 		focusLast('[data-guidance]');
 	}
 
+	function addFact() {
+		config.facts = [...facts, ''];
+		focusLast('[data-fact]');
+	}
+
 	function addRule() {
 		config.rules = [...rules, newRule(rules)];
 		focusLast('[data-rule-name]');
@@ -61,26 +70,34 @@
 	<Panel title="Topics">
 		{#snippet actions()}{@render count(config.topics.length, MAX_TOPICS)}{/snippet}
 		<p class="mb-3 text-sm text-muted">Herald files every email under one of these.</p>
-		<ul class="flex flex-wrap gap-2" aria-label="Topics">
-			{#each config.topics as topic, i (topic)}
+		<ul aria-label="Topics">
+			{#each config.topics as topic, i (topic.name)}
 				<li
-					class="inline-flex h-control-md items-center gap-1 rounded-sm border border-line-strong bg-surface pr-1 pl-2.5 text-sm font-semibold"
+					class="flex items-center gap-2 border-t border-dashed border-line-dashed py-2 first:border-t-0"
 				>
-					{topic}
+					<span class="w-48 flex-none truncate text-sm font-semibold">{topic.name}</span>
+					<label class="sr-only" for={`topic-meaning-${i}`}>What {topic.name} covers</label>
+					<input
+						id={`topic-meaning-${i}`}
+						bind:value={config.topics[i].meaning}
+						maxlength={MAX_MEANING_LENGTH}
+						placeholder="What belongs here, in one line"
+						class="h-control-md min-w-0 flex-1 rounded-sm border border-transparent px-2 text-md hover:border-line focus:border-control"
+					/>
 					<button
 						type="button"
-						aria-label={`Remove ${topic}`}
-						class="flex size-6 cursor-pointer items-center justify-center rounded-xs text-muted hover:bg-subtle"
+						aria-label={`Remove ${topic.name}`}
+						class="flex size-control-md flex-none cursor-pointer items-center justify-center rounded-sm text-muted hover:bg-subtle"
 						onclick={() => (config.topics = config.topics.filter((_, j) => j !== i))}
-						><Icon name="close" size={14} /></button
+						><Icon name="close" size={16} /></button
 					>
 				</li>
 			{/each}
 			<li
-				class="inline-flex h-control-md items-center rounded-sm border border-line bg-subtle px-2.5 text-sm font-semibold text-muted"
+				class="flex items-center gap-2 border-t border-dashed border-line-dashed py-2 text-sm font-semibold text-muted"
 				title="Every email can go here. It can't be removed."
 			>
-				{SPAM_TOPIC}
+				<span class="w-48 flex-none truncate">{SPAM_TOPIC}</span>
 			</li>
 		</ul>
 		{#if config.topics.length < MAX_TOPICS}
@@ -104,10 +121,54 @@
 		{/if}
 	</Panel>
 
+	<Panel title="Facts">
+		{#snippet actions()}{@render count(facts.length, MAX_FACTS)}{/snippet}
+		<p class="mb-1 text-sm text-muted">
+			What is true about your business, like your return window or delivery times. Herald checks
+			emails against these.
+		</p>
+		{#if !facts.length}
+			<p
+				class="my-2 rounded-md border border-dashed border-line-strong bg-sunken p-3 text-sm text-muted"
+			>
+				No facts yet. Add one such as "Returns are accepted within 7 days of delivery."
+			</p>
+		{/if}
+		<ul>
+			<!-- Facts can be empty or repeat while the owner types, so the index is the key. -->
+			{#each facts as fact, i (i)}
+				<li
+					class="flex items-center gap-2 border-t border-dashed border-line-dashed py-2 first:border-t-0"
+				>
+					<label class="sr-only" for={`fact-${i}`}>Fact {i + 1}</label>
+					<input
+						id={`fact-${i}`}
+						data-fact
+						bind:value={config.facts![i]}
+						maxlength={MAX_FACT_LENGTH}
+						class="h-control-md min-w-0 flex-1 rounded-sm border border-transparent px-2 text-md hover:border-line focus:border-control"
+					/>
+					<button
+						type="button"
+						aria-label={`Remove fact ${i + 1}${fact ? `, ${fact}` : ''}`}
+						class="flex size-control-md flex-none cursor-pointer items-center justify-center rounded-sm text-muted hover:bg-subtle"
+						onclick={() => (config.facts = facts.filter((_, j) => j !== i))}
+						><Icon name="close" size={16} /></button
+					>
+				</li>
+			{/each}
+		</ul>
+		{#if facts.length < MAX_FACTS}
+			<Button variant="quiet" size="sm" onclick={addFact}
+				><Icon name="plus" size={14} />Add a fact</Button
+			>
+		{/if}
+	</Panel>
+
 	<Panel title="Guidance">
 		{#snippet actions()}{@render count(guidance.length, MAX_GUIDANCE)}{/snippet}
 		<p class="mb-1 text-sm text-muted">
-			How your business judges urgency. Herald reads every email with these in mind.
+			How your business judges urgency. Facts go above; these lines say what matters most.
 		</p>
 		{#if !guidance.length}
 			<p

@@ -6,6 +6,7 @@ export type Email = components['schemas']['EmailOut'];
 export type EmailIn = components['schemas']['EmailIn'];
 export type EmailStatus = components['schemas']['EmailStatus'];
 export type WorkspaceConfig = components['schemas']['WorkspaceConfig'];
+export type Topic = components['schemas']['Topic'];
 export type Rule = components['schemas']['Rule'];
 export type RuleAction = components['schemas']['RuleAction'];
 export type SetupOut = components['schemas']['SetupOut'];

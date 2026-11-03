@@ -8,7 +8,7 @@ owner's own actions move an email's status.
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 SPAM_TOPIC = "Spam or not for me"
 
@@ -40,10 +40,22 @@ class RuleAction(StrEnum):
     CLOSE = "close"
 
 
-Topic = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+TopicName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+TopicMeaning = Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]
+FactLine = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 GuidanceLine = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)
 ]
+
+
+class Topic(BaseModel):
+    name: TopicName
+    meaning: TopicMeaning | None = None
+
+    @field_validator("meaning")
+    @classmethod
+    def _blank_meaning_is_none(cls, value: str | None) -> str | None:
+        return value or None
 
 
 class Rule(BaseModel):
@@ -67,6 +79,9 @@ class WorkspaceConfig(BaseModel):
     business_profile: str = Field(min_length=1, max_length=2000)
     # At least one: the fake model and the notes prompt both fall back to the first topic.
     topics: list[Topic] = Field(min_length=1, max_length=12)
+    facts: list[FactLine] = Field(
+        default_factory=list, max_length=10, description="Short facts about the brand."
+    )
     important_contacts: list[str] = Field(
         default_factory=list, description="Email addresses or domains such as bigclient.com."
     )
@@ -76,6 +91,32 @@ class WorkspaceConfig(BaseModel):
         description="The owner's own lines on how to read topic, urgency and anger.",
     )
     rules: list[Rule] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _plain_string_topics(cls, data):
+        # Keeps configs saved before topic meanings loading, with no migration. Old data could
+        # hold names that differ only by case. Drop the repeats so stored configs still load;
+        # object topics skip this and keep the strict unique-name error.
+        if isinstance(data, dict) and isinstance(data.get("topics"), list):
+            topics, seen = [], set()
+            for t in data["topics"]:
+                if isinstance(t, str):
+                    key = t.strip().lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    t = {"name": t}
+                topics.append(t)
+            data = data | {"topics": topics}
+        return data
+
+    @model_validator(mode="after")
+    def _unique_topic_names(self) -> "WorkspaceConfig":
+        names = [t.name.lower() for t in self.topics]
+        if len(names) != len(set(names)):
+            raise ValueError("Topic names must be unique")
+        return self
 
     @model_validator(mode="after")
     def _unique_rule_ids(self) -> "WorkspaceConfig":
@@ -100,10 +141,18 @@ class RuleDraft(BaseModel):
     urgency: Urgency | None = None
 
 
+class TopicDraft(BaseModel):
+    """A topic the AI suggests at setup, with a one-line meaning."""
+
+    name: str
+    meaning: str
+
+
 class SetupDraft(BaseModel):
     """The AI's first guess at a business's setup, read from its description."""
 
-    topics: list[str]
+    topics: list[TopicDraft]
+    facts: list[str]
     guidance: list[str]
     rules: list[RuleDraft]
 

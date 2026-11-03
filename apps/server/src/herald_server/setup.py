@@ -1,8 +1,8 @@
 """Onboarding: turn a business name and description into a first config the owner edits.
 
-The AI drafts topics, guidance and rules. Its draft is never trusted as is: `clean_draft` makes
-it a valid `WorkspaceConfig`, and if the AI fails the owner gets a plain fallback instead of an
-error, so setup never depends on the model being up.
+The AI drafts topics with meanings, facts, guidance and rules. Its draft is never trusted as
+is: `clean_draft` makes it a valid `WorkspaceConfig`, and if the AI fails the owner gets a plain
+fallback instead of an error, so setup never depends on the model being up.
 """
 
 import logging
@@ -14,13 +14,17 @@ from herald_core.schema import (
     Rule,
     RuleAction,
     SetupDraft,
+    Topic,
     WorkspaceConfig,
 )
 
 log = logging.getLogger(__name__)
 
-FALLBACK_TOPICS = ["Questions", "Problems", "Billing"]
+FALLBACK_TOPICS = [Topic(name=n) for n in ("Questions", "Problems", "Billing")]
 MAX_TOPICS = 12
+MAX_FACTS = 10
+MAX_FACT_LENGTH = 200
+MAX_MEANING_LENGTH = 120
 MAX_GUIDANCE = 8
 MAX_RULES = 8
 
@@ -30,13 +34,18 @@ def _slug(text: str) -> str:
 
 
 def clean_draft(draft: SetupDraft, description: str) -> WorkspaceConfig:
-    topics: list[str] = []
+    topics: list[Topic] = []
     seen = {SPAM_TOPIC.lower()}  # Every email can already go to spam; it is not a topic.
-    for topic in draft.topics:
-        topic = topic.strip()[:60]
-        if topic and topic.lower() not in seen:
-            seen.add(topic.lower())
-            topics.append(topic)
+    for draft_topic in draft.topics:
+        name = draft_topic.name.strip()[:60]
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            meaning = draft_topic.meaning.strip()[:MAX_MEANING_LENGTH].strip() or None
+            topics.append(Topic(name=name, meaning=meaning))
+
+    # Facts come from the AI and are judged against real emails, so they are trimmed and
+    # capped like every other draft field.
+    facts = [f.strip()[:MAX_FACT_LENGTH].strip() for f in draft.facts if f.strip()][:MAX_FACTS]
 
     guidance = [g.strip()[:300] for g in draft.guidance if g.strip()][:MAX_GUIDANCE]
 
@@ -69,6 +78,7 @@ def clean_draft(draft: SetupDraft, description: str) -> WorkspaceConfig:
     return WorkspaceConfig(
         business_profile=description,
         topics=topics[:MAX_TOPICS] or FALLBACK_TOPICS,
+        facts=facts,
         guidance=guidance,
         rules=rules,
     )
