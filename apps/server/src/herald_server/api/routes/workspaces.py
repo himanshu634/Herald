@@ -25,9 +25,16 @@ def _out(workspace: Workspace) -> WorkspaceOut:
 
 
 def _create(
-    session: Session, name: str, config: WorkspaceConfig, *, setup_done: bool = True
+    session: Session,
+    name: str,
+    config: WorkspaceConfig,
+    *,
+    setup_done: bool = True,
+    demo: bool = False,
 ) -> Workspace:
-    workspace = Workspace(name=name, config=config.model_dump(mode="json"), setup_done=setup_done)
+    workspace = Workspace(
+        name=name, config=config.model_dump(mode="json"), setup_done=setup_done, demo=demo
+    )
     session.add(workspace)
     session.commit()
     session.refresh(workspace)
@@ -47,7 +54,7 @@ def create_workspace(data: WorkspaceIn, session: SessionDep) -> WorkspaceOut:
 
 @router.post("/demo", status_code=status.HTTP_201_CREATED)
 def create_demo_workspace(session: SessionDep) -> WorkspaceOut:
-    return _out(_create(session, TRIPFOLD_NAME, TRIPFOLD))
+    return _out(_create(session, TRIPFOLD_NAME, TRIPFOLD, demo=True))
 
 
 def _create_draft(services: Services, name: str, config: WorkspaceConfig) -> WorkspaceOut:

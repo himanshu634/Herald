@@ -56,6 +56,8 @@ class Workspace(SQLModel, table=True):
     config: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
     # False until the owner saves the setup. A draft workspace accepts no email.
     setup_done: bool = Field(default=False)
+    # The seeded Tripfold demo. It opens without a mailbox; every other business needs one.
+    demo: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_now)
 
 

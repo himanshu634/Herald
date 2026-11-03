@@ -47,9 +47,6 @@ async def oauth_callback(
     error: str | None = None,
 ) -> RedirectResponse:
     # Logs name only the outcome and ids: never the code, the state or a token.
-    if error is not None:
-        return _back_to_web(services, mailbox_error="access_denied")
-
     connector = services.connectors.get(provider)
     if connector is None or services.secrets is None:
         return _back_to_web(services, mailbox_error="provider_unavailable")
@@ -75,29 +72,39 @@ async def oauth_callback(
         log.info("oauth callback for %s: state names another provider or no workspace", provider)
         return _back_to_web(services, mailbox_error="invalid_state")
 
+    # From here the state is checked, so the redirect can name the business it came from: the
+    # web opens that one, not whichever business is first. Before this point there is no
+    # workspace we can trust, and the web falls back to its default.
+    back = {"workspace": workspace_id}
+
+    # The owner said no on the consent screen. This is checked after the state, so the owner
+    # still lands on the business they were connecting.
+    if error is not None:
+        return _back_to_web(services, mailbox_error="access_denied", **back)
+
     if not code:
-        return _back_to_web(services, mailbox_error="authorization_failed")
+        return _back_to_web(services, mailbox_error="authorization_failed", **back)
 
     try:
         mailbox = await connect_mailbox(services, workspace_id, connector, code)
     except MissingRefreshToken:
         log.info("oauth callback for %s: no refresh token", provider)
-        return _back_to_web(services, mailbox_error="no_refresh_token")
+        return _back_to_web(services, mailbox_error="no_refresh_token", **back)
     except MailboxInUse:
         # One business per mailbox. The new grant is not revoked (see connect_mailbox).
         log.info("oauth callback for %s: address live in another workspace", provider)
-        return _back_to_web(services, mailbox_error="mailbox_in_use")
+        return _back_to_web(services, mailbox_error="mailbox_in_use", **back)
     except AuthRevoked:
         # An invalid, expired or reused code: the provider refuses the exchange.
         log.info("oauth callback for %s: code exchange refused", provider)
-        return _back_to_web(services, mailbox_error="authorization_failed")
+        return _back_to_web(services, mailbox_error="authorization_failed", **back)
     except Exception as exc:
         # Anything else before the mailbox is saved: connect_mailbox raises only then (an
         # account without the mail service, a scope the owner deselected, a rate limit, a
         # network error). The owner's browser is on this route, so answer with a redirect,
         # never a 500. Only the type name: str() of an HTTP error can carry provider responses.
         log.warning("oauth callback for %s: %s", provider, type(exc).__name__)
-        return _back_to_web(services, mailbox_error="provider_error")
+        return _back_to_web(services, mailbox_error="provider_error", **back)
 
     # The first sync backfills recent mail; a reconnect continues from the kept cursor.
     try:
@@ -107,4 +114,4 @@ async def oauth_callback(
         # catch-up sync picks up every active mailbox and runs this first sync instead.
         log.warning("%s enqueueing first sync of mailbox %s", type(exc).__name__, mailbox.id)
     log.info("mailbox %s connected in workspace %s", mailbox.id, workspace_id)
-    return _back_to_web(services, mailbox_connected=mailbox.id)
+    return _back_to_web(services, mailbox_connected=mailbox.id, **back)

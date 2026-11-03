@@ -1,13 +1,16 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { api, type Email, type EmailIn, type Workspace } from '#lib/api/client.js';
+	import { api, type Email, type EmailIn, type Mailbox, type Workspace } from '#lib/api/client.js';
 	import { WorkspaceEvents } from '#lib/events.svelte.js';
 	import BusinessMenu from '#lib/inbox/BusinessMenu.svelte';
 	import EmailPanel from '#lib/inbox/EmailPanel.svelte';
 	import EmailTable from '#lib/inbox/EmailTable.svelte';
 	import SendTestEmail from '#lib/inbox/SendTestEmail.svelte';
+	import ConnectGmail from '#lib/mailbox/ConnectGmail.svelte';
+	import MailboxMenu from '#lib/mailbox/MailboxMenu.svelte';
+	import { liveMailboxes, needsMailbox, readReturn, type Notice } from '#lib/mailbox/mailbox.js';
 	import Rail from '#lib/shell/Rail.svelte';
 	import {
 		ACTIONS,
@@ -30,6 +33,14 @@
 	let toast = $state<string | null>(null);
 	let busy = $state(false);
 
+	let mailboxes = $state.raw<Mailbox[]>([]);
+	// The workspace `mailboxes` belongs to. Until it matches, we don't know yet whether the
+	// business is open, so neither the inbox nor the connect screen shows.
+	let mailboxesFor = $state<string | null>(null);
+	let providers = $state.raw<string[]>([]);
+	let notice = $state<Notice | null>(null);
+	let connecting = $state(false);
+
 	let view = $state<ViewId>('needs-you');
 	let filters = $state<Filters>({ query: '', urgentOnly: false, angry: false, unsure: false });
 	let chosenId = $state<string | null>(null);
@@ -42,6 +53,11 @@
 	const ready = $derived(workspaces.filter((w) => w.setup_done));
 	const firstDraft = $derived(workspaces.find((w) => !w.setup_done));
 	const workspace = $derived(ready.find((w) => w.id === workspaceId));
+	const checked = $derived(!!workspace && mailboxesFor === workspace.id);
+	// A business with no mailbox stays closed: the connect screen is all it shows.
+	const gated = $derived(!!workspace && checked && needsMailbox(workspace, mailboxes));
+	const open = $derived(!!workspace && checked && !gated);
+	const mailbox = $derived(liveMailboxes(mailboxes)[0]);
 	const counts = $derived(countByView(emails));
 	const visible = $derived(visibleEmails(emails, view, filters));
 	// Keep the owner's choice while it is in view; otherwise open the top email.
@@ -54,20 +70,34 @@
 		.listWorkspaces()
 		.then((list) => {
 			workspaces = list;
-			// Setup sends the owner here with the saved workspace in the page state.
-			const asked = page.state.workspace;
+			// Google's callback names the business the connect started from on the URL; setup
+			// sends the owner here with the saved workspace in the page state.
+			const back = readReturn(page.url.searchParams);
+			notice = back.notice;
+			const asked = back.workspace ?? page.state.workspace;
+			// Drop the callback's query so a reload doesn't show the same notice again.
+			if (page.url.search) replaceState(resolve('/'), {});
 			const usable = list.filter((w) => w.setup_done);
 			workspaceId = (usable.find((w) => w.id === asked) ?? usable[0])?.id ?? null;
 			loaded = true;
 		})
 		.catch(fail);
 
+	// Not fatal: with no providers the connect screen says Gmail isn't set up.
+	api
+		.listProviders()
+		.then((list) => (providers = list))
+		.catch(() => (providers = []));
+
 	$effect(() => {
 		if (!workspaceId) return;
 		const id = workspaceId;
 		refresh(id);
+		refreshMailboxes(id);
 		live.connect(id);
-		const stop = live.onEvent(() => refresh(id));
+		const stop = live.onEvent((event) =>
+			event.type === 'mailbox.status' ? refreshMailboxes(id) : refresh(id)
+		);
 		return () => {
 			stop();
 			live.close();
@@ -92,6 +122,53 @@
 		} catch (e) {
 			fail(e);
 		}
+	}
+
+	async function refreshMailboxes(id: string) {
+		try {
+			mailboxes = await api.listMailboxes(id);
+			mailboxesFor = id;
+		} catch (e) {
+			fail(e);
+		}
+	}
+
+	async function connectGmail() {
+		if (!workspaceId || connecting) return;
+		connecting = true;
+		try {
+			const { authorization_url } = await api.startConnect(workspaceId, 'gmail');
+			// A full page redirect: Google sends the browser back to / with the outcome on the URL.
+			window.location.assign(authorization_url);
+		} catch (e) {
+			connecting = false;
+			fail(e);
+		}
+	}
+
+	async function mailboxAct(
+		run: (workspaceId: string, mailboxId: string) => Promise<Mailbox>,
+		done: string
+	) {
+		if (!mailbox || busy) return;
+		busy = true;
+		try {
+			const updated = await run(mailbox.workspace_id, mailbox.id);
+			mailboxes = mailboxes.map((m) => (m.id === updated.id ? updated : m));
+			toast = done;
+		} catch (e) {
+			fail(e);
+		} finally {
+			busy = false;
+		}
+	}
+
+	function disconnect() {
+		if (!mailbox) return;
+		const sure = confirm(
+			`Disconnect ${mailbox.email_address}? Herald stops reading it. Emails already here stay.`
+		);
+		if (sure) mailboxAct(api.disconnectMailbox, `Disconnected ${mailbox.email_address}.`);
 	}
 
 	async function createDemo() {
@@ -138,7 +215,7 @@
 	// Owner shortcuts, from docs/design-system.md. Never while typing or in a dialog.
 	function onkeydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
-		if (event.metaKey || event.ctrlKey || event.altKey) return;
+		if (!open || event.metaKey || event.ctrlKey || event.altKey) return;
 		if (target.closest('input, textarea, select, dialog[open]')) return;
 		const keys: Record<string, () => void> = {
 			j: () => move(1),
@@ -167,23 +244,43 @@
 		<header
 			class="flex flex-wrap items-end justify-between gap-3 border-b border-line px-4 pt-2.5 lg:border-b-0"
 		>
-			{#if workspace}
+			{#if open}
 				<Tabs items={tabs} bind:selected={view} label="Inbox views" />
 			{:else}
-				<h1 class="pb-2 text-2xl font-extrabold">Herald</h1>
+				<p class="pb-2 text-2xl font-extrabold">{workspace?.name ?? 'Herald'}</p>
 			{/if}
 			<div class="flex flex-wrap items-center gap-3 pb-1.5">
-				{#if workspace}
+				{#if open}
 					<span class="inline-flex items-center gap-1.5 text-sm text-neutral-fg">
 						<span class={['size-2 rounded-full', live.connected ? 'bg-live' : 'bg-line-strong']}
 						></span>
 						{live.connected ? 'Live' : 'Connecting'}
 					</span>
 				{/if}
+				{#if open && mailbox}
+					<MailboxMenu
+						{mailbox}
+						{busy}
+						onsync={() =>
+							mailboxAct((w, m) => api.mailboxAction(w, m, 'sync'), 'Checking for new mail.')}
+						onpause={() =>
+							mailboxAct(
+								(w, m) => api.mailboxAction(w, m, 'pause'),
+								'Paused. Mail waits in Gmail.'
+							)}
+						onresume={() =>
+							mailboxAct(
+								(w, m) => api.mailboxAction(w, m, 'resume'),
+								'Resumed. Herald is catching up.'
+							)}
+						ondisconnect={disconnect}
+						onreconnect={connectGmail}
+					/>
+				{/if}
 				{#if workspaces.length}
 					<BusinessMenu {workspaces} bind:selected={workspaceId} />
 				{/if}
-				{#if workspace}
+				{#if open}
 					<Button onclick={() => sender?.open()}>Send test email</Button>
 				{/if}
 			</div>
@@ -199,7 +296,38 @@
 			</div>
 		{/if}
 
-		{#if workspace}
+		{#if notice}
+			<div
+				role={notice.tone === 'danger' ? 'alert' : 'status'}
+				class={[
+					'mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-lg px-4 py-2.5 text-sm',
+					notice.tone === 'danger' ? 'bg-danger-bg text-danger-fg' : 'bg-success-bg text-success-fg'
+				]}
+			>
+				<p class="flex-1"><b>{notice.title}</b> {notice.text}</p>
+				{#if notice.retry && workspace}
+					<Button size="sm" disabled={connecting} onclick={connectGmail}>Try again</Button>
+				{/if}
+				<Button variant="quiet" size="sm" onclick={() => (notice = null)}>Dismiss</Button>
+			</div>
+		{/if}
+
+		{#if open && mailbox?.status === 'needs_reauth'}
+			<div
+				role="alert"
+				class="mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-lg bg-danger-bg px-4 py-2.5 text-sm text-danger-fg"
+			>
+				<p class="flex-1">
+					<b>Herald has stopped reading {mailbox.email_address}.</b> Google access ended, so new mail
+					can’t alert you. Nothing is lost: Herald catches up when you reconnect.
+				</p>
+				<Button variant="primary" size="sm" disabled={connecting} onclick={connectGmail}
+					>Reconnect Gmail</Button
+				>
+			</div>
+		{/if}
+
+		{#if open}
 			<div class="flex flex-1 flex-col lg:flex-row">
 				<main class="flex min-w-0 flex-1 flex-col gap-3 p-4 lg:border-t lg:border-line">
 					<div class="flex flex-wrap items-center gap-2">
@@ -254,7 +382,14 @@
 					</div>
 				{/if}
 			</div>
-		{:else if loaded}
+		{:else if gated && workspace}
+			<ConnectGmail
+				business={workspace.name}
+				available={providers.includes('gmail')}
+				busy={connecting}
+				onconnect={connectGmail}
+			/>
+		{:else if loaded && !workspace}
 			<main class="flex flex-1 items-center justify-center p-6">
 				<div class="flex w-full max-w-190 flex-col gap-5">
 					<div>

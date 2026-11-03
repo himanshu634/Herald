@@ -102,3 +102,15 @@ async def test_failed_tool_is_recorded(app, client, monkeypatch):
     email = await send(app, client, ws, "Order", "Where is my order?")
     assert email["context"]["failed"] == ["sender_history"]
     assert email["status"] == "inbox"
+
+
+async def test_only_the_seeded_demo_is_marked_demo(client):
+    demo = (await client.post("/api/workspaces/demo")).json()
+    setup = (
+        await client.post(
+            "/api/workspaces/setup", json={"name": "Kesar Cakes", "description": "A cake shop."}
+        )
+    ).json()["workspace"]
+
+    assert demo["demo"] is True
+    assert setup["demo"] is False

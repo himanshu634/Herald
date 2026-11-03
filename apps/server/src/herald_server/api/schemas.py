@@ -19,6 +19,7 @@ class WorkspaceOut(BaseModel):
     name: str
     config: WorkspaceConfig
     setup_done: bool
+    demo: bool
     created_at: datetime
 
 
