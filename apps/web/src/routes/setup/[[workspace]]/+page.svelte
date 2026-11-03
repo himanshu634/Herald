@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { api, type WorkspaceConfig } from '#lib/api/client.js';
 	import SetupEditor from '#lib/setup/SetupEditor.svelte';
+	import Rail from '#lib/shell/Rail.svelte';
 	import { MAX_DESCRIPTION, isEdited, problems } from '#lib/setup/setup.js';
 	import { Button, Icon } from '#lib/ui/index.js';
 
@@ -129,16 +130,7 @@
 {/snippet}
 
 <div class="flex min-h-screen">
-	<nav
-		aria-label="Main"
-		class="flex w-rail flex-none flex-col items-center gap-1.5 border-r border-line bg-sunken py-3"
-	>
-		<a
-			href={resolve('/')}
-			class="mb-2.5 flex size-8.5 items-center justify-center rounded-md bg-ink text-accent"
-			aria-label="Herald inbox"><Icon name="mail" size={18} /></a
-		>
-	</nav>
+	<Rail />
 
 	<div class="flex min-w-0 flex-1 flex-col">
 		<header class="flex h-14 items-center justify-between gap-3 px-5">

@@ -27,7 +27,7 @@ The web app styles everything with **Tailwind CSS v4**, and the tokens below are
 ## Using Tailwind here
 
 - **Only Herald's tokens exist.** `tokens.css` switches off Tailwind's default colours, font sizes, radii and shadows (`--color-*: initial` and so on). `bg-red-500` or `text-base` will not work; `bg-danger-bg` and `text-md` will. That is on purpose: a screen can't drift off the palette.
-- **Spacing is Tailwind's 4 px scale** (`p-4` is 16 px, `gap-2` is 8 px). Use the scale, not arbitrary values. Herald adds a few named sizes: `h-control-md`, `h-row`, `h-tab`, `w-rail`, `w-panel`.
+- **Spacing is Tailwind's 4 px scale** (`p-4` is 16 px, `gap-2` is 8 px). Use the scale, not arbitrary values. Herald adds a few named sizes: `h-control-md`, `h-row`, `h-tab`, `w-rail`, `w-rail-wide`, `w-panel`.
 - **No `<style>` blocks in components.** Write utilities in `class`. Use Svelte's array or object `class` syntax for variants (`class={['…', active && '…']}`).
 - **Variants live in a lookup, not in string building.** Write whole class names (`'bg-danger-bg text-danger-fg'`), never `bg-${tone}-bg`: Tailwind only finds classes it can read in full. `TONE_CLASSES` in `tones.ts` is the pattern.
 - **Arbitrary values are a last resort.** If you reach for `[…]` twice for the same thing, add a token instead.
@@ -104,7 +104,7 @@ A replacement face must have tabular figures (`tnum`), its own ₹ and weights u
 
 - **Radius** follows the size of the thing: `rounded-xs` 4 (tags, kbd), `rounded-sm` 7 (inputs, chips), `rounded-md` 8 (buttons, tabs), `rounded-lg` 10 (panels, tables), `rounded-xl` 14 (dialogs). Never one radius on everything.
 - **Borders:** `border border-line` for the edge of a container; `border-dashed border-line-dashed` for dividers inside one (panel header, table rows); `border-[1.5px]` only for pressable buttons.
-- **Sizes:** `h-control-md` 32 (inputs, chips), `size-control-lg` 40 (rail items), `h-row` 42 (table rows), `h-tab` 34, `w-rail` 56, `w-panel` 352 (the detail side panel).
+- **Sizes:** `h-control-md` 32 (inputs, chips), `size-control-lg` 40 (rail items), `h-row` 42 (table rows), `h-tab` 34, `w-rail` 56 (the closed rail), `w-rail-wide` 208 (the rail with labels), `w-panel` 352 (the detail side panel).
 - **Shadow:** `shadow-popover`, only on things that float.
 
 ## Components
@@ -146,6 +146,14 @@ Dashed when off, solid ink when on (`aria-pressed`). Chips filter the current vi
 ### Toast
 
 A short message after an owner action, bottom centre, ink on canvas. It uses the action's own words ("Moved to In progress.") and clears itself after 5 seconds. It sits in a `role="status"` region so screen readers hear it. Errors are not toasts: they stay on screen as a `role="alert"` banner until dismissed.
+
+### ThemeSwitch
+
+Three buttons, System, Light and Dark, each with `aria-pressed`, so the current choice always shows. Don't make it one button that cycles. `labelled` shows the words (the gallery), the default is icons only (the open rail), and `vertical` stacks them (the closed rail). It reads and saves `prefs.theme`; see Dark mode.
+
+### Rail
+
+The main nav on every app screen (`lib/shell/Rail.svelte`), not on the gallery. Closed it is `w-rail`, icons only, each with `aria-label` and `title`. Open it is `w-rail-wide` with labels. Every item keeps the same 40 px icon column in both states, so the icons stay put while the width animates. The theme switch and the collapse toggle sit at the bottom. The open or closed choice is saved in the browser and starts closed.
 
 ### Icon
 
@@ -189,7 +197,7 @@ The mark is three emails on a tile, with one pulled out of the pile and lit char
 
 ## Dark mode
 
-Both themes ship together. The page follows the system setting; `data-theme="light"` or `"dark"` on `<html>` overrides it. Every colour token needs a dark value in both dark blocks of `tokens.css` (the media query and the `data-theme` rule). In dark, chartreuse stays the same and the safety floor inverts to chartreuse with ink.
+Both themes ship together. The page follows the system setting; `data-theme="light"` or `"dark"` on `<html>` overrides it. The owner picks System, Light or Dark with the theme switch (`ThemeSwitch`, in the rail and the gallery). The choice is saved in the browser (`src/lib/prefs.svelte.ts`), and a small script in `app.html` applies it before the first paint so a dark choice never flashes light. System removes the attribute. Every colour token needs a dark value in both dark blocks of `tokens.css` (the media query and the `data-theme` rule). In dark, chartreuse stays the same and the safety floor inverts to chartreuse with ink.
 
 ## Adding to the system
 

@@ -10,6 +10,7 @@
 		StatusTag,
 		Tabs,
 		Tag,
+		ThemeSwitch,
 		Toast,
 		URGENCY,
 		type TabItem,
@@ -60,13 +61,6 @@
 	let tab = $state('needs-you');
 	let anger4 = $state(true);
 	let toast = $state<string | null>(null);
-	let theme = $state<'light' | 'dark' | null>(null);
-
-	function setTheme(next: 'light' | 'dark') {
-		theme = next;
-		document.documentElement.dataset.theme = next;
-	}
-
 	const th = 'h-8.5 border-b border-line bg-sunken px-3 text-left text-xs font-bold text-muted';
 	const td = 'h-row border-b border-dashed border-line-dashed px-3 whitespace-nowrap';
 </script>
@@ -81,18 +75,7 @@
 				Direction M, Control room. Rules in <code class="font-mono">docs/design-system.md</code>.
 			</p>
 		</div>
-		<div class="flex gap-2">
-			<Button
-				variant={theme === 'light' ? 'primary' : 'secondary'}
-				size="sm"
-				onclick={() => setTheme('light')}>Light</Button
-			>
-			<Button
-				variant={theme === 'dark' ? 'primary' : 'secondary'}
-				size="sm"
-				onclick={() => setTheme('dark')}>Dark</Button
-			>
-		</div>
+		<ThemeSwitch labelled />
 	</header>
 
 	<div class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,32rem),1fr))] items-start gap-4">
@@ -230,6 +213,17 @@
 					>Show a toast</Button
 				>
 				<span class="text-sm text-muted">Bottom centre, the action's own words.</span>
+			</div>
+		</Panel>
+
+		<Panel title="Theme switch">
+			<div class="flex flex-wrap items-start gap-4">
+				<ThemeSwitch labelled />
+				<ThemeSwitch />
+				<ThemeSwitch vertical />
+				<span class="text-sm text-muted"
+					>Saved in this browser. Labelled here, icons in the open rail, stacked in the closed one.</span
+				>
 			</div>
 		</Panel>
 

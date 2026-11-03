@@ -109,7 +109,8 @@
 	--spacing-control-lg: 2.5rem; /* 40: rail items */
 	--spacing-row: 2.625rem; /* 42: table rows */
 	--spacing-tab: 2.125rem; /* 34 */
-	--spacing-rail: 3.5rem; /* 56 */
+	--spacing-rail: 3.5rem; /* 56: the icon rail, collapsed */
+	--spacing-rail-wide: 13rem; /* 208: the rail with labels */
 	--spacing-panel: 22rem; /* 352: detail side panel */
 
 	/* Elevation: only things that float */
