@@ -53,6 +53,7 @@ flowchart LR
 
 - The graph is compiled once and shared by all tenants. Each run carries its workspace's config in the state.
 - `word_check` and `write_notes` run in parallel and write different state keys.
+- `write_notes` waits on `gather_context`. `word_check` does not.
 - If the AI fails (outage, refusal, bad output), the notes are empty and the email goes to "Needs a look". A safety-floor match from the word check still alerts.
 - `decide` order, first match wins: safety floor → owner rules (alert beats close) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
 
@@ -63,6 +64,7 @@ Before the model reads an email, `gather_context` runs three tools in code: `sen
 - The workspace is bound when the toolbox is built. No tool input has a workspace or email id.
 - A tool sees only emails received before the current one.
 - A tool that fails or takes over 2 s gives nothing, and its name goes into `email.context.failed`. Triage goes on.
+- `word_check` never waits on the tools. A slow tool can delay the alert by at most the tool timeout (2 s).
 - History goes into the user message inside a fenced `<history>` block. Its text is untrusted, so Herald strips `<history>`, `<message>`, `<email>` and `<business>` tags from it.
 - `email.context` saves what the model saw: repeat counts, the ids it was shown, failed tools and timings.
 
@@ -74,7 +76,7 @@ Claude gets one system prompt for each business and one user message for each em
 | --- | --- | --- |
 | Herald: role, scales, flag definitions, fences | A Herald release | System prompt, first, from `triage.md` |
 | Brand: name, profile, topics, facts, guidance, rules | The owner edits setup | System prompt, in `<business>` |
-| Learned: past corrections | Later spec | — |
+| History: sender history, thread, past corrections | Every email | User message, in `<history>`, before `<email>` |
 | Email: sender, important marker, subject, body | Every email | User message, in `<email>` |
 
 Building rules:

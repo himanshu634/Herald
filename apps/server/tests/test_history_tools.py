@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from herald_core.history import (
     RECENT_CORRECTIONS,
@@ -140,7 +140,7 @@ async def test_tools_are_isolated(app):
     engine = app.state.services.engine
     with Session(engine) as s:
         ws_a, ws_b = _workspace(s), _workspace(s)
-        b_ids = set()
+        a_ids, b_ids = set(), set()
         for ws in (ws_a, ws_b):
             e = _email(s, ws, at=NOW - timedelta(days=1), thread_id="t1")
             c = Correction(
@@ -148,11 +148,11 @@ async def test_tools_are_isolated(app):
             )
             s.add(c)
             s.commit()
-            if ws == ws_b:
-                b_ids = {e.id, c.id}
+            if ws == ws_a:
+                a_email, a_ids = e.id, {e.id, c.id}
+            else:
+                b_email, b_ids = e.id, {e.id, c.id}
         cur = _email(s, ws_a, at=NOW, thread_id="t1").id
-        a_email = s.exec(select(Email).where(Email.workspace_id == ws_a)).first().id
-        b_email = s.exec(select(Email).where(Email.workspace_id == ws_b)).first().id
         # Mismatched pairs: each has one side in A and the other in B. Each join filter must
         # catch its own half.
         cross_1 = Correction(
@@ -168,12 +168,12 @@ async def test_tools_are_isolated(app):
     sender = await box.call(SENDER_HISTORY, SenderHistoryIn(sender=SENDER))
     thread = await box.call(THREAD, ThreadIn(thread_id="t1"))
     corrections = await box.call(RECENT_CORRECTIONS, CorrectionsIn())
-    ids = (
-        {e.id for e in sender.recent}
-        | {m.id for m in thread.messages}
-        | {c.id for c in corrections.items}
-    )
-    assert ids and not ids & b_ids
+    # Each tool returns exactly A's earlier email or correction, so nothing from B leaks in
+    # and nothing of A's is lost. cross_2 is dropped only by the Correction.workspace_id filter.
+    assert {e.id for e in sender.recent} == {a_email}
+    assert {m.id for m in thread.messages} == {a_email}
+    assert {c.id for c in corrections.items} == a_ids - {a_email}
+    assert not (a_ids | {a_email}) & b_ids
 
 
 async def test_corrections_skip_the_current_and_later_emails(app):

@@ -51,21 +51,32 @@ def email_block(email: Email, important: bool) -> str:
     # Header fields are one line each: a newline must not forge a line like "From: ...".
     sender = _line(email.sender)
     sender = f"{sender} (important contact)" if important else sender
-    return f"<email>\nFrom: {sender}\nSubject: {_line(email.subject)}\n\n{email.body}\n</email>"
+    subject = _strip(_HISTORY_TAG, _line(email.subject))
+    body = _strip(_HISTORY_TAG, email.body)
+    return f"<email>\nFrom: {sender}\nSubject: {subject}\n\n{body}\n</email>"
 
 
-# History is the only part of the prompt built from other people's text (earlier emails and
+# The current email can also forge a history block (a fake "owner corrections" section that
+# would steer the model), so <history> tags are removed from it too. <email> and <business>
+# are left alone here on purpose.
+_HISTORY_TAG = re.compile(r"<\s*/?\s*history\b[^>]*>", re.I)
+
+# History is the only other part of the prompt built from other people's text (earlier emails and
 # their bodies). Tags that match our own fences are removed so none of it can close
 # <history> early or open a fake <email>, <business> or <message> block.
-_FENCE_TAG = re.compile(r"</?\s*(history|message|email|business)\b[^>]*>", re.I)
+_FENCE_TAG = re.compile(r"<\s*/?\s*(history|message|email|business)\b[^>]*>", re.I)
+
+
+def _strip(pattern: re.Pattern[str], text: str) -> str:
+    # One pass can rebuild a tag: "<<history>/history>" becomes "</history>". Repeat until
+    # the text stops changing.
+    while (cleaned := pattern.sub("", text)) != text:
+        text = cleaned
+    return text
 
 
 def _clean(text: str) -> str:
-    # One pass can rebuild a tag: "<<history>/history>" becomes "</history>". Repeat until
-    # the text stops changing.
-    while (cleaned := _FENCE_TAG.sub("", text)) != text:
-        text = cleaned
-    return text
+    return _strip(_FENCE_TAG, text)
 
 
 def _day(when) -> str:
@@ -114,8 +125,10 @@ def history_block(history: History) -> str:
         lines = ["Owner corrections in this business, newest first:"]
         for c in history.corrections.items:
             was = _clean(_line(c.from_value)) if c.from_value is not None else "nothing"
+            # Drop quotes before cleaning (as for from=): the text sits inside our own quotes.
+            subject = _clean(_line(c.subject).replace('"', ""))
             lines.append(
-                f'- "{_clean(_line(c.subject))}": Herald said {was}; '
+                f'- "{subject}": Herald said {was}; '
                 f"the owner changed it to {_clean(_line(c.to_value))}."
             )
         sections.append("\n".join(lines))
