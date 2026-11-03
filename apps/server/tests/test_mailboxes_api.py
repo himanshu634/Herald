@@ -329,3 +329,61 @@ async def test_pause_resume_and_disconnect(app, client, fake_connector):
     assert mailbox.credentials_enc is None
     # One event per change; the 409s add none.
     assert status_events(app, ws) == ["active", "paused", "active", "disconnected"]
+
+
+async def test_pause_keeps_watch_when_other_workspace_is_active(app, client, fake_connector):
+    # The same Google account connected in two workspaces shares one watch and one grant.
+    ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
+    mailbox_a = await connect(app, client, ws_a)
+    await connect(app, client, ws_b)
+    fake_connector.calls.clear()
+
+    paused = await client.post(f"/api/workspaces/{ws_a}/mailboxes/{mailbox_a}/pause")
+
+    assert paused.json()["status"] == "paused"
+    # Stopping the watch would stop push for the other workspace's mailbox too.
+    assert "unsubscribe" not in fake_connector.calls
+
+
+async def test_pause_stops_watch_when_other_workspace_is_paused(app, client, fake_connector):
+    ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
+    mailbox_a = await connect(app, client, ws_a)
+    mailbox_b = await connect(app, client, ws_b)
+    await client.post(f"/api/workspaces/{ws_b}/mailboxes/{mailbox_b}/pause")
+    fake_connector.calls.clear()
+
+    await client.post(f"/api/workspaces/{ws_a}/mailboxes/{mailbox_a}/pause")
+
+    assert "unsubscribe" in fake_connector.calls
+
+
+async def test_disconnect_does_not_revoke_shared_grant(app, client, fake_connector):
+    ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
+    mailbox_a = await connect(app, client, ws_a)
+    mailbox_b = await connect(app, client, ws_b)
+    # Paused still holds the grant (resume needs it), but nothing needs the watch.
+    await client.post(f"/api/workspaces/{ws_b}/mailboxes/{mailbox_b}/pause")
+    fake_connector.calls.clear()
+
+    removed = await client.delete(f"/api/workspaces/{ws_a}/mailboxes/{mailbox_a}")
+
+    assert removed.json()["status"] == "disconnected"
+    assert "unsubscribe" in fake_connector.calls
+    assert "revoke" not in fake_connector.calls
+
+    # Once no other workspace holds it, the last disconnect revokes the grant.
+    fake_connector.calls.clear()
+    await client.delete(f"/api/workspaces/{ws_b}/mailboxes/{mailbox_b}")
+    assert "revoke" in fake_connector.calls
+
+
+async def test_disconnect_keeps_watch_when_other_workspace_is_active(app, client, fake_connector):
+    ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
+    mailbox_a = await connect(app, client, ws_a)
+    await connect(app, client, ws_b)
+    fake_connector.calls.clear()
+
+    await client.delete(f"/api/workspaces/{ws_a}/mailboxes/{mailbox_a}")
+
+    assert "unsubscribe" not in fake_connector.calls
+    assert "revoke" not in fake_connector.calls
