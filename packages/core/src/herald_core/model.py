@@ -25,7 +25,7 @@ from herald_core.schema import (
     WorkspaceConfig,
 )
 
-DEFAULT_MODEL = "claude-opus-5-5"
+DEFAULT_MODEL = "claude-haiku-5-5"
 
 
 class ModelError(Exception):
