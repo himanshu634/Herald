@@ -102,6 +102,11 @@ class GmailClient:
         self._client_secret = client_secret
         self._redirect_uri = redirect_uri
 
+    @property
+    def redirect_uri(self) -> str:
+        """The OAuth callback; the consent URL must name the same one the code exchange sends."""
+        return self._redirect_uri
+
     async def _request(
         self, method: str, url: str, access: str | None, **kw: Any
     ) -> httpx.Response:
