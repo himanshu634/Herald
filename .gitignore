@@ -24,3 +24,6 @@ node_modules/
 # SvelteKit build output
 apps/web/build/
 apps/web/.svelte-kit/
+
+# Claude Code per-user settings
+.claude/settings.local.json
