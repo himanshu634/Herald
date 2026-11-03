@@ -14,7 +14,8 @@ make lite           # API on :8000 with no Docker: SQLite, in-memory bus, inline
 make web            # SvelteKit on :5173, proxies /api to :8000
 make dev            # full stack in one terminal: Postgres + Redis in Docker, then API, worker and web
 make infra && make api && make worker   # full stack: Postgres + Redis, separate arq worker (each in its own terminal)
-make test           # pytest (core + server) and vitest
+make test           # pytest (core + evals + server) and vitest
+make eval           # triage evals on Claude -> score report in packages/evals/results (see docs/evals.md)
 make lint           # ruff check, ruff format --check, prettier + eslint, svelte-check
 make format
 make gen-api        # regenerate apps/web/src/lib/api/schema.d.ts from FastAPI's OpenAPI
@@ -32,10 +33,11 @@ Web-only: `pnpm -C apps/web check` (svelte-check), `pnpm -C apps/web lint`.
 
 ## Architecture
 
-Three packages; Python is one uv workspace (root `pyproject.toml`), JS is a pnpm workspace containing only `apps/web`.
+Three packages plus the evals; Python is one uv workspace (root `pyproject.toml`), JS is a pnpm workspace containing only `apps/web`.
 
 - **`packages/core` (`herald_core`)** — business-agnostic and I/O-free (no DB, no Redis). `schema.py` holds the shared Pydantic types (`WorkspaceConfig`, `Email`, `Notes`, `Decision`, `Route`). `graph.py` builds the LangGraph graph once and shares it across tenants; each run carries its workspace config in state. `word_check` (regex safety floor, `safety.py`) and `write_notes` run in parallel, then `judge_rules`, then `decide` (`decide.py`, plain Python). `model.py` has the `TriageModel` protocol with `AnthropicModel` and the offline `FakeModel`.
 - **`apps/server` (`herald_server`)** — FastAPI app (`api/main.py:create_app`) and arq worker (`worker/main.py`) share `Services` (`services.py`: engine, bus, compiled graph). `pipeline.process_email` loads an email, runs `triage`, saves notes/decision/status, publishes events, and records an `alert.sent` event when the route is `alert`. Alerts stay in the app: nothing is sent outside it. Settings are `HERALD_*` env vars or `.env` (`settings.py`).
+- **`packages/evals` (`herald_evals`)** — labelled test emails (TOML in `datasets/`) run through the real graph, scored into a Markdown report and a JSON run record. Labels say what Herald should do; cases start `reviewed = false` until a person agrees. See `docs/evals.md`.
 - **`apps/web`** — SvelteKit (Svelte 5 runes forced on) built as a static SPA (`adapter-static`, `ssr = false`); FastAPI owns all server logic. `src/lib/api/client.ts` wraps routes with types from the generated `schema.d.ts`; `src/lib/events.svelte.ts` is the SSE client. Import `src/lib` via the `#lib/*` subpath alias.
 
 Invariants that span files:

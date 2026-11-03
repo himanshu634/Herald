@@ -1,6 +1,6 @@
 # Virtual uv workspace root: holds dev tooling and shared config only.
 [tool.uv.workspace]
-members = ["packages/core", "apps/server"]
+members = ["packages/core", "packages/evals", "apps/server"]
 
 [dependency-groups]
 dev = [
@@ -19,9 +19,9 @@ extend-exclude = ["docs/superpowers"]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "FAST"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["herald_core", "herald_server"]
+known-first-party = ["herald_core", "herald_evals", "herald_server"]
 
 [tool.pytest.ini_options]
-testpaths = ["packages/core/tests", "apps/server/tests"]
+testpaths = ["packages/core/tests", "packages/evals/tests", "apps/server/tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
