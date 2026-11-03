@@ -164,13 +164,13 @@ The OAuth callback always redirects to `HERALD_WEB_URL` with one query value:
 
 | Query | Meaning |
 | --- | --- |
-| `mailbox_connected=<id>` | The mailbox is connected and its first sync is queued |
+| `mailbox_connected=<id>` | The mailbox is saved and `active`. Its first sync is queued (if queueing fails, the catch-up sync runs it). A failure after the save is logged and does not change this answer. |
 | `mailbox_error=access_denied` | The owner refused at the provider |
 | `mailbox_error=provider_unavailable` | The provider is not set up, or `HERALD_TOKEN_KEY` is not set |
 | `mailbox_error=invalid_state` | The state is bad, expired, for another provider, or names a missing workspace |
 | `mailbox_error=authorization_failed` | No code came back, or the provider refused the code |
 | `mailbox_error=no_refresh_token` | The provider gave no long-lived credential |
-| `mailbox_error=provider_error` | Any other provider failure: for example the account has no Gmail, the owner deselected the scope, a rate limit, or a network error |
+| `mailbox_error=provider_error` | Any other failure before the mailbox is saved: for example the account has no Gmail, the owner deselected the scope, a rate limit, or a network error |
 
 ### Cron jobs
 

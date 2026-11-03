@@ -285,6 +285,8 @@ async def connect_mailbox(
 
     The caller has checked that `workspace_id` exists and queues the first sync.
     Raises the connector's `MissingRefreshToken` or `AuthRevoked` for a code that cannot be used.
+    Raises only before the mailbox is saved: the steps after the commit are best effort, so
+    an exception always means the connect did not happen.
     """
     account = await connector.complete_authorization(code)
     mailbox, event = await asyncify(upsert_connected)(
@@ -292,8 +294,20 @@ async def connect_mailbox(
     )
     # Publish before subscribing: the change is committed, and a slow provider should not
     # hold back the status the owner's open tabs are waiting for.
-    await services.bus.publish(event)
-    await subscribe_mailbox(services, mailbox)
+    try:
+        await services.bus.publish(event)
+    except Exception as exc:
+        # The status and its event are committed; only the live update to open tabs is lost,
+        # and they read the stored events on reload. Failing here would tell the owner the
+        # connect failed although the mailbox exists, and would skip the subscribe below.
+        log.warning("%s publishing status of mailbox %s", type(exc).__name__, mailbox.id)
+    try:
+        await subscribe_mailbox(services, mailbox)
+    except Exception as exc:
+        # subscribe_mailbox absorbs provider errors but not a failed save of the subscription.
+        # Push is best effort here too: the renewal cron subscribes again, and the catch-up
+        # sync reads the mail until then.
+        log.warning("%s subscribing mailbox %s", type(exc).__name__, mailbox.id)
     return mailbox
 
 

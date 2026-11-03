@@ -88,14 +88,19 @@ async def oauth_callback(
         log.info("oauth callback for %s: code exchange refused", provider)
         return _back_to_web(services, mailbox_error="authorization_failed")
     except Exception as exc:
-        # Anything else from the provider (an account without the mail service, a scope the
-        # owner deselected, a rate limit, a network error). The owner's browser is on this
-        # route, so answer with a redirect, never a 500. Only the type name: str() of an HTTP
-        # error can carry provider responses.
+        # Anything else before the mailbox is saved: connect_mailbox raises only then (an
+        # account without the mail service, a scope the owner deselected, a rate limit, a
+        # network error). The owner's browser is on this route, so answer with a redirect,
+        # never a 500. Only the type name: str() of an HTTP error can carry provider responses.
         log.warning("oauth callback for %s: %s", provider, type(exc).__name__)
         return _back_to_web(services, mailbox_error="provider_error")
 
     # The first sync backfills recent mail; a reconnect continues from the kept cursor.
-    await queue.enqueue_sync(mailbox.id)
+    try:
+        await queue.enqueue_sync(mailbox.id)
+    except Exception as exc:
+        # The mailbox is saved and ACTIVE, so the connect worked: say so. The 15-minute
+        # catch-up sync picks up every active mailbox and runs this first sync instead.
+        log.warning("%s enqueueing first sync of mailbox %s", type(exc).__name__, mailbox.id)
     log.info("mailbox %s connected in workspace %s", mailbox.id, workspace_id)
     return _back_to_web(services, mailbox_connected=mailbox.id)

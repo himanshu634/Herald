@@ -233,6 +233,81 @@ async def test_callback_provider_error_redirects(app, client, fake_connector, ca
     assert "leak-me-xyz" not in caplog.text
 
 
+async def test_callback_reports_connected_when_failure_happens_after_save(
+    app, client, fake_connector, monkeypatch, caplog
+):
+    ws = await demo_workspace(client)
+    fake_connector.queue = [message("m1")]
+    state = await start_connect(client, ws)
+    bus = app.state.services.bus
+    real_publish = bus.publish
+    failures = [RuntimeError("leak-me-xyz")]
+
+    async def publish_failing_once(event):
+        # Only the first publish (the connect's status event) fails: the sync publishes too.
+        if failures:
+            raise failures.pop()
+        await real_publish(event)
+
+    monkeypatch.setattr(bus, "publish", publish_failing_once)
+
+    response = await callback(client, code="c", state=state)
+    await app.state.queue.drain()
+
+    # The mailbox is saved: telling the owner the connect failed would be wrong.
+    [mailbox] = mailboxes_of(app, ws)
+    assert redirect_query(response) == {"mailbox_connected": [mailbox.id]}
+    assert mailbox.status == MailboxStatus.ACTIVE
+    assert "subscribe" in fake_connector.calls
+    # The first sync still ran.
+    assert [e.provider_message_id for e in emails_of(app, ws)] == ["m1"]
+    assert "RuntimeError" in caplog.text and mailbox.id in caplog.text
+    assert "leak-me-xyz" not in caplog.text
+
+
+async def test_callback_reports_connected_when_saving_subscription_fails(
+    app, client, fake_connector, monkeypatch, caplog
+):
+    ws = await demo_workspace(client)
+    fake_connector.queue = [message("m1")]
+    state = await start_connect(client, ws)
+
+    def save_subscription(services, mailbox_id, subscription):
+        raise RuntimeError("leak-me-xyz")
+
+    monkeypatch.setattr("herald_server.mailboxes._save_subscription", save_subscription)
+
+    response = await callback(client, code="c", state=state)
+    await app.state.queue.drain()
+
+    [mailbox] = mailboxes_of(app, ws)
+    assert redirect_query(response) == {"mailbox_connected": [mailbox.id]}
+    assert [e.provider_message_id for e in emails_of(app, ws)] == ["m1"]
+    assert "RuntimeError" in caplog.text and mailbox.id in caplog.text
+    assert "leak-me-xyz" not in caplog.text
+
+
+async def test_callback_reports_connected_when_first_sync_cannot_be_queued(
+    app, client, fake_connector, monkeypatch, caplog
+):
+    ws = await demo_workspace(client)
+    state = await start_connect(client, ws)
+
+    async def enqueue_sync(mailbox_id):
+        raise ConnectionError("leak-me-xyz")
+
+    monkeypatch.setattr(app.state.queue, "enqueue_sync", enqueue_sync)
+
+    response = await callback(client, code="c", state=state)
+
+    # The catch-up sync runs the first sync later; the connect itself worked.
+    [mailbox] = mailboxes_of(app, ws)
+    assert redirect_query(response) == {"mailbox_connected": [mailbox.id]}
+    assert mailbox.status == MailboxStatus.ACTIVE
+    assert "ConnectionError" in caplog.text and mailbox.id in caplog.text
+    assert "leak-me-xyz" not in caplog.text
+
+
 async def test_callback_for_unconfigured_provider_redirects(app, client):
     ws = await demo_workspace(client)
     state = app.state.services.secrets.seal({"workspace_id": ws, "provider": "fake"})
