@@ -5,7 +5,9 @@ from datetime import datetime
 from sqlalchemy import Engine
 
 from herald_core.tools import Toolbox
-from herald_server.tools.history import CorrectionsTool, SenderHistoryTool, ThreadTool
+from herald_server.tools.corrections import CorrectionsTool
+from herald_server.tools.sender_history import SenderHistoryTool
+from herald_server.tools.thread import ThreadTool
 
 
 def build_toolbox(engine: Engine, workspace_id: str, email_id: str, before: datetime) -> Toolbox:

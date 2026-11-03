@@ -155,7 +155,7 @@ async def test_to_inbox_is_409_unless_closed(app, client):
 
 
 async def test_failed_tool_is_recorded(app, client, monkeypatch):
-    from herald_server.tools.history import SenderHistoryTool
+    from herald_server.tools.sender_history import SenderHistoryTool
 
     async def boom(self, *args, **kwargs):
         raise RuntimeError("down")
