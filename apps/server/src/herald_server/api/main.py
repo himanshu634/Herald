@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from herald_server.api.routes import emails, events, health, mailboxes, oauth, workspaces
+from herald_server.api.routes import emails, events, health, mailboxes, oauth, webhooks, workspaces
 from herald_server.queue import ArqQueue, InlineQueue, JobQueue
 from herald_server.services import Services, build_services
 from herald_server.settings import Settings, get_settings
@@ -29,7 +29,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         services.engine.dispose()
 
     app = FastAPI(title="Herald", lifespan=lifespan)
-    for module in (health, workspaces, emails, events, mailboxes, oauth):
+    for module in (health, workspaces, emails, events, mailboxes, oauth, webhooks):
         app.include_router(module.router)
     return app
 
