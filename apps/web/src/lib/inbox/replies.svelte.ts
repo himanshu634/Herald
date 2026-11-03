@@ -1,6 +1,6 @@
 // The inbox's reply wiring: one draft per email, the composer that is open, sending, and the
 // open email's replies. Kept out of +page.svelte so the page only connects it to the screen.
-import { api, type Email, type Reply } from '#lib/api/client.js';
+import { api, type Email, type EmailStatus, type Reply } from '#lib/api/client.js';
 import { REPLY_COPY, failedCopy, keepsKey, spendsKey, type ReplyState } from './reply';
 
 export interface Draft {
@@ -12,6 +12,11 @@ export interface Draft {
 	key: string;
 	/** A POST is out. The buttons and Discard wait for it. */
 	sending: boolean;
+	/**
+	 * The email's status when the owner last pressed Send, for the toast: "and marked done"
+	 * only if this send moved it to done. In memory only; a reload falls back to the email.
+	 */
+	pressedOn: EmailStatus | null;
 	/** The last outcome that kept the draft: not sent, or not confirmed. */
 	last: Reply | null;
 	/** A send that saved no reply we know of: refused, or no answer. */
@@ -53,6 +58,7 @@ function newDraft(): Draft {
 		body: '',
 		key: crypto.randomUUID(),
 		sending: false,
+		pressedOn: null,
 		last: null,
 		problem: null,
 		waiting: null,
@@ -98,8 +104,9 @@ export interface ReplyHooks {
 	/**
 	 * A reply to this email was sent to `to`: refresh the emails and say so. `shown` is
 	 * whether the panel still shows that email; the owner may have moved on meanwhile.
+	 * `before` is the email's status when the owner pressed Send.
 	 */
-	onsent: (to: string, emailId: string, shown: boolean) => void;
+	onsent: (to: string, emailId: string, shown: boolean, before: EmailStatus) => void;
 	/** The mailbox may have changed (refused, or Gmail took access away): refresh it. */
 	onmailbox: () => void;
 	onerror: (error: unknown) => void;
@@ -232,6 +239,7 @@ export class ReplyDesk {
 		const draft = this.drafts[email.id];
 		if (!draft || draft.sending || !draft.body.trim()) return;
 		draft.sending = true;
+		draft.pressedOn = email.status;
 		draft.problem = null;
 		// Saved before the POST: if the page goes away while it is out, the restored draft
 		// must still know the key may have been used.
@@ -278,12 +286,15 @@ export class ReplyDesk {
 			return;
 		}
 		if (reply.status === 'sent') {
+			// Read before the draft goes. A draft restored by a reload has no press on record;
+			// the email's status now may already be done, which only makes the toast plainer.
+			const before = draft?.pressedOn ?? email.status;
 			delete this.drafts[email.id];
 			this.#save(email);
 			// Read before the composer closes: the page then falls back to another email.
 			const shown = this.#listFor === email.id;
 			if (this.composingId === email.id) this.composingId = null;
-			this.#hooks.onsent(reply.to_address, email.id, shown);
+			this.#hooks.onsent(reply.to_address, email.id, shown, before);
 			return;
 		}
 		// Not sent, or not confirmed: the draft stays in the box with the outcome under it.

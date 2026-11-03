@@ -1,6 +1,12 @@
 // Reply logic with no UI: whether the owner can reply to an email, where the reply goes, and
 // the words for every state a reply can be in. The copy is fixed by the owner-replies plan.
-import { ApiError, type Email, type Mailbox, type Reply } from '#lib/api/client.js';
+import {
+	ApiError,
+	type Email,
+	type EmailStatus,
+	type Mailbox,
+	type Reply
+} from '#lib/api/client.js';
 import type { IconName } from '#lib/ui/Icon.svelte';
 import type { Tone } from '#lib/ui/tones.js';
 import { formatTime } from './inbox';
@@ -121,12 +127,18 @@ export function replyNotice(reply: Reply): string {
 }
 
 /**
- * The toast for a sent reply, from the email as the refreshed list has it. Not from the
+ * The toast for a sent reply. "And marked done" only when this send moved the email to done:
+ * not done when the owner pressed Send (`before`), done in the refreshed list. Not from the
  * button pressed: a press that reuses an earlier key gets that earlier send's row back, and
- * the server applies only that send's mark_done. Unknown (the refresh failed) says only "Sent".
+ * the server applies only that send's mark_done. An email that was already done, or one the
+ * refresh couldn't load, says only "Sent".
  */
-export function sentToast(to: string, email: Pick<Email, 'status'> | undefined): string {
-	return REPLY_COPY.toast(to, email?.status === 'done');
+export function sentToast(
+	to: string,
+	before: EmailStatus,
+	after: Pick<Email, 'status'> | undefined
+): string {
+	return REPLY_COPY.toast(to, before !== 'done' && after?.status === 'done');
 }
 
 /**

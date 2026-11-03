@@ -110,15 +110,17 @@
 	);
 
 	const replies = new ReplyDesk({
-		onsent: async (to, emailId, shown) => {
+		onsent: async (to, emailId, shown, before) => {
 			// Only if the panel still shows it: the owner may have moved on while the POST
 			// was out, and pinning would pull the panel back to the answered email.
 			if (shown) pinnedId = emailId;
-			// "And marked done" only once the refreshed list says so, never from the button:
-			// a press under an earlier key gets that send's row and its mark_done, not this one's.
+			// "And marked done" only if the refreshed list has it done and it wasn't before the
+			// press, never from the button: a press under an earlier key gets that send's row
+			// and its mark_done, not this one's.
 			const list = workspaceId ? await refresh(workspaceId) : null;
 			toast = sentToast(
 				to,
+				before,
 				list?.find((e) => e.id === emailId)
 			);
 		},

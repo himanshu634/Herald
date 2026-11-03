@@ -188,13 +188,19 @@ describe('replySubject', () => {
 });
 
 describe('sentToast', () => {
-	it('says where it went, and marked done only when the email is done', () => {
-		expect(sentToast('a@x.in', email({ status: 'inbox' }))).toBe('Sent to a@x.in');
-		expect(sentToast('a@x.in', email({ status: 'done' }))).toBe('Sent to a@x.in and marked done');
+	it('says marked done only when this send moved the email to done', () => {
+		expect(sentToast('a@x.in', 'inbox', email({ status: 'inbox' }))).toBe('Sent to a@x.in');
+		expect(sentToast('a@x.in', 'inbox', email({ status: 'done' }))).toBe(
+			'Sent to a@x.in and marked done'
+		);
+	});
+
+	it('says only where it went when the email was already done', () => {
+		expect(sentToast('a@x.in', 'done', email({ status: 'done' }))).toBe('Sent to a@x.in');
 	});
 
 	it('says only where it went when the refreshed email is not known', () => {
-		expect(sentToast('a@x.in', undefined)).toBe('Sent to a@x.in');
+		expect(sentToast('a@x.in', 'inbox', undefined)).toBe('Sent to a@x.in');
 	});
 });
 

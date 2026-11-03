@@ -10,7 +10,8 @@ vi.mock('#lib/api/client.js', async (actual) => ({
 const { ReplyDesk, lockHint, locked } = await import('./replies.svelte');
 const { REPLY_COPY } = await import('./reply');
 
-const email = (id: string) => ({ id, workspace_id: 'w1' }) as Email;
+const email = (id: string, status: Email['status'] = 'inbox') =>
+	({ id, workspace_id: 'w1', status }) as Email;
 
 function reply(over: Partial<Reply> = {}): Reply {
 	return {
@@ -150,9 +151,33 @@ describe('ReplyDesk.send', () => {
 		await desk.send(email('a'), true);
 
 		// The toast is the page's: it reads the email's status once the list refreshes.
-		expect(hooks.onsent).toHaveBeenCalledWith('arjun@outlook.com', 'a', false);
+		expect(hooks.onsent).toHaveBeenCalledWith('arjun@outlook.com', 'a', false, 'inbox');
 		expect(desk.drafts.a).toBeUndefined();
 		expect(desk.composingId).toBeNull();
+	});
+});
+
+describe('ReplyDesk naming the status the owner pressed Send on', () => {
+	it('passes it on, so a send to an already-done email is not called marked done', async () => {
+		const { desk, hooks } = make();
+		api.reply.mockResolvedValue(reply());
+
+		await desk.send(email('a', 'done'), false);
+
+		expect(hooks.onsent).toHaveBeenCalledWith('arjun@outlook.com', 'a', false, 'done');
+	});
+
+	it('keeps the status from the press when the reply settles later', async () => {
+		const { desk, hooks } = make();
+		api.reply.mockResolvedValue(reply({ status: 'sending', sent_at: null }));
+		await desk.send(email('a', 'inbox'), true);
+		await new Promise((r) => setTimeout(r));
+
+		// The reply.status event: by now the list has the email as done.
+		api.replies.mockResolvedValue([reply()]);
+		await desk.load(email('a', 'done'));
+
+		expect(hooks.onsent).toHaveBeenCalledWith('arjun@outlook.com', 'a', true, 'inbox');
 	});
 });
 
@@ -164,7 +189,7 @@ describe('ReplyDesk pinning a sent email', () => {
 
 		await desk.send(email('a'), true);
 
-		expect(hooks.onsent).toHaveBeenCalledWith(expect.any(String), 'a', true);
+		expect(hooks.onsent).toHaveBeenCalledWith(expect.any(String), 'a', true, 'inbox');
 	});
 
 	it('says it does not once the owner moved on while the POST was out', async () => {
@@ -178,7 +203,7 @@ describe('ReplyDesk pinning a sent email', () => {
 		answer.resolve(reply());
 		await sending;
 
-		expect(hooks.onsent).toHaveBeenCalledWith(expect.any(String), 'a', false);
+		expect(hooks.onsent).toHaveBeenCalledWith(expect.any(String), 'a', false, 'inbox');
 	});
 });
 
