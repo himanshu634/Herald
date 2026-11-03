@@ -71,6 +71,27 @@ describe('ReplyDesk.send', () => {
 		expect(desk.drafts.a.key).not.toBe(key);
 	});
 
+	it('spends the key when a reload finds the waited-on reply settled', async () => {
+		// The reply.status event path: the page reloads the list and the draft settles there.
+		const { desk } = make();
+		const key = desk.drafts.a.key;
+		api.reply.mockResolvedValue(reply({ status: 'sending', sent_at: null }));
+		await desk.send(email('a'), false);
+		await new Promise((r) => setTimeout(r));
+		expect(desk.drafts.a.key).toBe(key);
+
+		api.replies.mockResolvedValue([reply({ status: 'unknown', error: 'unknown', sent_at: null })]);
+		await desk.load(email('a'));
+
+		expect(desk.drafts.a.waiting).toBeNull();
+		expect(desk.drafts.a.last?.status).toBe('unknown');
+		// "Send again anyway" must really send: a new key, not the one that returns the row.
+		expect(desk.drafts.a.key).not.toBe(key);
+		api.reply.mockResolvedValue(reply());
+		await desk.send(email('a'), false);
+		expect(api.reply.mock.lastCall?.[2].client_key).not.toBe(key);
+	});
+
 	it('lets the owner discard a draft that waits on a sending reply', async () => {
 		const { desk } = make();
 		api.reply.mockResolvedValue(reply({ status: 'sending', sent_at: null }));

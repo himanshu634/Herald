@@ -125,18 +125,20 @@ export class ReplyDesk {
 			}
 			return;
 		}
-		// A settled answer spends the key. A new one is what lets "Send again anyway" really
-		// send after an unknown outcome: the old key would only return that row. A `sending`
-		// answer keeps it: only a POST with that key can expire the row if its process died.
-		if (spendsKey(reply)) draft.key = crypto.randomUUID();
 		this.#settle(email, reply);
 		// Only for the email in the panel: the owner may have moved on while the POST was out,
 		// and loading this one would put its replies under another customer's email.
 		if (this.#listFor === email.id) this.load(email);
 	}
 
+	/** Apply an outcome, from the POST's answer or from a reload that found it settled. */
 	#settle(email: Email, reply: Reply) {
 		const draft = this.drafts[email.id];
+		// A settled outcome spends the key, whichever path brought it. A new one is what lets
+		// "Send again anyway" really send after an unknown outcome: the old key would only
+		// return that row. A `sending` answer keeps it: only a POST with that key can expire
+		// the row if its process died.
+		if (draft && spendsKey(reply)) draft.key = crypto.randomUUID();
 		if (reply.status === 'sending') {
 			// Another request with this key is still out. Wait for its reply.status event.
 			if (draft) Object.assign(draft, { sending: false, waiting: reply.id });
