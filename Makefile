@@ -1,6 +1,9 @@
 # Herald monorepo tasks. Written for GNU Make 3.81 (macOS default): no .ONESHELL.
 SERVER := cd apps/server &&
 LITE := HERALD_DATABASE_URL=sqlite:///./herald-dev.db HERALD_BUS=memory HERALD_QUEUE=inline
+# The API and the arq worker must share one internal token. Dev only: a fixed fallback, so
+# make api and make worker agree without setup. Set HERALD_INTERNAL_TOKEN to use your own.
+DEV_TOKEN := HERALD_INTERNAL_TOKEN=$${HERALD_INTERNAL_TOKEN:-herald-dev-internal-token-not-secret}
 # Run from apps/server. Watch core too: the API imports it, so its edits need a reload.
 UVICORN := uv run uvicorn herald_server.api.main:app --port 8000 \
 	--reload --reload-dir src --reload-dir ../../packages/core/src
@@ -34,10 +37,10 @@ dev: ## Start Postgres and Redis (Docker), then the API, worker and web app toge
 	$(MAKE) -j3 api worker web
 
 api: ## Run the API on :8000 (needs make infra)
-	$(SERVER) HERALD_DEBUG=1 $(UVICORN)
+	$(SERVER) $(DEV_TOKEN) HERALD_DEBUG=1 $(UVICORN)
 
 worker: ## Run the pipeline worker (needs make infra)
-	$(SERVER) uv run arq herald_server.worker.main.WorkerSettings
+	$(SERVER) $(DEV_TOKEN) uv run arq herald_server.worker.main.WorkerSettings
 
 web: ## Run the web app on :5173 (proxies /api to :8000)
 	pnpm -C apps/web dev

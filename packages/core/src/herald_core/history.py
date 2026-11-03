@@ -39,6 +39,9 @@ class SenderHistory(BaseModel):
     count_30d: int
     top_topics: list[str]
     recent: list[PastEmail]
+    # When the current email arrived: the counts and `recent` are relative to it. decide needs
+    # it to tell which recent emails fall in the last 7 days. None in data saved before it.
+    as_of: datetime | None = None
 
 
 class ThreadIn(BaseModel):

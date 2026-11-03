@@ -4,14 +4,19 @@ The AI suggests (notes, rule verdicts); this function decides. Order, first matc
 
 1. Safety floor (from the AI or the word check) -> alert, always.
 2. Not for the business (see `not_for_business`) -> closed.
-3. The owner's rules; the most urgent result wins (alert > close).
+3. The owner's rules; the most urgent result wins (alert > close). A set-urgency rule never
+   lowers an urgent email.
 4. Urgent, or anger 5 -> alert.
-5. Anger 4 from an important contact, or about to cancel -> alert.
+5. Anger 4 from an important contact, about to cancel, or the third email about the same
+   thing this week (see `repeat_count`) -> alert.
 6. No notes, or the AI is unsure -> needs a look.
 7. Spam or not for me -> closed.
 8. Everything else -> inbox.
 """
 
+from datetime import timedelta
+
+from herald_core.history import History
 from herald_core.schema import (
     FLOOR_FLAGS,
     SPAM_TOPIC,
@@ -24,6 +29,8 @@ from herald_core.schema import (
     Urgency,
     WorkspaceConfig,
 )
+
+_URGENCY_ORDER = [Urgency.LOW, Urgency.NORMAL, Urgency.HIGH, Urgency.URGENT]
 
 
 def is_spam(topic: str) -> bool:
@@ -48,6 +55,39 @@ def not_for_business(notes: Notes | None, config: WorkspaceConfig, sender: str) 
     )
 
 
+REPEAT_WINDOW = timedelta(days=7)
+# This email plus two earlier ones: "a third email about the same thing".
+REPEAT_ALERT_AT = 3
+# Statuses that end a matter. A new email after the owner marked one done (or after clutter
+# was closed) starts a new matter, so those do not count as repeats. Status is a plain string
+# here: the server owns the status names.
+_RESOLVED = frozenset({"done", "closed"})
+
+
+def repeat_count(notes: Notes, history: History | None) -> int:
+    """How many emails, this one included, the sender sent about this topic in the last week.
+
+    Counted in code from Herald's own history, not judged by the AI: "about the same thing" is
+    the same topic, and only emails not yet done or closed count. Sender history holds at most
+    the 5 newest emails, which is enough to reach 3. With no `as_of` the window cannot be
+    placed, so nothing counts: an alert must not rest on a guess.
+    """
+    sender = history.sender if history else None
+    if sender is None or sender.as_of is None or is_spam(notes.topic):
+        return 1
+    since = sender.as_of - REPEAT_WINDOW
+    topic = notes.topic.strip().casefold()
+    earlier = [
+        past
+        for past in sender.recent
+        if past.received_at >= since
+        and past.status not in _RESOLVED
+        and past.topic is not None
+        and past.topic.strip().casefold() == topic
+    ]
+    return 1 + len(earlier)
+
+
 def decide(
     *,
     notes: Notes | None,
@@ -55,6 +95,7 @@ def decide(
     verdicts: list[RuleVerdict],
     config: WorkspaceConfig,
     sender: str,
+    history: History | None = None,
 ) -> Decision:
     ai_flags = set(notes.risk_flags) if notes else set()
     floor = sorted((ai_flags | word_flags) & FLOOR_FLAGS)
@@ -76,9 +117,13 @@ def decide(
     fired = [rules_by_id[v.rule_id] for v in verdicts if v.matched and v.rule_id in rules_by_id]
     fired_ids = [r.id for r in fired]
 
-    for rule in fired:
-        if rule.action is RuleAction.SET_URGENCY and rule.urgency is not None:
-            urgency = rule.urgency
+    # Set-urgency rules: the most urgent one wins, as with every rule. A rule may lower the
+    # AI's urgency for sorting, but never below "urgent": that would turn an alert into an
+    # inbox email (a "damaged -> high" rule burying a bag that broke at the airport). To quiet
+    # an urgent email the owner writes a close rule, which says so.
+    levels = [r.urgency for r in fired if r.action is RuleAction.SET_URGENCY and r.urgency]
+    if levels and urgency is not Urgency.URGENT:
+        urgency = max(levels, key=_URGENCY_ORDER.index)
 
     def route(to: Route, reason: str) -> Decision:
         return Decision(route=to, urgency=urgency, reason=reason, fired_rule_ids=fired_ids)
@@ -100,6 +145,8 @@ def decide(
         return route(Route.ALERT, "Angry important contact")
     if RiskFlag.ABOUT_TO_CANCEL in ai_flags:
         return route(Route.ALERT, "Customer about to cancel")
+    if repeat_count(notes, history) >= REPEAT_ALERT_AT:
+        return route(Route.ALERT, "Third email about the same thing this week")
 
     if not notes.sure:
         return route(Route.NEEDS_A_LOOK, "The AI is unsure")

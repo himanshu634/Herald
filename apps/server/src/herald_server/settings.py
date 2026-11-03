@@ -35,6 +35,12 @@ class Settings(BaseSettings):
 
     web_url: str = "http://localhost:5173"
 
+    # The worker's triage pipeline and its tools reach the database only through the API's
+    # internal routes (/internal/v1). The worker calls this base URL and sends this token.
+    # Required for the arq queue. The inline queue makes a random one per process.
+    internal_api_url: str = "http://localhost:8000"
+    internal_token: SecretStr | None = None
+
     # Fernet key that encrypts mailbox credentials and signs OAuth state.
     # Generate one with Fernet.generate_key() from the cryptography package.
     token_key: str | None = None

@@ -15,6 +15,8 @@ from asyncer import asyncify
 from redis.exceptions import LockNotOwnedError
 
 from herald_server.connectors.base import RateLimited
+from herald_server.internal.client import AgentApi, ApiUnavailable
+from herald_server.internal.token import internal_token
 from herald_server.logs import setup_logging
 from herald_server.mailboxes import active_mailbox_ids, renew_subscriptions
 from herald_server.pipeline import process_email
@@ -35,15 +37,23 @@ SYNC_LOOP_BUDGET = 120
 # Seconds. A pending flag nobody consumed (e.g. the job failed) expires; the catch-up sync
 # covers that mailbox meanwhile.
 SYNC_PENDING_TTL = 3600
+# Tries and seconds per try for a triage job whose API call failed safely (see ApiUnavailable).
+PROCESS_EMAIL_TRIES = 5
+API_RETRY_DEFER = 5
 
 
 async def startup(ctx: dict[str, Any]) -> None:
     # Here, not at import: the arq CLI sets up its own logging after it imports this module.
     setup_logging(settings.log_level)
     ctx["services"] = build_services(settings)
+    # The worker never makes up a token: one the API does not share would fail every email.
+    ctx["agent_api"] = AgentApi.connect(
+        settings.internal_api_url, internal_token(settings, allow_random=False)
+    )
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:
+    await ctx["agent_api"].close()
     services = ctx["services"]
     await services.bus.close()
     await services.http.aclose()
@@ -51,7 +61,13 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 
 async def process_email_job(ctx: dict[str, Any], email_id: str) -> str:
-    decision = await process_email(ctx["services"], email_id)
+    try:
+        decision = await process_email(ctx["agent_api"], ctx["services"].graph, email_id)
+    except ApiUnavailable as exc:
+        # The API is down or still starting (make dev starts it beside the worker), and
+        # nothing was saved. arq does not retry a plain error, so without this the email
+        # would stay "new" for good. Each try waits longer.
+        raise Retry(defer=API_RETRY_DEFER * ctx["job_try"]) from exc
     return decision.route
 
 
@@ -120,7 +136,7 @@ async def catch_up_syncs_job(ctx: dict[str, Any]) -> int:
 
 class WorkerSettings:
     functions = [
-        func(process_email_job, name=PROCESS_EMAIL_JOB),
+        func(process_email_job, name=PROCESS_EMAIL_JOB, max_tries=PROCESS_EMAIL_TRIES),
         # keep_result=0: the job returns nothing worth reading back, so store no result.
         func(sync_mailbox_job, name=SYNC_MAILBOX_JOB, keep_result=0, max_tries=5),
     ]

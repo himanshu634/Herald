@@ -136,6 +136,7 @@ class HistorySpec(BaseModel):
             s = self.sender
             sender = SenderHistory(
                 first_seen=ago(s.first_seen_days_ago),
+                as_of=now,
                 count_7d=s.count_7d,
                 count_30d=s.count_30d,
                 top_topics=s.top_topics,

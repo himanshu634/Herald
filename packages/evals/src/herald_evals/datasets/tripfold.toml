@@ -261,7 +261,7 @@ body = """
 Hi, following up again on order TF-19302. It's now 9 days and the tracking hasn't moved
 since it left the Delhi hub. Could someone please look into it?
 """
-note = "docs/product-scope.md alerts on 'a third email about the same thing'. decide does not count repeats yet, so this fails until it does."
+note = "docs/product-scope.md alerts on 'a third email about the same thing': two earlier open emails on this topic this week."
 [cases.expect]
 route = "alert"
 topic = "Orders and delivery"
@@ -293,6 +293,28 @@ days_ago = 4
 body = "Hi, could you tell me when TF-20555 will arrive? I'm travelling later this week."
 
 # ---------------------------------------------------------------- inbox
+
+[[cases]]
+id = "third-email-earlier-ones-resolved"
+tags = ["repeat_contact", "history"]
+sender = "kunal.desai@gmail.com"
+subject = "One more question about cabin bags"
+body = """
+Thanks for the help last week. One more: does the Aero 55 have a laptop sleeve inside?
+"""
+note = "Third email in a week on one topic, but the owner finished the earlier two: a new matter, not a chase."
+[cases.expect]
+route = "inbox"
+topic = "Product questions"
+[cases.history.sender]
+first_seen_days_ago = 6
+count_7d = 2
+count_30d = 2
+top_topics = ["Product questions"]
+recent = [
+  { days_ago = 3, subject = "Aero 55 weight?", topic = "Product questions", urgency = "low", status = "done", summary = "Asks the bag's weight." },
+  { days_ago = 6, subject = "Does Aero 55 fit IndiGo?", topic = "Product questions", urgency = "low", status = "done", summary = "Asks about cabin limits." },
+]
 
 [[cases]]
 id = "where-is-order"
@@ -591,9 +613,10 @@ tags = ["word_false_positive"]
 sender = "aarav.malik@gmail.com"
 subject = "Love it"
 body = "Honestly this duffel is the bomb. Fits everything for a week. Do you make it in olive?"
+note = "Praise plus a real product question, so normal urgency is as right as low."
 [cases.expect]
 route = "inbox"
-urgency = "low"
+urgency = ["low", "normal"]
 no_flags = ["safety"]
 
 # ---------------------------------------------------------------- closed
