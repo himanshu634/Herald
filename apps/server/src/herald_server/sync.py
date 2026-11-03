@@ -2,6 +2,7 @@
 
 import logging
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from asyncer import asyncify
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +17,12 @@ from herald_server.models import Email, Mailbox, MailboxStatus
 from herald_server.services import Services
 
 log = logging.getLogger(__name__)
+
+
+class SyncOutcome(NamedTuple):
+    email_ids: list[str]  # new emails, for the caller to triage
+    # The connector stopped at its per-fetch cap: sync again to read the rest.
+    has_more: bool
 
 
 def _store(
@@ -83,28 +90,29 @@ def _store(
         return ids, [to_bus(event) for event in events]
 
 
-async def sync_mailbox(services: Services, mailbox_id: str) -> list[str]:
-    """Fetch and store new mail. Returns the new email ids, for the caller to triage.
+async def sync_mailbox(services: Services, mailbox_id: str) -> SyncOutcome:
+    """Fetch and store one batch of new mail. Returns the new email ids and `has_more`.
 
+    The caller triages the emails, and syncs again while `has_more` is true.
     Raises `RateLimited` without moving the cursor, so the retry reads the same changes again.
     """
     mailbox = await asyncify(get_mailbox)(services, mailbox_id)
     if mailbox is None:
         log.info("sync skipped for mailbox %s: not found", mailbox_id)
-        return []
+        return SyncOutcome([], has_more=False)
     if mailbox.status != MailboxStatus.ACTIVE:
         log.info("sync skipped for mailbox %s: status is %s", mailbox_id, mailbox.status)
-        return []
+        return SyncOutcome([], has_more=False)
     if not mailbox.credentials_enc:
         log.info("sync skipped for mailbox %s: no credentials", mailbox_id)
-        return []
+        return SyncOutcome([], has_more=False)
     connector = services.connectors.get(mailbox.provider)
     if connector is None:
         log.info("sync skipped for mailbox %s: provider not configured", mailbox_id)
-        return []
+        return SyncOutcome([], has_more=False)
     if services.secrets is None:
         log.info("sync skipped for mailbox %s: token_key is not set", mailbox_id)
-        return []
+        return SyncOutcome([], has_more=False)
 
     # RateLimited is not caught: the cursor must stay where it is, or the changes the
     # provider refused to send now would be skipped for good. The caller retries later.
@@ -117,9 +125,9 @@ async def sync_mailbox(services: Services, mailbox_id: str) -> list[str]:
         # Log only the type and id: the exception may carry provider responses or tokens.
         log.warning("%s on mailbox %s", type(exc).__name__, mailbox_id)
         await mark_needs_reauth(services, mailbox_id)
-        return []
+        return SyncOutcome([], has_more=False)
 
     ids, events = await asyncify(_store)(services, mailbox_id, result)
     for event in events:
         await services.bus.publish(event)
-    return ids
+    return SyncOutcome(ids, has_more=result.has_more)

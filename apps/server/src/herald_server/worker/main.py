@@ -74,14 +74,19 @@ async def sync_mailbox_job(ctx: dict[str, Any], mailbox_id: str) -> None:
         deadline = monotonic() + SYNC_LOOP_BUDGET
         while monotonic() < deadline and await redis.getdel(pending_key):
             try:
-                email_ids = await sync_mailbox(ctx["services"], mailbox_id)
+                outcome = await sync_mailbox(ctx["services"], mailbox_id)
             except RateLimited as exc:
                 # The cursor did not move, so the retry reads the same changes again; the
                 # retried job sets the flag again. At least 5 s: a Retry-After of 0 would
                 # burn every try at once.
                 raise Retry(defer=max(exc.retry_after, 5)) from exc
-            for email_id in email_ids:
+            for email_id in outcome.email_ids:
                 await redis.enqueue_job(PROCESS_EMAIL_JOB, email_id)
+            if outcome.has_more:
+                # The connector stopped at its per-fetch cap; the cursor moved past this
+                # batch. Setting the flag runs the loop again, within the same budget and
+                # hand-off as a push, so one long gap never runs into the job timeout.
+                await redis.set(pending_key, 1, ex=SYNC_PENDING_TTL)
     finally:
         # A sync that ran past the lock timeout no longer owns the lock (it expired, and
         # another sync may hold it now). Nothing is left to release; failing here would

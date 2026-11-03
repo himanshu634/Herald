@@ -13,6 +13,7 @@ from test_sync import add_mailbox, demo_workspace, message
 from herald_server.connectors.base import RateLimited
 from herald_server.models import Mailbox
 from herald_server.queue import PROCESS_EMAIL_JOB, SYNC_MAILBOX_JOB
+from herald_server.sync import SyncOutcome
 from herald_server.worker import main as worker_main
 from herald_server.worker.main import catch_up_syncs_job, sync_mailbox_job
 
@@ -103,12 +104,12 @@ async def test_push_during_sync_runs_again_in_same_job(app, client, monkeypatch)
     ctx = ctx_for(app)
     calls: list[str] = []
 
-    async def fake_sync(services, synced_id: str) -> list[str]:
+    async def fake_sync(services, synced_id: str) -> SyncOutcome:
         calls.append(synced_id)
         if len(calls) == 1:
             # A push lands while this sync runs: its job finds the lock busy and sets the flag.
             await ctx["redis"].set(pending_key(mailbox_id), 1, ex=3600)
-        return [f"email-{len(calls)}"]
+        return SyncOutcome([f"email-{len(calls)}"], has_more=False)
 
     monkeypatch.setattr(worker_main, "sync_mailbox", fake_sync)
 
@@ -126,8 +127,8 @@ async def test_push_after_release_enqueues_fresh_sync(app, client, monkeypatch):
     mailbox_id = add_mailbox(app, await demo_workspace(client))
     ctx = ctx_for(app)
 
-    async def fake_sync(services, synced_id: str) -> list[str]:
-        return []
+    async def fake_sync(services, synced_id: str) -> SyncOutcome:
+        return SyncOutcome([], has_more=False)
 
     async def push_arrives() -> None:
         # After the last GETDEL, before the release: the push's job saw the lock busy.
@@ -148,11 +149,11 @@ async def test_busy_mailbox_stops_after_budget_and_hands_off(app, client, monkey
     calls: list[str] = []
     clock = itertools.count(0, 50)
 
-    async def fake_sync(services, synced_id: str) -> list[str]:
+    async def fake_sync(services, synced_id: str) -> SyncOutcome:
         # A push lands during every sync, so the flag is never clear.
         calls.append(synced_id)
         await ctx["redis"].set(pending_key(mailbox_id), 1, ex=3600)
-        return []
+        return SyncOutcome([], has_more=False)
 
     monkeypatch.setattr(worker_main, "sync_mailbox", fake_sync)
     monkeypatch.setattr(worker_main, "monotonic", lambda: next(clock))
@@ -162,6 +163,35 @@ async def test_busy_mailbox_stops_after_budget_and_hands_off(app, client, monkey
     # Budget 120 s, clock +50 s per read: syncs start at 50 s and 100 s, none at 150 s.
     assert len(calls) == 2
     assert ctx["redis"].enqueued == [(SYNC_MAILBOX_JOB, (mailbox_id,), {})]
+    assert ctx["redis"].held == set()
+
+
+async def test_has_more_syncs_again_in_same_job(app, client, fake_connector):
+    mailbox_id = add_mailbox(app, await demo_workspace(client))
+    fake_connector.batches = [[message("m1")], [message("m2")], [message("m3")]]
+    ctx = ctx_for(app)
+
+    await sync_mailbox_job(ctx, mailbox_id)
+
+    # No push came in between: has_more alone set the flag again for the next batch.
+    assert fake_connector.calls.count("fetch_changes") == 3
+    assert [f for f, _, _ in ctx["redis"].enqueued] == [PROCESS_EMAIL_JOB] * 3
+    assert ctx["redis"].values == {}
+    assert ctx["redis"].held == set()
+
+
+async def test_has_more_past_the_budget_hands_off(app, client, fake_connector, monkeypatch):
+    mailbox_id = add_mailbox(app, await demo_workspace(client))
+    fake_connector.batches = [[message("m1")], [message("m2")], [message("m3")]]
+    ctx = ctx_for(app)
+    clock = itertools.count(0, 100)
+    monkeypatch.setattr(worker_main, "monotonic", lambda: next(clock))
+
+    await sync_mailbox_job(ctx, mailbox_id)
+
+    # Budget 120 s, clock +100 s per read: one sync, then a fresh job for the rest.
+    assert fake_connector.calls.count("fetch_changes") == 1
+    assert ctx["redis"].enqueued[-1] == (SYNC_MAILBOX_JOB, (mailbox_id,), {})
     assert ctx["redis"].held == set()
 
 

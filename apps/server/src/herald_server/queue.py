@@ -66,16 +66,24 @@ class InlineQueue:
         # race to store the same batch. A second request waits, then reads from the new cursor.
         lock = self._sync_locks.setdefault(mailbox_id, asyncio.Lock())
         async with lock:
-            try:
-                email_ids = await sync_mailbox(self._services, mailbox_id)
-            except Exception as exc:
-                # Inline has no retry (arq retries in the worker), so log and stop. The cursor
-                # did not move, so the next push or catch-up sync reads these changes again.
-                # Only the type name: str() of an HTTP error can carry provider responses.
-                log.warning("%s on sync of mailbox %s", type(exc).__name__, mailbox_id)
-                return
-        for email_id in email_ids:
-            await self.enqueue_email(email_id)
+            # has_more: the connector stopped at its per-fetch cap after storing a batch and
+            # moving the cursor, so fetch again until the gap is read. Each batch moves the
+            # cursor forward, so the loop ends.
+            while True:
+                try:
+                    outcome = await sync_mailbox(self._services, mailbox_id)
+                except Exception as exc:
+                    # Inline has no retry (arq retries in the worker), so log and stop. The
+                    # cursor did not move, so the next push or catch-up sync reads these
+                    # changes again. Only the type name: str() of an HTTP error can carry
+                    # provider responses.
+                    log.warning("%s on sync of mailbox %s", type(exc).__name__, mailbox_id)
+                    return
+                # Queued per batch, so a failure on a later batch keeps the earlier ones triaged.
+                for email_id in outcome.email_ids:
+                    await self.enqueue_email(email_id)
+                if not outcome.has_more:
+                    return
 
     async def drain(self) -> None:
         """Wait for queued syncs and emails to finish (tests)."""

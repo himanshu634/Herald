@@ -20,6 +20,8 @@ class FakeConnector:
 
     def __init__(self) -> None:
         self.queue: list[InboundMessage] = []
+        # When set, each fetch returns the next batch, with has_more while batches remain.
+        self.batches: list[list[InboundMessage]] = []
         self.raise_on_fetch: Exception | None = None
         self.raise_on_authorize: Exception | None = None
         self.raise_on_subscribe: Exception | None = None
@@ -54,8 +56,12 @@ class FakeConnector:
         self.calls.append("fetch_changes")
         if self.raise_on_fetch is not None:
             raise self.raise_on_fetch
+        next_cursor = str(int(cursor or 0) + 1)
+        if self.batches:
+            batch = self.batches.pop(0)
+            return FetchResult(messages=batch, cursor=next_cursor, has_more=bool(self.batches))
         messages, self.queue = self.queue, []
-        return FetchResult(messages=messages, cursor=str(int(cursor or 0) + 1))
+        return FetchResult(messages=messages, cursor=next_cursor)
 
     async def revoke(self, credentials: dict[str, str]) -> None:
         self.calls.append("revoke")

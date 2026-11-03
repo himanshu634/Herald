@@ -130,7 +130,7 @@ async def test_auth_revoked_does_not_override_a_disconnect(app, client, fake_con
 
     fake_connector.fetch_changes = disconnect_then_revoke
 
-    assert await sync_mailbox(app.state.services, mailbox_id) == []
+    assert (await sync_mailbox(app.state.services, mailbox_id)).email_ids == []
 
     assert load_mailbox(app, mailbox_id).status == MailboxStatus.DISCONNECTED
     assert status_events(app, workspace_id) == []
@@ -141,7 +141,7 @@ async def test_undecryptable_credentials_mark_needs_reauth(app, client, fake_con
     other_key = SecretBox(Fernet.generate_key().decode())
     mailbox_id = add_mailbox(app, workspace_id, credentials_enc=other_key.seal({"token": "t"}))
 
-    assert await sync_mailbox(app.state.services, mailbox_id) == []
+    assert (await sync_mailbox(app.state.services, mailbox_id)).email_ids == []
 
     assert "fetch_changes" not in fake_connector.calls
     assert load_mailbox(app, mailbox_id).status == MailboxStatus.NEEDS_REAUTH
@@ -207,3 +207,27 @@ async def test_repeat_inside_one_batch_is_stored_once(app, client, fake_connecto
 
     assert len(emails_of(app, mailbox_id)) == 1
     assert load_mailbox(app, mailbox_id).cursor == "1"
+
+
+async def test_sync_reports_has_more(app, client, fake_connector):
+    mailbox_id = add_mailbox(app, await demo_workspace(client))
+    fake_connector.batches = [[message("m1")], [message("m2")]]
+
+    outcome = await sync_mailbox(app.state.services, mailbox_id)
+
+    assert len(outcome.email_ids) == 1
+    assert outcome.has_more is True
+    assert load_mailbox(app, mailbox_id).cursor == "1"
+
+
+async def test_inline_sync_fetches_again_while_has_more(app, client, fake_connector):
+    mailbox_id = add_mailbox(app, await demo_workspace(client))
+    fake_connector.batches = [[message("m1")], [message("m2")], [message("m3")]]
+
+    await sync(app, mailbox_id)
+
+    assert fake_connector.calls.count("fetch_changes") == 3
+    emails = emails_of(app, mailbox_id)
+    assert sorted(e.provider_message_id for e in emails) == ["m1", "m2", "m3"]
+    assert all(e.status != EmailStatus.NEW for e in emails)
+    assert load_mailbox(app, mailbox_id).cursor == "3"
