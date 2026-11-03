@@ -38,7 +38,14 @@ export const REPLY_COPY = {
 	refused: 'Herald couldn’t send this reply. Your draft is kept.',
 	// The draft's key went out and no answer settled it. An edit now could be dropped: the
 	// next press may only return the reply that was saved with the old words.
-	locked: 'Herald is checking whether this was sent. You can edit it once that’s settled.'
+	locked: {
+		// The server named a reply that is still sending; its reply.status event settles it.
+		checking: 'Herald is checking whether this was sent. You can edit it once that’s settled.',
+		// No answer or a 5xx: nothing is watching this key. Only the owner's next Send asks the
+		// server about it. After a reload this is the only line left, as `no_answer` isn't saved.
+		unheard:
+			'Herald didn’t hear back about this reply. Press Send again to find out whether it went; you can edit it once that’s settled.'
+	}
 } as const;
 
 /**
@@ -113,8 +120,13 @@ export function replyNotice(reply: Reply): string {
 	}
 }
 
-export function sentToast(to: string, done: boolean): string {
-	return REPLY_COPY.toast(to, done);
+/**
+ * The toast for a sent reply, from the email as the refreshed list has it. Not from the
+ * button pressed: a press that reuses an earlier key gets that earlier send's row back, and
+ * the server applies only that send's mark_done. Unknown (the refresh failed) says only "Sent".
+ */
+export function sentToast(to: string, email: Pick<Email, 'status'> | undefined): string {
+	return REPLY_COPY.toast(to, email?.status === 'done');
 }
 
 /**

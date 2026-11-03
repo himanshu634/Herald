@@ -7,7 +7,8 @@ vi.mock('#lib/api/client.js', async (actual) => ({
 	api
 }));
 
-const { ReplyDesk, locked } = await import('./replies.svelte');
+const { ReplyDesk, lockHint, locked } = await import('./replies.svelte');
+const { REPLY_COPY } = await import('./reply');
 
 const email = (id: string) => ({ id, workspace_id: 'w1' }) as Email;
 
@@ -148,11 +149,8 @@ describe('ReplyDesk.send', () => {
 
 		await desk.send(email('a'), true);
 
-		expect(hooks.onsent).toHaveBeenCalledWith(
-			'Sent to arjun@outlook.com and marked done',
-			'a',
-			false
-		);
+		// The toast is the page's: it reads the email's status once the list refreshes.
+		expect(hooks.onsent).toHaveBeenCalledWith('arjun@outlook.com', 'a', false);
 		expect(desk.drafts.a).toBeUndefined();
 		expect(desk.composingId).toBeNull();
 	});
@@ -333,5 +331,163 @@ describe('ReplyDesk saving drafts across a page load', () => {
 		expect(desk.drafts.a.body).toBe('Hi');
 		await desk.send(email('a'), false);
 		expect(hooks.onsent).toHaveBeenCalled();
+	});
+});
+
+describe('lockHint', () => {
+	it('says Herald is checking while the draft waits on a sending reply', async () => {
+		const { desk } = make();
+		api.reply.mockResolvedValue(reply({ status: 'sending', sent_at: null }));
+
+		await desk.send(email('a'), false);
+
+		expect(lockHint(desk.drafts.a)).toBe(REPLY_COPY.locked.checking);
+	});
+
+	it('asks for another Send after no answer or a 5xx: nothing is checking', async () => {
+		for (const error of [new TypeError('Failed to fetch'), new ApiError(502, 'Bad Gateway')]) {
+			const { desk } = make();
+			api.reply.mockRejectedValueOnce(error);
+
+			await desk.send(email('a'), false);
+
+			expect(lockHint(desk.drafts.a)).toBe(REPLY_COPY.locked.unheard);
+		}
+	});
+
+	it('asks for another Send for a held draft restored from storage', () => {
+		const store = fakeStore();
+		const draft = { body: 'Hi', key: 'k-12345678', held: true, waiting: null, last: null };
+		store.setItem('herald:drafts:w1', JSON.stringify({ a: draft }));
+		const desk = new ReplyDesk({ onsent: vi.fn(), onmailbox: vi.fn(), onerror: vi.fn() }, store);
+
+		desk.restore('w1');
+
+		expect(lockHint(desk.drafts.a)).toBe(REPLY_COPY.locked.unheard);
+	});
+
+	it('gives no hint for a draft the owner can edit', () => {
+		const { desk } = make();
+
+		expect(lockHint(desk.drafts.a)).toBeNull();
+	});
+
+	it('words the two hints as the brief does', () => {
+		expect(REPLY_COPY.locked.checking).toBe(
+			'Herald is checking whether this was sent. You can edit it once that’s settled.'
+		);
+		expect(REPLY_COPY.locked.unheard).toBe(
+			'Herald didn’t hear back about this reply. Press Send again to find out whether it went; you can edit it once that’s settled.'
+		);
+	});
+});
+
+describe('ReplyDesk reopening the composer after Reconnect', () => {
+	const ok = () => 'ok' as const;
+	const fresh = (store: ReturnType<typeof fakeStore> | null) =>
+		new ReplyDesk({ onsent: vi.fn(), onmailbox: vi.fn(), onerror: vi.fn() }, store);
+
+	it('reopens the email whose composer started the connect', () => {
+		const { desk, store } = make();
+		desk.keepComposing('w1');
+
+		// The page went to Google and back: a new desk over the same storage.
+		const after = fresh(store);
+		after.restore('w1');
+		const reopened = after.reopen('w1', [email('b'), email('a')], ok);
+
+		expect(reopened?.id).toBe('a');
+		expect(after.composingId).toBe('a');
+		expect(after.drafts.a.body).toBe('Hi');
+	});
+
+	it('leaves it closed when the email is not loaded', () => {
+		const { desk, store } = make();
+		desk.keepComposing('w1');
+
+		const after = fresh(store);
+		after.restore('w1');
+
+		expect(after.reopen('w1', [email('b')], ok)).toBeNull();
+		expect(after.composingId).toBeNull();
+	});
+
+	it('leaves it closed when the email cannot be replied to', () => {
+		const { desk, store } = make();
+		desk.keepComposing('w1');
+
+		const after = fresh(store);
+		after.restore('w1');
+
+		expect(after.reopen('w1', [email('a')], () => 'reconnect')).toBeNull();
+		expect(after.composingId).toBeNull();
+	});
+
+	it('forgets the id once used, so a later reload does not reopen it', () => {
+		for (const emails of [[email('a')], []]) {
+			const { desk, store } = make();
+			desk.keepComposing('w1');
+
+			fresh(store).reopen('w1', emails, ok);
+
+			expect(store!.items.has('herald:composing:w1')).toBe(false);
+			expect(fresh(store).reopen('w1', [email('a')], ok)).toBeNull();
+		}
+	});
+
+	it('forgets the id when the connect did not start', () => {
+		const { desk, store } = make();
+		desk.keepComposing('w1');
+
+		desk.forgetComposing('w1');
+
+		expect(store!.items.has('herald:composing:w1')).toBe(false);
+	});
+
+	it('keeps the id per workspace', () => {
+		const { desk, store } = make();
+		desk.keepComposing('w1');
+
+		expect(fresh(store).reopen('w2', [email('a')], ok)).toBeNull();
+		expect(store!.items.has('herald:composing:w1')).toBe(true);
+	});
+
+	it('saves nothing when no composer is open', () => {
+		const { desk, store } = make();
+		desk.close();
+
+		desk.keepComposing('w1');
+
+		expect(store!.items.has('herald:composing:w1')).toBe(false);
+	});
+
+	it('keeps drafts apart from the saved id', () => {
+		const { desk, store } = make();
+		desk.keepComposing('w1');
+
+		desk.discard(email('a'));
+
+		expect(store!.items.has('herald:drafts:w1')).toBe(false);
+		expect(store!.items.get('herald:composing:w1')).toBe('a');
+	});
+
+	it('works on when storage throws', () => {
+		const broken = {
+			getItem: () => {
+				throw new Error('SecurityError');
+			},
+			setItem: () => {
+				throw new Error('QuotaExceededError');
+			},
+			removeItem: () => {
+				throw new Error('SecurityError');
+			}
+		};
+		const desk = new ReplyDesk({ onsent: vi.fn(), onmailbox: vi.fn(), onerror: vi.fn() }, broken);
+		desk.open(email('a'));
+
+		expect(() => desk.keepComposing('w1')).not.toThrow();
+		expect(() => desk.forgetComposing('w1')).not.toThrow();
+		expect(desk.reopen('w1', [email('a')], ok)).toBeNull();
 	});
 });

@@ -21,7 +21,7 @@
 		body = $bindable(),
 		sending,
 		waiting,
-		locked,
+		lockHint,
 		last,
 		problem,
 		connecting,
@@ -39,8 +39,11 @@
 		sending: boolean;
 		/** The server said the reply is still sending. Shown, but the buttons stay on. */
 		waiting: boolean;
-		/** The draft's key is unsettled: the body can't change, but Send and Discard can run. */
-		locked: boolean;
+		/**
+		 * The line saying why the body can't change while the draft's key is unsettled, or
+		 * null when it can. Send and Discard still run while it is locked.
+		 */
+		lockHint: string | null;
 		/** The last outcome that kept the draft here: not sent, or not confirmed. */
 		last: Reply | null;
 		/** A send that saved no reply: refused, or no answer. */
@@ -110,14 +113,14 @@
 			id="reply-body"
 			bind:value={body}
 			{@attach focus}
-			readonly={sending || locked}
-			aria-describedby={locked && !sending ? 'reply-locked' : undefined}
+			readonly={sending || lockHint !== null}
+			aria-describedby={lockHint && !sending ? 'reply-locked' : undefined}
 			maxlength={20000}
 			rows="9"
 			class="field-sizing-content min-h-48 flex-1 resize-none rounded-sm border border-control bg-surface px-2.5 py-2 text-md leading-snug focus:border-ink"
 		></textarea>
-		{#if locked && !sending}
-			<p id="reply-locked" class="text-xs text-muted">{REPLY_COPY.locked}</p>
+		{#if lockHint && !sending}
+			<p id="reply-locked" class="text-xs text-muted">{lockHint}</p>
 		{/if}
 		{#if from}
 			<p class="text-xs text-muted">

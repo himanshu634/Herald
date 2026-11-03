@@ -17,8 +17,8 @@
 	import QuestionDialog from '#lib/inbox/QuestionDialog.svelte';
 	import QuestionStrip from '#lib/inbox/QuestionStrip.svelte';
 	import ReplyBox from '#lib/inbox/ReplyBox.svelte';
-	import { ReplyDesk, locked } from '#lib/inbox/replies.svelte.js';
-	import { replyMailbox, replyState } from '#lib/inbox/reply.js';
+	import { ReplyDesk, lockHint } from '#lib/inbox/replies.svelte.js';
+	import { replyMailbox, replyState, sentToast } from '#lib/inbox/reply.js';
 	import ConnectGmail from '#lib/mailbox/ConnectGmail.svelte';
 	import MailboxMenu from '#lib/mailbox/MailboxMenu.svelte';
 	import { liveMailboxes, needsMailbox, readReturn, type Notice } from '#lib/mailbox/mailbox.js';
@@ -51,6 +51,8 @@
 
 	let workspaces = $state.raw<Workspace[]>([]);
 	let emails = $state.raw<Email[]>([]);
+	// The workspace `emails` belongs to: the last business's list stays until the new one loads.
+	let emailsFor = $state<string | null>(null);
 	let loaded = $state(false);
 	let error = $state<string | null>(null);
 	let toast = $state<string | null>(null);
@@ -98,7 +100,8 @@
 	// Closes by itself once the email stops asking, say after On it from another tab.
 	const asking = $derived(questions.find((e) => e.id === askingId) ?? null);
 	// The email the owner just replied to stays open, even once "Send and mark done" drops it
-	// from the view, so its "Your replies" shows. J/K, a row click or a tab lets it go.
+	// from the view, so its "Your replies" shows. So does one whose composer came back from
+	// Reconnect. J/K, a row click or a tab lets it go.
 	let pinnedId = $state<string | null>(null);
 	const pinned = $derived(emails.find((e) => e.id === pinnedId) ?? null);
 	// Keep the owner's choice while it is in view; otherwise open the top email.
@@ -107,12 +110,17 @@
 	);
 
 	const replies = new ReplyDesk({
-		onsent: (message, emailId, shown) => {
-			toast = message;
+		onsent: async (to, emailId, shown) => {
 			// Only if the panel still shows it: the owner may have moved on while the POST
 			// was out, and pinning would pull the panel back to the answered email.
 			if (shown) pinnedId = emailId;
-			if (workspaceId) refresh(workspaceId);
+			// "And marked done" only once the refreshed list says so, never from the button:
+			// a press under an earlier key gets that send's row and its mark_done, not this one's.
+			const list = workspaceId ? await refresh(workspaceId) : null;
+			toast = sentToast(
+				to,
+				list?.find((e) => e.id === emailId)
+			);
 		},
 		onmailbox: () => workspaceId && refreshMailboxes(workspaceId),
 		onerror: fail
@@ -182,6 +190,19 @@
 		};
 	});
 
+	// Back from Google after the composer's Reconnect: open that composer again. Only once
+	// both lists are this business's, or the email would look missing and the id be spent.
+	$effect(() => {
+		if (!workspaceId || emailsFor !== workspaceId || mailboxesFor !== workspaceId) return;
+		const id = workspaceId;
+		// Untracked: reopen writes the drafts and the composer, and reads both lists.
+		const email = untrack(() => replies.reopen(id, emails, (e) => replyState(e, mailboxes)));
+		if (email) {
+			pinnedId = email.id;
+			params.email = email.id;
+		}
+	});
+
 	// The panel's replies load when another email opens, not on every refresh of the list.
 	$effect(() => {
 		if (!currentId) return;
@@ -201,11 +222,15 @@
 		loaded = true;
 	}
 
-	async function refresh(id: string) {
+	/** Load the business's emails. Returns them, or null when the load failed. */
+	async function refresh(id: string): Promise<Email[] | null> {
 		try {
 			emails = await api.listEmails(id);
+			emailsFor = id;
+			return emails;
 		} catch (e) {
 			fail(e);
+			return null;
 		}
 	}
 
@@ -218,17 +243,30 @@
 		}
 	}
 
-	async function connectGmail() {
-		if (!workspaceId || connecting) return;
+	/** Start the connect. Returns whether the page is leaving for Google. */
+	async function connectGmail(): Promise<boolean> {
+		if (!workspaceId || connecting) return false;
 		connecting = true;
 		try {
 			const { authorization_url } = await api.startConnect(workspaceId, 'gmail');
 			// A full page redirect: Google sends the browser back to / with the outcome on the URL.
 			window.location.assign(authorization_url);
+			return true;
 		} catch (e) {
 			connecting = false;
 			fail(e);
+			return false;
 		}
+	}
+
+	// The composer's Reconnect, the only one that brings the composer back: the drafts are
+	// saved, but without this the owner would land on the list and think theirs was gone.
+	async function reconnectFromComposer() {
+		const id = workspaceId;
+		if (!id || connecting) return;
+		// Saved before the request: once it answers, the page may already be leaving.
+		replies.keepComposing(id);
+		if (!(await connectGmail())) replies.forgetComposing(id);
 	}
 
 	async function mailboxAct(
@@ -492,14 +530,14 @@
 							}
 							sending={draft.sending}
 							waiting={!!draft.waiting}
-							locked={locked(draft)}
+							lockHint={lockHint(draft)}
 							last={draft.last}
 							problem={draft.problem}
 							{connecting}
 							onsend={(markDone) => composing && replies.send(composing, markDone)}
 							onclose={() => replies.close()}
 							ondiscard={() => composing && replies.discard(composing)}
-							onreconnect={connectGmail}
+							onreconnect={reconnectFromComposer}
 						/>
 					{:else}
 						{#if questions.length}

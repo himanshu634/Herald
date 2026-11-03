@@ -1,7 +1,7 @@
 // The inbox's reply wiring: one draft per email, the composer that is open, sending, and the
 // open email's replies. Kept out of +page.svelte so the page only connects it to the screen.
 import { api, type Email, type Reply } from '#lib/api/client.js';
-import { failedCopy, keepsKey, sentToast, spendsKey } from './reply';
+import { REPLY_COPY, failedCopy, keepsKey, spendsKey, type ReplyState } from './reply';
 
 export interface Draft {
 	body: string;
@@ -12,8 +12,6 @@ export interface Draft {
 	key: string;
 	/** A POST is out. The buttons and Discard wait for it. */
 	sending: boolean;
-	/** The button the owner pressed last, for the toast. */
-	markDone: boolean;
 	/** The last outcome that kept the draft: not sent, or not confirmed. */
 	last: Reply | null;
 	/** A send that saved no reply we know of: refused, or no answer. */
@@ -40,12 +38,21 @@ export function locked(draft: Draft): boolean {
 	return draft.held || draft.waiting !== null;
 }
 
+/**
+ * The line under a locked body, or null when it can change. Waiting on a known reply, its
+ * event settles the draft. Held with no reply to wait on (no answer, a 5xx), nothing does:
+ * only the owner's next Send gets the server's answer for the key.
+ */
+export function lockHint(draft: Draft): string | null {
+	if (draft.waiting !== null) return REPLY_COPY.locked.checking;
+	return draft.held ? REPLY_COPY.locked.unheard : null;
+}
+
 function newDraft(): Draft {
 	return {
 		body: '',
 		key: crypto.randomUUID(),
 		sending: false,
-		markDone: false,
 		last: null,
 		problem: null,
 		waiting: null,
@@ -67,6 +74,8 @@ function sessionStore(): DraftStore | null {
 }
 
 const storeKey = (workspaceId: string) => `herald:drafts:${workspaceId}`;
+// Its own key, not an entry in the drafts map: the map's entries must all be drafts.
+const composingKey = (workspaceId: string) => `herald:composing:${workspaceId}`;
 
 // Stored data may come from an older build or be edited by hand: anything that is not a
 // draft is dropped. The key must survive with the body, or the restored draft would lose its
@@ -87,10 +96,10 @@ function parseSaved(value: unknown): Saved | null {
 
 export interface ReplyHooks {
 	/**
-	 * A reply to this email was sent: show this toast and refresh the emails. `shown` is
+	 * A reply to this email was sent to `to`: refresh the emails and say so. `shown` is
 	 * whether the panel still shows that email; the owner may have moved on meanwhile.
 	 */
-	onsent: (toast: string, emailId: string, shown: boolean) => void;
+	onsent: (to: string, emailId: string, shown: boolean) => void;
 	/** The mailbox may have changed (refused, or Gmail took access away): refresh it. */
 	onmailbox: () => void;
 	onerror: (error: unknown) => void;
@@ -136,6 +145,52 @@ export class ReplyDesk {
 		this.composingId = null;
 	}
 
+	/**
+	 * The composer's Reconnect is leaving for Google: remember which email it was open for, so
+	 * the page can open it again on the way back. Only the drafts survive the trip otherwise.
+	 */
+	keepComposing(workspaceId: string) {
+		if (!this.composingId) return;
+		try {
+			this.#store?.setItem(composingKey(workspaceId), this.composingId);
+		} catch {
+			// The draft is still saved; the owner only has to open it again.
+		}
+	}
+
+	/** The connect never left the page: a later reload must not open the composer. */
+	forgetComposing(workspaceId: string) {
+		try {
+			this.#store?.removeItem(composingKey(workspaceId));
+		} catch {
+			// Nothing to clear when storage is blocked.
+		}
+	}
+
+	/**
+	 * Open the composer that Reconnect left, and return its email. Call it once the
+	 * workspace's emails and mailboxes are in: before that the email looks missing. The id is
+	 * read once and cleared whatever happens, so a later reload doesn't open it again. An email
+	 * gone from the list, or one that can't be replied to now (say Gmail still can't send),
+	 * stays closed; its draft waits for the owner's Reply.
+	 */
+	reopen(workspaceId: string, emails: Email[], stateOf: (email: Email) => ReplyState) {
+		let id: string | null = null;
+		try {
+			id = this.#store?.getItem(composingKey(workspaceId)) ?? null;
+		} catch {
+			return null;
+		}
+		this.forgetComposing(workspaceId);
+		const email = emails.find((e) => e.id === id);
+		if (!email || stateOf(email) !== 'ok') return null;
+		// The saved draft first, whichever runs first on the page: `open` would otherwise make
+		// an empty draft that `restore` then keeps, since drafts in memory win.
+		this.restore(workspaceId);
+		this.open(email);
+		return email;
+	}
+
 	discard(email: Email) {
 		if (this.drafts[email.id]?.sending) return;
 		delete this.drafts[email.id];
@@ -177,7 +232,6 @@ export class ReplyDesk {
 		const draft = this.drafts[email.id];
 		if (!draft || draft.sending || !draft.body.trim()) return;
 		draft.sending = true;
-		draft.markDone = markDone;
 		draft.problem = null;
 		// Saved before the POST: if the page goes away while it is out, the restored draft
 		// must still know the key may have been used.
@@ -224,13 +278,12 @@ export class ReplyDesk {
 			return;
 		}
 		if (reply.status === 'sent') {
-			const done = draft?.markDone ?? false;
 			delete this.drafts[email.id];
 			this.#save(email);
 			// Read before the composer closes: the page then falls back to another email.
 			const shown = this.#listFor === email.id;
 			if (this.composingId === email.id) this.composingId = null;
-			this.#hooks.onsent(sentToast(reply.to_address, done), email.id, shown);
+			this.#hooks.onsent(reply.to_address, email.id, shown);
 			return;
 		}
 		// Not sent, or not confirmed: the draft stays in the box with the outcome under it.
