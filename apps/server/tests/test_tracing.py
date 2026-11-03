@@ -27,10 +27,12 @@ class StubClient:
     With raise_all=True every method raises, to prove a Langfuse failure never reaches triage.
     """
 
-    def __init__(self, raise_all: bool = False) -> None:
+    def __init__(self, raise_all: bool = False, exit_raises: bool = False) -> None:
         self.raise_all = raise_all
+        # Spans open fine but raise when they close.
+        self.exit_raises = exit_raises
         self.spans: list[str] = []
-        self.scores: list[tuple[str, str, str | bool]] = []
+        self.scores: list[tuple[str, str, object, str]] = []
         self.trace_id = "t1"
 
     def _maybe_raise(self) -> None:
@@ -42,6 +44,8 @@ class StubClient:
         self._maybe_raise()
         self.spans.append(name)
         yield object()
+        if self.exit_raises:
+            raise RuntimeError("span close failed")
 
     def get_current_trace_id(self) -> str:
         self._maybe_raise()
@@ -49,7 +53,7 @@ class StubClient:
 
     def create_score(self, *, name, value, trace_id, data_type) -> None:
         self._maybe_raise()
-        self.scores.append((trace_id, name, value))
+        self.scores.append((trace_id, name, value, data_type))
 
 
 propagated: list[dict] = []
@@ -139,11 +143,13 @@ def test_outcome_scores():
     )
     record_outcome(tracing, Run("t1", []), decision, notes=None)
     assert client.scores == [
-        ("t1", "route", "alert"),
-        ("t1", "floor", True),
-        ("t1", "unsure", False),
-        ("t1", "ai_failed", True),
+        ("t1", "route", "alert", "CATEGORICAL"),
+        ("t1", "floor", 1, "BOOLEAN"),
+        ("t1", "unsure", 0, "BOOLEAN"),
+        ("t1", "ai_failed", 1, "BOOLEAN"),
     ]
+    # True == 1 in Python, so also pin the type: Langfuse wants a number for BOOLEAN.
+    assert all(type(s[2]) is int for s in client.scores[1:])
 
 
 def test_outcome_scores_with_unsure_notes():
@@ -152,10 +158,10 @@ def test_outcome_scores_with_unsure_notes():
     decision = Decision(route=Route.NEEDS_A_LOOK, urgency=None, reason="unsure")
     notes = Notes(topic="x", urgency="low", anger=1, summary="s", sure=False, question="q?")
     record_outcome(tracing, Run("t1", []), decision, notes)
-    assert client.scores[1:] == [
-        ("t1", "floor", False),
-        ("t1", "unsure", True),
-        ("t1", "ai_failed", False),
+    assert [s[:3] for s in client.scores[1:]] == [
+        ("t1", "floor", 0),
+        ("t1", "unsure", 1),
+        ("t1", "ai_failed", 0),
     ]
 
 
@@ -200,3 +206,35 @@ def test_no_tracing_does_nothing():
         assert run == Run(None, [])
     NO_TRACING.score(None, "route", "alert")
     NO_TRACING.shutdown()
+
+
+def _herald_warnings(caplog):
+    return [r for r in caplog.records if r.name == "herald_server.tracing"]
+
+
+async def test_traced_model_survives_a_failing_span_exit(caplog):
+    traced = TracedModel(FakeModel(), StubClient(exit_raises=True))
+    notes = await traced.write_notes(EMAIL, "Tripfold", CONFIG)
+    assert notes == await FakeModel().write_notes(EMAIL, "Tripfold", CONFIG)
+    assert len(_herald_warnings(caplog)) == 1
+
+
+async def test_traced_model_error_passes_through_a_failing_span_exit():
+    traced = TracedModel(FailingModel(), StubClient(exit_raises=True))
+    with pytest.raises(ModelError, match="rate limited"):
+        await traced.write_notes(EMAIL, "Tripfold", CONFIG)
+
+
+def test_run_survives_a_failing_span_exit(caplog):
+    tracing = LangfuseTracing(StubClient(exit_raises=True), "m", stub_propagate, lambda **kw: kw)
+    with tracing.run("email", user_id="w", session_id="e", tags=[], metadata={}) as run:
+        result = run.trace_id
+    assert result == "t1"
+    assert len(_herald_warnings(caplog)) == 1
+
+
+def test_run_body_error_passes_through_a_failing_span_exit():
+    tracing = LangfuseTracing(StubClient(exit_raises=True), "m", stub_propagate, lambda **kw: kw)
+    with pytest.raises(ModelError, match="boom"):
+        with tracing.run("email", user_id="w", session_id="e", tags=[], metadata={}):
+            raise ModelError("boom")

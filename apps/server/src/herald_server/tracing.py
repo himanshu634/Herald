@@ -22,6 +22,27 @@ log = logging.getLogger(__name__)
 _instrumented = False
 
 
+class _Safe:
+    """Wraps a Langfuse context manager so a failure on exit is logged, never raised.
+
+    Without it, an error while closing a span would replace the caller's result (or its own
+    exception) and break triage. A body exception still propagates unchanged.
+    """
+
+    def __init__(self, cm: Any) -> None:
+        self._cm = cm
+
+    def __enter__(self) -> Any:
+        return self._cm.__enter__()
+
+    def __exit__(self, *exc_info: Any) -> bool:
+        try:
+            return bool(self._cm.__exit__(*exc_info))
+        except Exception as exc:
+            log.warning("Tracing: could not close a span: %s", exc)
+            return False
+
+
 @dataclass
 class Run:
     """What one traced triage run hands to the graph: the trace id and its callbacks."""
@@ -87,10 +108,14 @@ class TracedModel:
         stack = ExitStack()
         try:
             stack.enter_context(
-                self._client.start_as_current_observation(as_type="span", name=name)
+                _Safe(self._client.start_as_current_observation(as_type="span", name=name))
             )
         except Exception as exc:
             log.warning("Tracing: could not open span %s, running untraced: %s", name, exc)
+            stack = None
+        # Awaited outside the except block, so a ModelError does not carry the tracing error
+        # as its __context__.
+        if stack is None:
             return await call()
         with stack:
             return await call()
@@ -154,16 +179,18 @@ class LangfuseTracing:
         stack = ExitStack()
         try:
             stack.enter_context(
-                self._propagate(
-                    trace_name=name,
-                    user_id=user_id,
-                    session_id=session_id,
-                    tags=[*tags, self._model_name],
-                    metadata=metadata,
+                _Safe(
+                    self._propagate(
+                        trace_name=name,
+                        user_id=user_id,
+                        session_id=session_id,
+                        tags=[*tags, self._model_name],
+                        metadata=metadata,
+                    )
                 )
             )
             stack.enter_context(
-                self._client.start_as_current_observation(as_type="span", name=name)
+                _Safe(self._client.start_as_current_observation(as_type="span", name=name))
             )
             # The handler is given the public key because Herald never sets LANGFUSE_* env vars,
             # so the SDK could not otherwise tell which client to use.
