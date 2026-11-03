@@ -121,7 +121,12 @@ def main(argv: list[str] | None = None) -> None:
         return
     model = _model(args.model, args.model_name)
     # Tracing is on only when the Langfuse keys are set (dev). It is never built for --rescore.
-    tracing = build_tracing(get_settings())
+    # Tag traces with the model this run uses, not the one in settings or .env.
+    tracing = build_tracing(
+        get_settings().model_copy(
+            update={"model_provider": args.model, "model_name": args.model_name}
+        )
+    )
     session = f"eval-{started.strftime('%Y%m%d-%H%M%S')}"
     try:
         trials = asyncio.run(

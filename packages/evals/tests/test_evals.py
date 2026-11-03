@@ -14,7 +14,7 @@ from herald_evals.report import markdown
 from herald_evals.runner import Trial, run_all
 from herald_evals.score import check, grounded, rule_talk, score_trials, summarise
 from herald_server.seed import TRIPFOLD
-from herald_server.tracing import Run
+from herald_server.tracing import NO_TRACING, Run
 
 
 @pytest.mark.parametrize("name", ds.builtin_names())
@@ -256,3 +256,19 @@ async def test_run_all_traces_each_trial():
     assert kw["session_id"] == "eval-test" and kw["tags"] == ["eval", "tripfold"]
     assert all(t.trace_id == "trace-1" for t in trials)  # the stub's fixed id
     assert {s[1] for s in tracing.scores} == {"route", "floor", "unsure", "ai_failed"}
+
+
+def test_traces_carry_the_model_the_run_uses(tmp_path, monkeypatch):
+    seen = []
+
+    def capture(settings):
+        seen.append(settings)
+        return NO_TRACING
+
+    monkeypatch.setattr("herald_evals.cli.build_tracing", capture)
+    # Settings say Claude; the run uses the fake model, so the tag must say "fake".
+    monkeypatch.setenv("HERALD_MODEL_PROVIDER", "anthropic")
+    monkeypatch.setenv("HERALD_MODEL_NAME", "claude-from-env")
+    main(["--model", "fake", "--dataset", "ledgerly", "--out", str(tmp_path)])
+    assert seen[0].model_provider == "fake"
+    assert seen[0].model_name == "claude-from-env"  # build_tracing turns fake into the tag

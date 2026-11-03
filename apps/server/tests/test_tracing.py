@@ -3,6 +3,7 @@ import sys
 from contextlib import contextmanager
 
 import pytest
+from langchain_core.callbacks import BaseCallbackHandler
 from pydantic import SecretStr
 
 import herald_server.tracing as tracing_module
@@ -298,11 +299,115 @@ async def test_trial_read_is_traced_as_try(app, client, agent_api):
     assert {s[1] for s in tracing.scores} == {"route", "floor", "unsure", "ai_failed"}
 
 
-async def test_tracing_errors_never_reach_triage(app, client, agent_api):
+class StubHandler(BaseCallbackHandler):
+    """A real LangChain callback handler that records nothing, built like the Langfuse one."""
+
+    def __init__(self, public_key=None) -> None:
+        super().__init__()
+
+
+class ScoreFailingClient(StubClient):
+    """Traces open and spans close with an error, but every score post raises."""
+
+    def __init__(self) -> None:
+        super().__init__(exit_raises=True)
+
+    def create_score(self, *, name, value, trace_id, data_type) -> None:
+        raise RuntimeError("score post failed")
+
+
+async def test_langfuse_failing_mid_run_never_reaches_triage(app, client, agent_api, monkeypatch):
     ws, email_id = await make_test_email(app, client)
     tracing = LangfuseTracing(
-        StubClient(raise_all=True), model_name="fake", propagate=stub_propagate, handler=object
+        ScoreFailingClient(), model_name="fake", propagate=stub_propagate, handler=StubHandler
+    )
+    # The inline queue already triaged this email once, so spy on the save to prove this run
+    # reached it.
+    saved = []
+    real_save = agent_api.save_triage_result
+
+    async def spy(email_id, result):
+        saved.append(result)
+        return await real_save(email_id, result)
+
+    monkeypatch.setattr(agent_api, "save_triage_result", spy)
+    decision = await process_email(agent_api, app.state.services.graph, email_id, tracing)
+    assert [r.decision for r in saved] == [decision]
+    detail = (await client.get(f"/api/workspaces/{ws}/emails/{email_id}")).json()
+    assert detail["decision"]["route"] == decision.route
+
+
+async def test_tracing_errors_at_trace_open_never_reach_triage(app, client, agent_api):
+    ws, email_id = await make_test_email(app, client)
+    tracing = LangfuseTracing(
+        StubClient(raise_all=True),
+        model_name="fake",
+        propagate=stub_propagate,
+        handler=StubHandler,
     )
     decision = await process_email(agent_api, app.state.services.graph, email_id, tracing)
     detail = (await client.get(f"/api/workspaces/{ws}/emails/{email_id}")).json()
-    assert detail["decision"]["route"] == decision.route  # saved as usual
+    assert detail["decision"]["route"] == decision.route
+
+
+def _stub_langfuse(monkeypatch, instrument_raises=False, auth_error=None, auth_ok=True):
+    """Installs fake langfuse and openinference modules so build_tracing runs offline."""
+    import types
+
+    shutdowns = []
+
+    class FakeLangfuse:
+        def __init__(self, **kw):
+            pass
+
+        def auth_check(self):
+            if auth_error:
+                raise auth_error
+            return auth_ok
+
+        def shutdown(self):
+            shutdowns.append(1)
+
+    class Instrumentor:
+        def instrument(self):
+            if instrument_raises:
+                raise RuntimeError("patch failed")
+
+    def module(name, **attrs):
+        mod = types.ModuleType(name)
+        mod.__dict__.update(attrs)
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    module("langfuse", Langfuse=FakeLangfuse, propagate_attributes=stub_propagate)
+    module("langfuse.langchain", CallbackHandler=lambda **kw: kw)
+    module("openinference")
+    module("openinference.instrumentation")
+    module("openinference.instrumentation.anthropic", AnthropicInstrumentor=Instrumentor)
+    monkeypatch.setattr(tracing_module, "_instrumented", False)
+    return shutdowns
+
+
+def test_build_tracing_tags_fake_runs_as_fake(settings, monkeypatch):
+    _stub_langfuse(monkeypatch)
+    fake = keyed(settings, model_provider="fake", model_name="claude-sonnet-x")
+    assert build_tracing(fake)._model_name == "fake"
+    real = keyed(settings, model_provider="anthropic", model_name="claude-sonnet-x")
+    assert build_tracing(real)._model_name == "claude-sonnet-x"
+
+
+def test_build_tracing_survives_an_instrumentor_failure(settings, monkeypatch, caplog):
+    shutdowns = _stub_langfuse(monkeypatch, instrument_raises=True)
+    assert build_tracing(keyed(settings)) is NO_TRACING
+    assert shutdowns == [1]
+    assert len(_herald_warnings(caplog)) == 1
+    assert not tracing_module._instrumented
+
+
+def test_auth_failure_warning_says_why(settings, monkeypatch, caplog):
+    _stub_langfuse(monkeypatch, auth_error=ConnectionError("refused"))
+    assert build_tracing(keyed(settings)) is NO_TRACING
+    assert "ConnectionError: refused" in caplog.text
+    caplog.clear()
+    _stub_langfuse(monkeypatch, auth_ok=False)
+    assert build_tracing(keyed(settings)) is NO_TRACING
+    assert "auth_check returned False" in caplog.text

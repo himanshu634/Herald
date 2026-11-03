@@ -229,6 +229,14 @@ class LangfuseTracing:
             log.warning("Tracing: shutdown failed: %s", exc)
 
 
+def _shutdown_quietly(client: Any) -> None:
+    # Stops the client's exporter thread so it does not keep running for nothing.
+    try:
+        client.shutdown()
+    except Exception:
+        pass
+
+
 def build_tracing(settings: Settings) -> Tracing:
     """Tracing when both keys are set and Langfuse answers, otherwise NO_TRACING."""
     # An empty string counts as unset: the test conftest blanks the keys.
@@ -252,28 +260,36 @@ def build_tracing(settings: Settings) -> Tracing:
             public_key=public_key, secret_key=secret, base_url=settings.langfuse_base_url
         )
         ok = client.auth_check()
-    except Exception:
-        ok = False
+    except Exception as exc:
+        ok, why = False, f"{type(exc).__name__}: {exc}"
+    else:
+        why = "auth_check returned False"
     if not ok:
-        # Shut the client down so its exporter thread does not keep running for nothing.
         if client is not None:
-            try:
-                client.shutdown()
-            except Exception:
-                pass
+            _shutdown_quietly(client)
         log.warning(
-            "Langfuse at %s did not accept the keys or is not reachable; tracing is off",
+            "Langfuse at %s did not accept the keys or is not reachable (%s); tracing is off",
             settings.langfuse_base_url,
+            why,
         )
         return NO_TRACING
 
     # Only after auth succeeds, so a down Langfuse leaves Anthropic unpatched.
     global _instrumented
     if not _instrumented:
-        AnthropicInstrumentor().instrument()
+        try:
+            AnthropicInstrumentor().instrument()
+        except Exception as exc:
+            # Dev tooling must not stop the API or worker from starting.
+            _shutdown_quietly(client)
+            log.warning("Tracing: could not instrument Anthropic, tracing is off: %s", exc)
+            return NO_TRACING
         _instrumented = True
+    # The tag names the model that runs. Fake runs (lite mode, evals) must not carry the
+    # Claude name from settings.
+    model_name = settings.model_name if settings.model_provider == "anthropic" else "fake"
     return LangfuseTracing(
-        client, settings.model_name, propagate_attributes, CallbackHandler, public_key=public_key
+        client, model_name, propagate_attributes, CallbackHandler, public_key=public_key
     )
 
 
