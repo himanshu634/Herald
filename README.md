@@ -100,6 +100,20 @@ make worker
 make web
 ```
 
+Or run the whole stack in Docker, with hot reload for the API, worker and web app (web on :5173, API on :8000):
+
+```bash
+make docker-dev
+```
+
+Production runs nginx (serving the web app and proxying `/api`), the API, the worker, Postgres and Redis. Copy `.env.example` to `.env`, set `POSTGRES_PASSWORD`, `ANTHROPIC_API_KEY` and `HERALD_WEB_URL`, then:
+
+```bash
+make docker-prod
+```
+
+It listens on `HERALD_PORT` (default 8080); put TLS in front of it. Stop it with `make docker-prod-down`.
+
 Checks:
 
 ```bash

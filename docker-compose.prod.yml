@@ -1,0 +1,93 @@
+# Herald in production: nginx serves the web app and proxies /api, with the API, the
+# pipeline worker, Postgres and Redis behind it. Only nginx publishes a port.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Reads secrets from .env (see .env.example). Put TLS in front of HERALD_PORT.
+
+# Its own project name, so it never shares volumes with the dev `herald` project. Postgres
+# only applies POSTGRES_PASSWORD when it creates the volume, so a shared volume would keep
+# the dev password.
+name: herald-prod
+
+x-server: &server
+  build:
+    context: .
+    target: server
+  image: herald-server
+  restart: unless-stopped
+  env_file:
+    - path: .env
+      required: false
+  # Set here so a localhost value copied from .env.example cannot win.
+  environment:
+    HERALD_DATABASE_URL: postgresql+psycopg://herald:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/herald
+    HERALD_REDIS_URL: redis://redis:6379/0
+    HERALD_BUS: redis
+    HERALD_QUEUE: arq
+    HERALD_MODEL_PROVIDER: ${HERALD_MODEL_PROVIDER:-anthropic}
+    HERALD_WEB_URL: ${HERALD_WEB_URL:-http://localhost:8080}
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: herald
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: herald
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U herald"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # arq keeps queued jobs in Redis. Without persistence a restart drops them and those
+    # emails stay pending.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  api:
+    <<: *server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *server
+    command: ["arq", "herald_server.worker.main.WorkerSettings"]
+    # The image healthcheck probes the API port, which the worker does not serve.
+    healthcheck:
+      disable: true
+    # Both processes run create_all on startup. Waiting for a healthy API means the
+    # tables exist before the worker starts, so the two never race to create them.
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      target: web
+    image: herald-web
+    restart: unless-stopped
+    ports:
+      - "${HERALD_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
