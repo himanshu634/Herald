@@ -13,8 +13,10 @@ from herald_server.connectors.base import (
     InboundMessage,
     MailConnector,
     MissingRefreshToken,
+    OutboundReply,
     PushNotice,
     PushRejected,
+    SentReply,
     Subscription,
 )
 from herald_server.connectors.gmail.client import (
@@ -27,6 +29,7 @@ from herald_server.connectors.gmail.client import (
     MessageUnavailable,
     is_inbox_mail,
 )
+from herald_server.connectors.gmail.compose import build_reply
 from herald_server.connectors.gmail.mime import parse_raw_message
 from herald_server.connectors.gmail.push import (
     decode_envelope,
@@ -217,6 +220,15 @@ class GmailConnector(MailConnector):
                 break
             page = await self._client.list_history(access, cursor, page.next_page_token)
         return list(ids), first_page_history_id, False
+
+    async def send_reply(self, credentials: dict[str, str], reply: OutboundReply) -> SentReply:
+        access = await self._client.refresh(credentials["refresh_token"])
+        raw = build_reply(reply)
+        # Gmail keeps a reply in the customer's thread only when threadId, the matching
+        # References and In-Reply-To headers, and a matching subject all agree. Drop one and
+        # the reply starts a new conversation.
+        message_id = await self._client.send_message(access, raw, reply.provider_thread_id)
+        return SentReply(provider_message_id=message_id)
 
     async def parse_push(self, headers: Mapping[str, str], body: bytes) -> PushNotice:
         # Without both settings there is nothing to verify against. Reject instead of

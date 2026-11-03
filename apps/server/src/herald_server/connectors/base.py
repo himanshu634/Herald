@@ -43,6 +43,20 @@ class PushNotice(BaseModel):
     email_address: str  # lower-case
 
 
+class OutboundReply(BaseModel):
+    from_address: str
+    to_address: str
+    subject: str  # final subject, "Re: ..." already applied by the caller
+    body: str  # plain text
+    in_reply_to: str | None  # the customer email's Message-ID
+    references: str | None  # its References plus its Message-ID
+    provider_thread_id: str | None
+
+
+class SentReply(BaseModel):
+    provider_message_id: str
+
+
 class AuthRevoked(Exception):
     """The owner revoked access, or the password changed."""
 
@@ -55,6 +69,14 @@ class RateLimited(Exception):
     def __init__(self, retry_after: float) -> None:
         super().__init__(f"rate limited, retry after {retry_after}s")
         self.retry_after = retry_after
+
+
+class SendNotAllowed(Exception):
+    """The account did not grant permission to send."""
+
+
+class SendRejected(Exception):
+    """The provider refused this message. It was not sent."""
 
 
 class PushRejected(Exception):
@@ -95,3 +117,12 @@ class MailConnector(Protocol):
     async def revoke(self, credentials: dict[str, str]) -> None: ...
 
     async def parse_push(self, headers: Mapping[str, str], body: bytes) -> PushNotice: ...
+
+    async def send_reply(self, credentials: dict[str, str], reply: OutboundReply) -> SentReply:
+        """Send one reply as the owner.
+
+        `AuthRevoked`, `RateLimited`, `SendNotAllowed` and `SendRejected` all mean the message
+        was not sent. Any other exception (a timeout, a 5xx) means the outcome is unknown:
+        the customer may have got the email. The caller never retries a send.
+        """
+        ...

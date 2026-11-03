@@ -1,6 +1,9 @@
 """Tests for GmailConnector: OAuth, history sync, pagination and backfill."""
 
 import base64
+import email
+import email.policy
+import json
 import logging
 from collections.abc import AsyncIterator
 from email.message import EmailMessage
@@ -10,7 +13,7 @@ import httpx
 import pytest
 
 from herald_server.connectors import build_connectors
-from herald_server.connectors.base import MissingRefreshToken
+from herald_server.connectors.base import MissingRefreshToken, OutboundReply
 from herald_server.connectors.gmail.client import (
     API,
     READ_SCOPE,
@@ -514,3 +517,38 @@ async def test_build_connectors_includes_gmail_when_configured():
         connectors = build_connectors(settings, http)
     assert isinstance(connectors["gmail"], GmailConnector)
     assert connectors["gmail"].provider == "gmail"
+
+
+async def test_send_reply_refreshes_and_sends_in_thread(connector, google):
+    sent = []
+    inner = google.handler
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == MESSAGES + "/send":
+            google.calls.append("send")
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"id": "m9"})
+        return inner(request)
+
+    connector._client._http._transport = httpx.MockTransport(handler)
+    result = await connector.send_reply(
+        CREDS,
+        OutboundReply(
+            from_address="owner@shop.in",
+            to_address="cust@x.in",
+            subject="Re: Hi",
+            body="Hello back",
+            in_reply_to="<a@x.in>",
+            references="<a@x.in>",
+            provider_thread_id="t1",
+        ),
+    )
+    assert result.provider_message_id == "m9"
+    assert google.calls == ["token", "send"]
+    assert sent[0]["threadId"] == "t1"
+    raw = sent[0]["raw"]
+    msg = email.message_from_bytes(
+        base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)), policy=email.policy.default
+    )
+    assert msg["In-Reply-To"] == "<a@x.in>"
+    assert msg["Subject"] == "Re: Hi"
