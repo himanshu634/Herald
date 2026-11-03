@@ -14,12 +14,26 @@ def get_mailbox(services: Services, mailbox_id: str) -> Mailbox | None:
         return session.get(Mailbox, mailbox_id)
 
 
-def set_status(services: Services, mailbox_id: str, status: MailboxStatus) -> BusEvent:
-    """Save the new status and its `mailbox.status` event. Publish the returned event."""
+def set_status(
+    services: Services,
+    mailbox_id: str,
+    status: MailboxStatus,
+    *,
+    only_from: MailboxStatus | None = None,
+) -> BusEvent | None:
+    """Save the new status and its `mailbox.status` event. Publish the returned event.
+
+    With `only_from`, change nothing and return None unless the mailbox is in that status.
+    By id alone, for jobs that hold a trusted mailbox id. A route must first load the
+    mailbox filtered by `workspace_id`.
+    """
     with Session(services.engine) as session:
         mailbox = session.get(Mailbox, mailbox_id)
         if mailbox is None:
             raise LookupError(f"mailbox {mailbox_id} not found")
+        # Checked in this session, against the committed row: the caller's copy may be stale.
+        if only_from is not None and mailbox.status != only_from:
+            return None
         mailbox.status = status
         event = add_event(
             session,

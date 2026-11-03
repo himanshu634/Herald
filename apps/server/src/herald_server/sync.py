@@ -9,6 +9,7 @@ from sqlmodel import Session, col, select
 
 from herald_server.bus import BusEvent
 from herald_server.connectors.base import AuthRevoked, FetchResult
+from herald_server.crypto import BadSecret
 from herald_server.events import EMAIL_RECEIVED, add_event, to_bus
 from herald_server.mailboxes import get_mailbox, set_status
 from herald_server.models import Email, Mailbox, MailboxStatus
@@ -26,6 +27,7 @@ def _store(
     stored (lost mail), or store mail without moving the cursor (refetched, then deduped).
     """
     with Session(services.engine) as session:
+        # By id alone: the job holds a trusted mailbox id. Routes filter on workspace_id first.
         mailbox = session.get(Mailbox, mailbox_id)
         if mailbox is None:
             return [], []
@@ -81,6 +83,17 @@ def _store(
         return ids, [to_bus(event) for event in events]
 
 
+async def _mark_needs_reauth(services: Services, mailbox_id: str) -> None:
+    # Only from ACTIVE: the owner may have paused or disconnected the mailbox while the fetch
+    # was in flight. Overwriting that with NEEDS_REAUTH would undo their choice and publish
+    # a false status event.
+    event = await asyncify(set_status)(
+        services, mailbox_id, MailboxStatus.NEEDS_REAUTH, only_from=MailboxStatus.ACTIVE
+    )
+    if event is not None:
+        await services.bus.publish(event)
+
+
 async def sync_mailbox(services: Services, mailbox_id: str) -> list[str]:
     """Fetch and store new mail. Returns the new email ids, for the caller to triage.
 
@@ -104,16 +117,17 @@ async def sync_mailbox(services: Services, mailbox_id: str) -> list[str]:
         log.info("sync skipped for mailbox %s: token_key is not set", mailbox_id)
         return []
 
-    credentials = services.secrets.open(mailbox.credentials_enc)
     # RateLimited is not caught: the cursor must stay where it is, or the changes the
     # provider refused to send now would be skipped for good. The caller retries later.
     try:
+        # BadSecret: the credentials no longer decrypt (e.g. token_key changed), so only a
+        # reconnect can fix this mailbox, the same as a revoke.
+        credentials = services.secrets.open(mailbox.credentials_enc)
         result = await connector.fetch_changes(credentials, mailbox.cursor)
-    except AuthRevoked as exc:
+    except (AuthRevoked, BadSecret) as exc:
         # Log only the type and id: the exception may carry provider responses or tokens.
         log.warning("%s on mailbox %s", type(exc).__name__, mailbox_id)
-        event = await asyncify(set_status)(services, mailbox_id, MailboxStatus.NEEDS_REAUTH)
-        await services.bus.publish(event)
+        await _mark_needs_reauth(services, mailbox_id)
         return []
 
     ids, events = await asyncify(_store)(services, mailbox_id, result)

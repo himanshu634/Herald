@@ -3,9 +3,11 @@
 from datetime import UTC, datetime
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlmodel import Session, select
 
-from herald_server.connectors.base import AuthRevoked, InboundMessage, RateLimited
+from herald_server.connectors.base import AuthRevoked, FetchResult, InboundMessage, RateLimited
+from herald_server.crypto import SecretBox
 from herald_server.events import MAILBOX_STATUS
 from herald_server.mailboxes import active_mailbox_ids_for_address
 from herald_server.models import Email, EmailStatus, Event, Mailbox, MailboxStatus
@@ -20,12 +22,9 @@ async def demo_workspace(client) -> str:
 
 def add_mailbox(app, workspace_id: str, **fields) -> str:
     services = app.state.services
+    fields.setdefault("credentials_enc", services.secrets.seal({"token": "t"}))
     mailbox = Mailbox(
-        workspace_id=workspace_id,
-        provider="fake",
-        email_address="owner@shop.in",
-        credentials_enc=services.secrets.seal({"token": "t"}),
-        **fields,
+        workspace_id=workspace_id, provider="fake", email_address="owner@shop.in", **fields
     )
     with Session(services.engine) as session:
         session.add(mailbox)
@@ -101,6 +100,52 @@ async def test_auth_revoked_marks_needs_reauth(app, client, fake_connector):
     assert [e.data for e in events] == [
         {"mailbox_id": mailbox_id, "email_address": "owner@shop.in", "status": "needs_reauth"}
     ]
+
+
+def status_events(app, workspace_id: str) -> list[Event]:
+    with Session(app.state.services.engine) as session:
+        return list(
+            session.exec(
+                select(Event).where(
+                    Event.workspace_id == workspace_id, Event.type == MAILBOX_STATUS
+                )
+            ).all()
+        )
+
+
+async def test_auth_revoked_does_not_override_a_disconnect(app, client, fake_connector):
+    workspace_id = await demo_workspace(client)
+    mailbox_id = add_mailbox(app, workspace_id)
+
+    async def disconnect_then_revoke(credentials, cursor) -> FetchResult:
+        # The owner disconnects while this fetch is in flight, then the provider says revoked.
+        with Session(app.state.services.engine) as session:
+            mailbox = session.get(Mailbox, mailbox_id)
+            assert mailbox is not None
+            mailbox.status = MailboxStatus.DISCONNECTED
+            mailbox.credentials_enc = None
+            session.add(mailbox)
+            session.commit()
+        raise AuthRevoked()
+
+    fake_connector.fetch_changes = disconnect_then_revoke
+
+    assert await sync_mailbox(app.state.services, mailbox_id) == []
+
+    assert load_mailbox(app, mailbox_id).status == MailboxStatus.DISCONNECTED
+    assert status_events(app, workspace_id) == []
+
+
+async def test_undecryptable_credentials_mark_needs_reauth(app, client, fake_connector):
+    workspace_id = await demo_workspace(client)
+    other_key = SecretBox(Fernet.generate_key().decode())
+    mailbox_id = add_mailbox(app, workspace_id, credentials_enc=other_key.seal({"token": "t"}))
+
+    assert await sync_mailbox(app.state.services, mailbox_id) == []
+
+    assert "fetch_changes" not in fake_connector.calls
+    assert load_mailbox(app, mailbox_id).status == MailboxStatus.NEEDS_REAUTH
+    assert [e.data["status"] for e in status_events(app, workspace_id)] == ["needs_reauth"]
 
 
 async def test_rate_limited_keeps_cursor(app, client, fake_connector):
