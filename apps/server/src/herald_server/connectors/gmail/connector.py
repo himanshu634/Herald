@@ -5,6 +5,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urlencode
 
+from asyncer import asyncify
+
 from herald_server.connectors.base import (
     ConnectedAccount,
     FetchResult,
@@ -24,6 +26,11 @@ from herald_server.connectors.gmail.client import (
     is_inbox_mail,
 )
 from herald_server.connectors.gmail.mime import parse_raw_message
+from herald_server.connectors.gmail.push import (
+    decode_envelope,
+    google_signing_key,
+    verify_push_token,
+)
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +54,7 @@ class GmailConnector(MailConnector):
         self._client = client
         self._client_id = client_id
         self._topic = topic
-        # Used by parse_push (Task 7) to verify Pub/Sub push tokens.
+        # Used by parse_push to verify Pub/Sub push tokens.
         self._push_audience = push_audience
         self._push_service_account = push_service_account
         self._signing_key_for = signing_key_for
@@ -165,6 +172,20 @@ class GmailConnector(MailConnector):
         return list(ids), new_cursor
 
     async def parse_push(self, headers: Mapping[str, str], body: bytes) -> PushNotice:
-        # Task 7 replaces this with Pub/Sub token verification. Until then every push is
-        # rejected, so nothing unsigned is ever accepted.
-        raise PushRejected("push not configured")
+        # Without both settings there is nothing to verify against. Reject instead of
+        # accepting: an unsigned push must never be trusted.
+        if not self._push_audience or not self._push_service_account:
+            raise PushRejected("push verification is not configured")
+        # Plain dicts are case-sensitive, Starlette Headers are not: lower-case to cover both.
+        lowered = {k.lower(): v for k, v in headers.items()}
+        scheme, _, token = lowered.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise PushRejected("missing bearer token")
+        # The default key lookup does blocking HTTP, so verify in a worker thread.
+        await asyncify(verify_push_token)(
+            token.strip(),
+            audience=self._push_audience,
+            service_account=self._push_service_account,
+            signing_key_for=self._signing_key_for or google_signing_key,
+        )
+        return decode_envelope(body)
