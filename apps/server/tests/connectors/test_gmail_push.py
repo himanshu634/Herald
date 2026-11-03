@@ -21,15 +21,18 @@ KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 OTHER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
-def _token(key=KEY, **overrides) -> str:
+def _token(key=KEY, drop: tuple[str, ...] = (), **overrides) -> str:
     claims = {
         "iss": "https://accounts.google.com",
         "aud": AUDIENCE,
         "email": SERVICE_ACCOUNT,
         "email_verified": True,
+        "iat": int(time.time()),
         "exp": int(time.time()) + 300,
     }
     claims.update(overrides)
+    for name in drop:
+        claims.pop(name)
     return jwt.encode(claims, key, algorithm="RS256")
 
 
@@ -101,6 +104,11 @@ async def test_token_signed_by_other_key_is_rejected(make_connector):
 async def test_expired_token_is_rejected(make_connector):
     with pytest.raises(PushRejected):
         await make_connector().parse_push(_headers(_token(exp=int(time.time()) - 60)), _body())
+
+
+async def test_token_without_exp_is_rejected(make_connector):
+    with pytest.raises(PushRejected):
+        await make_connector().parse_push(_headers(_token(drop=("exp",))), _body())
 
 
 async def test_missing_authorization_header_is_rejected(make_connector):

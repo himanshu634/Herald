@@ -41,7 +41,14 @@ def verify_push_token(
     try:
         key = signing_key_for(token)
         # Pinning RS256 stops algorithm-confusion tricks (alg=none, HS256 with a public key).
-        claims = jwt.decode(token, key, algorithms=["RS256"], audience=audience)
+        # PyJWT checks exp only when present; require it, or a signed token never expires.
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=["RS256"],
+            audience=audience,
+            options={"require": ["exp", "iat", "iss", "aud"]},
+        )
     except Exception as exc:
         raise PushRejected("push token failed verification") from exc
     if claims.get("iss") not in GOOGLE_ISSUERS:
