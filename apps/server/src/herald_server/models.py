@@ -5,8 +5,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column, UniqueConstraint
-from sqlmodel import Field, SQLModel
+from sqlalchemy import JSON, Column, Index, UniqueConstraint
+from sqlmodel import Field, SQLModel, col
 
 from herald_core.schema import Email as CoreEmail
 from herald_core.schema import Route
@@ -63,6 +63,7 @@ class Mailbox(SQLModel, table=True):
     """A connected mail account. A reconnect updates the existing row."""
 
     # One row per address per provider per workspace, so a reconnect cannot add a duplicate.
+    # Across workspaces, uq_mailbox_live_address (below the class) allows one live row.
     __table_args__ = (UniqueConstraint("workspace_id", "provider", "email_address"),)
 
     id: str = Field(default_factory=_id, primary_key=True)
@@ -78,6 +79,20 @@ class Mailbox(SQLModel, table=True):
     subscription_expires_at: datetime | None = None
     last_synced_at: datetime | None = None
     created_at: datetime = Field(default_factory=_now)
+
+
+# One business per mailbox: an address is live in at most one workspace, so its mail is triaged
+# under one business's rules. Partial, because a disconnected row keeps its emails and is
+# reused if that workspace connects again; counting it would block the address forever. Built
+# from the column, not a SQL string: the status column stores the enum name ('DISCONNECTED').
+Index(
+    "uq_mailbox_live_address",
+    col(Mailbox.provider),
+    col(Mailbox.email_address),
+    unique=True,
+    postgresql_where=col(Mailbox.status) != MailboxStatus.DISCONNECTED,
+    sqlite_where=col(Mailbox.status) != MailboxStatus.DISCONNECTED,
+)
 
 
 class Email(SQLModel, table=True):

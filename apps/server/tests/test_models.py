@@ -70,12 +70,37 @@ def test_test_box_emails_without_mailbox_do_not_collide(session):
 
 
 def test_one_address_per_provider_per_workspace(session):
-    ws, other = _workspace(session), _workspace(session)
+    ws = _workspace(session)
     session.add(_mailbox(ws))
     session.commit()
     session.add(_mailbox(ws))
     with pytest.raises(IntegrityError):
         session.commit()
-    session.rollback()
+
+
+@pytest.mark.parametrize("status", [MailboxStatus.PAUSED, MailboxStatus.NEEDS_REAUTH])
+def test_address_live_in_two_workspaces_is_rejected(session, status):
+    ws, other = _workspace(session), _workspace(session)
+    session.add(_mailbox(ws))
+    session.commit()
+    second = _mailbox(other)
+    second.status = status
+    session.add(second)
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_disconnected_address_does_not_block_another_workspace(session):
+    ws, other = _workspace(session), _workspace(session)
+    gone = _mailbox(ws)
+    gone.status = MailboxStatus.DISCONNECTED
+    session.add(gone)
+    session.commit()
     session.add(_mailbox(other))
+    session.commit()
+
+    # The same address under another provider is another mailbox.
+    elsewhere = _mailbox(ws)
+    elsewhere.provider = "outlook"
+    session.add(elsewhere)
     session.commit()
