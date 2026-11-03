@@ -399,6 +399,21 @@ async def test_subscribe_watches_topic_and_returns_expiry(connector, google):
     assert subscription.provider_state == {}
 
 
+async def test_redirect_uri_has_no_double_slash_when_public_url_ends_in_slash():
+    settings = Settings(
+        token_key="k",
+        google_client_id="cid",
+        google_client_secret="secret",
+        gmail_topic="projects/p/topics/t",
+        public_api_url="https://api.example/",
+    )
+    async with httpx.AsyncClient() as http:
+        connector = build_connectors(settings, http)["gmail"]
+    query = parse_qs(urlsplit(connector.authorization_url("s")).query)
+    # Google matches the redirect URI exactly: "//api" would fail the code exchange.
+    assert query["redirect_uri"] == ["https://api.example/api/oauth/gmail/callback"]
+
+
 async def test_build_connectors_includes_gmail_when_configured():
     settings = Settings(
         token_key="k",

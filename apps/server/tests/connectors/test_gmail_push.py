@@ -106,6 +106,13 @@ async def test_expired_token_is_rejected(make_connector):
         await make_connector().parse_push(_headers(_token(exp=int(time.time()) - 60)), _body())
 
 
+async def test_token_expired_within_clock_skew_is_accepted(make_connector):
+    # Google's clock and ours may differ by a few seconds; 30 s of leeway absorbs that.
+    token = _token(exp=int(time.time()) - 10)
+    notice = await make_connector().parse_push(_headers(token), _body())
+    assert notice.email_address == "owner@shop.in"
+
+
 async def test_token_without_exp_is_rejected(make_connector):
     with pytest.raises(PushRejected):
         await make_connector().parse_push(_headers(_token(drop=("exp",))), _body())

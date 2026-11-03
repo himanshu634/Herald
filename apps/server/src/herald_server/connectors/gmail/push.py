@@ -42,11 +42,13 @@ def verify_push_token(
         key = signing_key_for(token)
         # Pinning RS256 stops algorithm-confusion tricks (alg=none, HS256 with a public key).
         # PyJWT checks exp only when present; require it, or a signed token never expires.
+        # leeway: Google's clock and ours may differ by a few seconds (clock skew).
         claims = jwt.decode(
             token,
             key,
             algorithms=["RS256"],
             audience=audience,
+            leeway=30,
             options={"require": ["exp", "iat", "iss", "aud"]},
         )
     except Exception as exc:

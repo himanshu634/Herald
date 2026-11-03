@@ -24,7 +24,9 @@ def build_connectors(settings: Settings, http: httpx.AsyncClient) -> dict[str, M
             http,
             settings.google_client_id,
             settings.google_client_secret,
-            f"{settings.public_api_url}/api/oauth/gmail/callback",
+            # Google matches the redirect URI exactly, so a trailing slash in the setting
+            # must not turn into "//api".
+            f"{settings.public_api_url.rstrip('/')}/api/oauth/gmail/callback",
         )
         connectors["gmail"] = GmailConnector(
             client,
