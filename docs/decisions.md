@@ -15,6 +15,9 @@ Herald ships as a multi-tenant framework, and the demo shows one business: Tripf
 | 2026-11-03 | **One push channel first: ntfy.** SSE reaches only an open tab, so alerts also need a push to the phone. | Least work for a real phone buzz. Notifier is an interface, so Web Push or Slack can be added later. |
 | 2026-11-03 | **Notes are trimmed.** Repeat contact and "going public" / "abusive" flags are cut for now. | Repeat contact needs customer identity and threads. |
 | 2026-11-03 | **Stack: SvelteKit (Svelte 5) + FastAPI + LangGraph, with Postgres and Redis.** FastAPI streams events to the browser over SSE. Details in [architecture.md](architecture.md). | Chosen by the owner of this repo. |
+| 2026-11-03 | **Owner guidance goes in the notes prompt.** Plain lines that shape topic, urgency and anger. They are fenced so they cannot silence the safety floor. Routing stays with rules. | Owners know things about their business that are not when/then rules ("wedding planners matter most"). |
+| 2026-11-03 | **Setup is drafted by the AI from the business description**, then edited by the owner. This replaces starter templates. | One description gives a sensible first draft for any business, with no template catalogue to maintain. |
+| 2026-11-03 | **One business per mailbox.** A connected mailbox belongs to exactly one workspace. Open item: the mail-connectors work must make `(provider, email_address)` unique. | A mailbox's mail is triaged under exactly one business's rules. |
 
 ## Cuts
 

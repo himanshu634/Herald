@@ -93,6 +93,9 @@ def list_emails(
 async def receive_test_email(
     data: EmailIn, workspace: WorkspaceDep, services: ServicesDep, queue: QueueDep
 ) -> EmailOut:
+    # A draft workspace's config is the AI's unchecked guess; triage nothing against it.
+    if not workspace.setup_done:
+        raise HTTPException(status_code=409, detail="Finish setup before sending email")
     email, event = await asyncify(_store_received)(services, workspace.id, data)
     await services.bus.publish(event)
     await queue.enqueue_email(email.id)
