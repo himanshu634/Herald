@@ -11,7 +11,7 @@ from sqlmodel import Session
 from herald_server.api.deps import QueueDep, ServicesDep
 from herald_server.connectors.base import AuthRevoked, MissingRefreshToken
 from herald_server.crypto import BadSecret
-from herald_server.mailboxes import connect_mailbox
+from herald_server.mailboxes import MailboxInUse, connect_mailbox
 from herald_server.models import Workspace
 from herald_server.services import Services
 
@@ -83,6 +83,10 @@ async def oauth_callback(
     except MissingRefreshToken:
         log.info("oauth callback for %s: no refresh token", provider)
         return _back_to_web(services, mailbox_error="no_refresh_token")
+    except MailboxInUse:
+        # One business per mailbox. The new grant is not revoked (see connect_mailbox).
+        log.info("oauth callback for %s: address live in another workspace", provider)
+        return _back_to_web(services, mailbox_error="mailbox_in_use")
     except AuthRevoked:
         # An invalid, expired or reused code: the provider refuses the exchange.
         log.info("oauth callback for %s: code exchange refused", provider)

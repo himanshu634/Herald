@@ -3,6 +3,7 @@
 import logging
 
 from asyncer import asyncify
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from herald_server.bus import BusEvent
@@ -26,6 +27,10 @@ class StatusConflict(Exception):
     def __init__(self, status: MailboxStatus) -> None:
         super().__init__(f"Mailbox is {status}")
         self.status = status
+
+
+class MailboxInUse(Exception):
+    """Another workspace holds the address live; the OAuth callback answers mailbox_in_use."""
 
 
 def stage_status_event(session: Session, mailbox: Mailbox) -> Event:
@@ -125,6 +130,23 @@ def open_credentials(services: Services, mailbox: Mailbox) -> dict[str, str] | N
         return None
 
 
+def address_live_in_other_workspace(
+    session: Session, workspace_id: str, provider: str, email_address: str
+) -> bool:
+    """True when a workspace other than `workspace_id` has this address not disconnected."""
+    # Cross-tenant by design: one business per mailbox is a rule across workspaces. Only a
+    # yes/no leaves this function, never the other workspace's data.
+    other = session.exec(
+        select(Mailbox.id).where(
+            Mailbox.provider == provider,
+            Mailbox.email_address == email_address,
+            Mailbox.workspace_id != workspace_id,
+            Mailbox.status != MailboxStatus.DISCONNECTED,
+        )
+    ).first()
+    return other is not None
+
+
 def upsert_connected(
     services: Services, workspace_id: str, provider: str, account: ConnectedAccount
 ) -> tuple[Mailbox, BusEvent]:
@@ -133,6 +155,7 @@ def upsert_connected(
     Stages `mailbox.status` in the same transaction; publish the returned event.
     The cursor is kept, so a mailbox that was needs_reauth or disconnected resumes where its
     last sync stopped and no mail in the gap is skipped.
+    Raises `MailboxInUse`, with nothing saved, when another workspace holds the address live.
     """
     if services.secrets is None:
         raise RuntimeError("token_key is not set")
@@ -142,6 +165,10 @@ def upsert_connected(
     # after the commit could fail with the mailbox already saved, and connect_mailbox promises
     # its caller that an exception means nothing was saved.
     with Session(services.engine, expire_on_commit=False) as session:
+        # Checked for a reconnect too: this workspace's own disconnected row may be reused
+        # only while no other workspace has connected the address since.
+        if address_live_in_other_workspace(session, workspace_id, provider, email_address):
+            raise MailboxInUse
         mailbox = session.exec(
             select(Mailbox).where(
                 Mailbox.workspace_id == workspace_id,
@@ -157,7 +184,14 @@ def upsert_connected(
         mailbox.status = MailboxStatus.ACTIVE
         session.add(mailbox)
         event = stage_status_event(session, mailbox)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            # Two callbacks for one address raced past the check above, and the partial unique
+            # index (uq_mailbox_live_address) refused the second. The per-workspace constraint
+            # can also fire here, when two connects in one workspace race to create the row;
+            # that answers "in use" too, and a retry reuses the row the first one saved.
+            raise MailboxInUse from exc
         return mailbox, to_bus(event)
 
 
@@ -255,11 +289,15 @@ async def connect_mailbox(
     """Finish OAuth: save the account as an ACTIVE mailbox, publish the status, subscribe.
 
     The caller has checked that `workspace_id` exists and queues the first sync.
-    Raises the connector's `MissingRefreshToken` or `AuthRevoked` for a code that cannot be used.
+    Raises the connector's `MissingRefreshToken` or `AuthRevoked` for a code that cannot be used,
+    and `MailboxInUse` when another workspace holds the address live.
     Raises only before the mailbox is saved: the steps after the commit are best effort, so
     an exception always means the connect did not happen.
     """
     account = await connector.complete_authorization(code)
+    # On MailboxInUse the grant just obtained is left alone, not revoked: it belongs to the
+    # same account as the other workspace's live grant, and a revoke ends the account's grant
+    # to Herald as a whole, which would break that workspace's mailbox.
     mailbox, event = await asyncify(upsert_connected)(
         services, workspace_id, connector.provider, account
     )

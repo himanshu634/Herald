@@ -8,6 +8,7 @@ import httpx
 import pytest
 from sqlmodel import Session, col, select
 
+from herald_server import mailboxes
 from herald_server.connectors.base import (
     AuthRevoked,
     InboundMessage,
@@ -453,3 +454,88 @@ async def test_pause_resume_and_disconnect(app, client, fake_connector):
     assert mailbox.credentials_enc is None
     # One event per change; the 409s add none.
     assert status_events(app, ws) == ["active", "paused", "active", "disconnected"]
+
+
+async def test_connect_refuses_address_live_in_another_workspace(app, client, fake_connector):
+    ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
+    await connect(app, client, ws_a)
+    [before] = mailboxes_of(app, ws_a)
+    fake_connector.calls.clear()
+
+    state = await start_connect(client, ws_b)
+    response = await callback(client, code="c", state=state)
+    await app.state.queue.drain()
+
+    assert redirect_query(response) == {"mailbox_error": ["mailbox_in_use"]}
+    assert mailboxes_of(app, ws_b) == []
+    assert status_events(app, ws_b) == []
+    assert "complete_authorization" in fake_connector.calls
+    # The new grant belongs to the same account as ws_a's live grant: revoking it would
+    # break ws_a. Nothing is subscribed or synced either.
+    assert "revoke" not in fake_connector.calls
+    assert "subscribe" not in fake_connector.calls
+    assert "fetch_changes" not in fake_connector.calls
+    [after] = mailboxes_of(app, ws_a)
+    assert after.status == MailboxStatus.ACTIVE
+    assert after.credentials_enc == before.credentials_enc
+    assert status_events(app, ws_a) == ["active"]
+
+
+async def test_connect_allowed_when_other_workspace_disconnected(app, client, fake_connector):
+    ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
+    mailbox_a = await connect(app, client, ws_a)
+    await client.delete(f"/api/workspaces/{ws_a}/mailboxes/{mailbox_a}")
+
+    mailbox_b = await connect(app, client, ws_b)
+
+    [new] = mailboxes_of(app, ws_b)
+    assert new.id == mailbox_b != mailbox_a
+    assert new.status == MailboxStatus.ACTIVE
+    [old] = mailboxes_of(app, ws_a)
+    assert old.id == mailbox_a
+    assert old.status == MailboxStatus.DISCONNECTED
+    assert old.credentials_enc is None
+    assert status_events(app, ws_a) == ["active", "disconnected"]
+
+
+async def test_reconnect_own_disconnected_row_refused_when_address_live_elsewhere(
+    app, client, fake_connector
+):
+    ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
+    mailbox_a = await connect(app, client, ws_a)
+    await client.delete(f"/api/workspaces/{ws_a}/mailboxes/{mailbox_a}")
+    await connect(app, client, ws_b)
+    fake_connector.calls.clear()
+
+    state = await start_connect(client, ws_a)
+    response = await callback(client, code="c", state=state)
+
+    assert redirect_query(response) == {"mailbox_error": ["mailbox_in_use"]}
+    assert "revoke" not in fake_connector.calls
+    [old] = mailboxes_of(app, ws_a)
+    assert old.status == MailboxStatus.DISCONNECTED
+    assert old.credentials_enc is None
+    assert status_events(app, ws_a) == ["active", "disconnected"]
+    [live] = mailboxes_of(app, ws_b)
+    assert live.status == MailboxStatus.ACTIVE
+
+
+async def test_concurrent_connect_integrity_error_maps_to_in_use(
+    app, client, fake_connector, monkeypatch
+):
+    ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
+    await connect(app, client, ws_a)
+    fake_connector.calls.clear()
+    # Two callbacks race: ws_b's check ran before ws_a's commit, so only the partial unique
+    # index catches the second live row, at commit.
+    monkeypatch.setattr(mailboxes, "address_live_in_other_workspace", lambda *args: False)
+
+    state = await start_connect(client, ws_b)
+    response = await callback(client, code="c", state=state)
+
+    assert redirect_query(response) == {"mailbox_error": ["mailbox_in_use"]}
+    assert mailboxes_of(app, ws_b) == []
+    assert status_events(app, ws_b) == []
+    assert "revoke" not in fake_connector.calls
+    [live] = mailboxes_of(app, ws_a)
+    assert live.status == MailboxStatus.ACTIVE
