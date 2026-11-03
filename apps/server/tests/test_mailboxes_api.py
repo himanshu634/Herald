@@ -108,9 +108,10 @@ async def test_callback_with_forged_state_is_rejected(app, client, fake_connecto
 
 async def test_callback_with_expired_state_is_rejected(app, client, fake_connector, monkeypatch):
     ws = await demo_workspace(client)
-    # Seal first: Fernet's encrypt reads the clock too.
-    real_now = time.time()
+    # Seal first, then read the clock: Fernet's encrypt reads it too, and a seal that crossed
+    # a second boundary after `real_now` would still be inside max_age at real_now + 601.
     state = await start_connect(client, ws)
+    real_now = time.time()
     monkeypatch.setattr("cryptography.fernet.time.time", lambda: real_now + 601)
 
     response = await callback(client, code="c", state=state)
