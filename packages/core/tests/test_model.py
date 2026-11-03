@@ -102,3 +102,18 @@ async def test_rules_call_sends_history_before_the_email():
     content = calls[0]["messages"][0]["content"]
     assert content.startswith(history_block(HISTORY) + "\n\n<email>")
     assert content.endswith("Answer each rule in the <business> block.")
+
+
+def test_a_sure_note_carries_no_question():
+    notes = Notes.model_validate(
+        NOTES.model_dump() | {"question": "Why?", "fact_draft": "Because."}
+    )
+    assert (notes.question, notes.fact_draft) == (None, None)
+
+
+def test_an_unsure_note_keeps_a_trimmed_question_and_draft():
+    notes = Notes.model_validate(
+        NOTES.model_dump() | {"sure": False, "question": "  Why?  ", "fact_draft": "x" * 250}
+    )
+    assert notes.question == "Why?"
+    assert notes.fact_draft == "x" * 200

@@ -78,6 +78,7 @@ def _record_alert(services: Services, email: Email, alert: Alert) -> BusEvent:
 async def process_email(services: Services, email_id: str) -> Decision:
     email, name, config, received_at = await asyncify(_load)(services, email_id)
     tools = build_toolbox(services.engine, email.workspace_id, email.id, received_at)
+    log.info("email %s triage started in workspace %s", email.id, email.workspace_id)
     started = time.perf_counter()
     state = await triage(services.graph, email.to_core(), config, business_name=name, tools=tools)
     total_ms = round((time.perf_counter() - started) * 1000)
@@ -86,7 +87,17 @@ async def process_email(services: Services, email_id: str) -> Decision:
     context = EmailContext.from_run(
         state.get("history") or History(), list(tools.failed), dict(tools.ms) | {"triage": total_ms}
     )
-    log.info("triaged email %s in %d ms, failed tools: %s", email.id, total_ms, tools.failed)
+    log.info(
+        "email %s triaged in %d ms: route=%s urgency=%s rules=%s floor=%s notes=%s failed tools=%s",
+        email.id,
+        total_ms,
+        decision.route,
+        decision.urgency,
+        ",".join(decision.fired_rule_ids) or "none",
+        ",".join(decision.floor_flags) or "none",
+        "yes" if notes else "no",
+        ",".join(tools.failed) or "none",
+    )
 
     email, event = await asyncify(_save)(services, email_id, notes, decision, context)
     await services.bus.publish(event)
@@ -102,4 +113,5 @@ async def process_email(services: Services, email_id: str) -> Decision:
             link=f"{services.settings.web_url}/emails/{email.id}",
         )
         await services.bus.publish(await asyncify(_record_alert)(services, email, alert))
+        log.info("email %s alert recorded", email.id)
     return decision

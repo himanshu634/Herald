@@ -176,6 +176,27 @@ class Notes(BaseModel):
     summary: str
     quotes: list[Quote] = Field(default_factory=list)
     sure: bool = Field(description="False when the AI is not confident in these notes.")
+    question: str | None = Field(
+        default=None,
+        description="When unsure: the one question the owner could answer to settle it.",
+    )
+    fact_draft: str | None = Field(
+        default=None,
+        description="When unsure: a fact that would settle it, for the owner to check.",
+    )
+
+    @model_validator(mode="after")
+    def _question_only_when_unsure(self) -> "Notes":
+        # A sure note carries no question, so nothing asks the owner about it.
+        if self.sure:
+            self.question = self.fact_draft = None
+        # Trimmed, not rejected: a too-long line from the model must not throw away the notes.
+        # The draft is cut to a fact's limit so the owner can save it as it stands.
+        if self.question:
+            self.question = self.question.strip()[:300] or None
+        if self.fact_draft:
+            self.fact_draft = self.fact_draft.strip()[:200] or None
+        return self
 
 
 class RuleVerdict(BaseModel):
