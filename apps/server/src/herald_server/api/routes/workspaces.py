@@ -5,7 +5,6 @@ from sqlmodel import Session, col, select
 from herald_core.schema import WorkspaceConfig
 from herald_server.api.deps import ServicesDep, SessionDep, WorkspaceDep
 from herald_server.api.schemas import (
-    ConfigIn,
     DraftOut,
     SetupIn,
     SetupOut,
@@ -25,10 +24,10 @@ def _out(workspace: Workspace) -> WorkspaceOut:
     return WorkspaceOut.model_validate(workspace, from_attributes=True)
 
 
-def _create(session: Session, data: WorkspaceIn, *, setup_done: bool = True) -> Workspace:
-    workspace = Workspace(
-        name=data.name, config=data.config.model_dump(mode="json"), setup_done=setup_done
-    )
+def _create(
+    session: Session, name: str, config: WorkspaceConfig, *, setup_done: bool = True
+) -> Workspace:
+    workspace = Workspace(name=name, config=config.model_dump(mode="json"), setup_done=setup_done)
     session.add(workspace)
     session.commit()
     session.refresh(workspace)
@@ -43,17 +42,17 @@ def list_workspaces(session: SessionDep) -> list[WorkspaceOut]:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_workspace(data: WorkspaceIn, session: SessionDep) -> WorkspaceOut:
-    return _out(_create(session, data))
+    return _out(_create(session, data.name, data.config))
 
 
 @router.post("/demo", status_code=status.HTTP_201_CREATED)
 def create_demo_workspace(session: SessionDep) -> WorkspaceOut:
-    return _out(_create(session, WorkspaceIn(name=TRIPFOLD_NAME, config=TRIPFOLD)))
+    return _out(_create(session, TRIPFOLD_NAME, TRIPFOLD))
 
 
 def _create_draft(services: Services, name: str, config: WorkspaceConfig) -> WorkspaceOut:
     with Session(services.engine) as session:
-        return _out(_create(session, WorkspaceIn(name=name, config=config), setup_done=False))
+        return _out(_create(session, name, config, setup_done=False))
 
 
 @router.post("/setup", status_code=status.HTTP_201_CREATED)
@@ -80,7 +79,7 @@ async def suggest_setup(
     return DraftOut(config=config, drafted=drafted)
 
 
-def _save_config(services: Services, workspace_id: str, data: ConfigIn) -> WorkspaceOut:
+def _save_config(services: Services, workspace_id: str, data: WorkspaceIn) -> WorkspaceOut:
     with Session(services.engine) as session:
         workspace = session.get(Workspace, workspace_id)
         if workspace is None:
@@ -96,7 +95,7 @@ def _save_config(services: Services, workspace_id: str, data: ConfigIn) -> Works
 
 @router.put("/{workspace_id}/config")  # noqa: FAST003
 async def save_config(
-    data: ConfigIn, workspace: WorkspaceDep, services: ServicesDep
+    data: WorkspaceIn, workspace: WorkspaceDep, services: ServicesDep
 ) -> WorkspaceOut:
     """Save the owner's reviewed setup. Ends onboarding; also the save for later edits."""
     return await asyncify(_save_config)(services, workspace.id, data)

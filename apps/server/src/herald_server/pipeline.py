@@ -7,10 +7,9 @@ from datetime import datetime
 from asyncer import asyncify
 from sqlmodel import Session
 
-from herald_core.adapters import Alert
 from herald_core.graph import triage
 from herald_core.history import EmailContext, History
-from herald_core.schema import Decision, Notes, Route, WorkspaceConfig
+from herald_core.schema import Alert, Decision, Notes, Route, WorkspaceConfig
 from herald_server.bus import BusEvent
 from herald_server.events import ALERT_SENT, EMAIL_NOTED, add_event, to_bus
 from herald_server.models import STATUS_FOR_ROUTE, Email, Workspace
@@ -42,7 +41,7 @@ def _save(
     notes: Notes | None,
     decision: Decision,
     context: EmailContext,
-) -> tuple[Email, list[BusEvent]]:
+) -> tuple[Email, BusEvent]:
     with Session(services.engine) as session:
         email = session.get(Email, email_id)
         assert email is not None
@@ -65,15 +64,15 @@ def _save(
         session.commit()
         session.refresh(email)
         session.refresh(event)
-        return email, [to_bus(event)]
+        return email, to_bus(event)
 
 
-def _record_alert(services: Services, email: Email, alert: Alert) -> list[BusEvent]:
+def _record_alert(services: Services, email: Email, alert: Alert) -> BusEvent:
     with Session(services.engine) as session:
         event = add_event(session, email.workspace_id, ALERT_SENT, alert.model_dump(mode="json"))
         session.commit()
         session.refresh(event)
-        return [to_bus(event)]
+        return to_bus(event)
 
 
 async def process_email(services: Services, email_id: str) -> Decision:
@@ -89,9 +88,8 @@ async def process_email(services: Services, email_id: str) -> Decision:
     )
     log.info("triaged email %s in %d ms, failed tools: %s", email.id, total_ms, tools.failed)
 
-    email, events = await asyncify(_save)(services, email_id, notes, decision, context)
-    for event in events:
-        await services.bus.publish(event)
+    email, event = await asyncify(_save)(services, email_id, notes, decision, context)
+    await services.bus.publish(event)
 
     if decision.route is Route.ALERT:
         alert = Alert(
@@ -103,6 +101,5 @@ async def process_email(services: Services, email_id: str) -> Decision:
             quote=notes.quotes[0].text if notes and notes.quotes else None,
             link=f"{services.settings.web_url}/emails/{email.id}",
         )
-        for event in await asyncify(_record_alert)(services, email, alert):
-            await services.bus.publish(event)
+        await services.bus.publish(await asyncify(_record_alert)(services, email, alert))
     return decision
