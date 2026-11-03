@@ -46,7 +46,8 @@ Invariants that span files:
 - **Sync DB in async code:** DB work lives in plain sync functions using `Session(services.engine)` and is called with `asyncify(...)` from async routes and the pipeline.
 - **Swappable backends:** `EventBus` (`redis`/`memory`), `JobQueue` (`arq`/`inline`), `TriageModel` (`anthropic`/`fake`), `MailConnector` (`gmail`; `FakeConnector` in tests). Tests use the in-process set via `apps/server/tests/conftest.py`, so they need no Docker or API key.
 - **Mail connectors are provider-neutral:** only code in `connectors/<provider>/` knows a provider. A mailbox's `cursor` and `provider_state` are opaque everywhere else.
-- **No migrations yet:** tables are created with `SQLModel.metadata.create_all` on startup. Delete `apps/server/herald-dev.db` after a model change in lite mode.
+- **No migrations yet:** tables are created with `SQLModel.metadata.create_all` on startup, which never adds columns to an existing table. Startup fails and names the missing columns when the database is older than the models. After a model change, delete `apps/server/herald-dev.db` (lite mode) or reset Postgres with `docker compose -f infra/docker-compose.yml down -v`.
+- **Dev errors:** `make api`, `make lite` and the Docker dev stack set `HERALD_DEBUG=1`, so a 500 carries its traceback to the browser. Leave it off in production.
 - **Auth, when added, must be a cookie** — `EventSource` cannot send an `Authorization` header.
 - After changing API schemas (`api/schemas.py`), run `make gen-api` and commit the regenerated `schema.d.ts`.
 

@@ -30,6 +30,7 @@ x-server: &server
     HERALD_REDIS_URL: redis://redis:6379/0
     HERALD_BUS: redis
     HERALD_QUEUE: arq
+    HERALD_DEBUG: "1"
 
 services:
   api:

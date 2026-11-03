@@ -289,9 +289,12 @@
 		{#if error}
 			<div
 				role="alert"
-				class="mx-4 mt-3 flex items-center justify-between gap-3 rounded-lg bg-danger-bg px-4 py-2 text-sm text-danger-fg"
+				class="mx-4 mt-3 flex items-start justify-between gap-3 rounded-lg bg-danger-bg px-4 py-2 text-sm text-danger-fg"
 			>
-				<p>Something went wrong: {error}</p>
+				<!-- With HERALD_DEBUG the message is a full traceback: keep its lines, cap its height. -->
+				<p class="max-h-64 min-w-0 overflow-auto break-words">
+					Something went wrong: <span class="whitespace-pre-wrap">{error}</span>
+				</p>
 				<Button variant="quiet" size="sm" onclick={() => (error = null)}>Dismiss</Button>
 			</div>
 		{/if}
