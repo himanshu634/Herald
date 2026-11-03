@@ -143,6 +143,10 @@ Dashed when off, solid ink when on (`aria-pressed`). Chips filter the current vi
 
 `bg-surface`, `border-line`, `rounded-lg`. An optional header with a title and actions sits above a dashed divider. `padded={false}` for edge-to-edge content such as a table. Don't nest panels.
 
+### HoverCard
+
+Help that would clutter the screen, opened from a dotted-underlined label with an `info` icon. Pass `info` to `Panel` to put it on the title. It opens on hover, on focus and on tap (there is no hover on a phone), stays open while the pointer moves into it, and Escape closes it. Say what the thing is for, then what it needs: required or optional, and its limits. Never put the only copy of something the owner must know in a hover card.
+
 ### Toast
 
 A short message after an owner action, bottom centre, ink on canvas. It uses the action's own words ("Moved to In progress.") and clears itself after 5 seconds. It sits in a `role="status"` region so screen readers hear it. Errors are not toasts: they stay on screen as a `role="alert"` banner until dismissed.

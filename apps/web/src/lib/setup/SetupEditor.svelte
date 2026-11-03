@@ -38,6 +38,50 @@
 		close: 'neutral'
 	};
 
+	// What each panel is for and what it needs, shown in the hover card on its title.
+	// Limits come from setup.ts so the card never disagrees with what the server accepts.
+	type Info = { about: string; required: boolean; points: string[] };
+	const INFO: Record<'topics' | 'facts' | 'guidance' | 'rules', Info> = {
+		topics: {
+			about: 'Herald files every email under one topic.',
+			required: true,
+			points: [
+				`Needs at least one. Up to ${MAX_TOPICS} topics, ${MAX_TOPIC_LENGTH} characters each.`,
+				'A one-line meaning tells Herald what belongs. It is optional.',
+				`"${SPAM_TOPIC}" is always there and can't be removed.`
+			]
+		},
+		facts: {
+			about: 'What is true about your business, like your return window, delivery area or prices.',
+			required: false,
+			points: [
+				`Up to ${MAX_FACTS} facts, ${MAX_FACT_LENGTH} characters each.`,
+				'Herald checks each email against these, for example a return asked for after the window.',
+				'Write only what is true. A wrong fact misleads Herald.'
+			]
+		},
+		guidance: {
+			about: 'How your business judges urgency, in your own words.',
+			required: false,
+			points: [
+				`Up to ${MAX_GUIDANCE} lines, ${MAX_GUIDANCE_LENGTH} characters each.`,
+				"Shapes each email's topic, urgency and anger.",
+				"It can't decide what alerts you or switch off the safety floor. Use a rule for that."
+			]
+		},
+		rules: {
+			about: 'What Herald does when an email matches.',
+			required: false,
+			points: [
+				'Each rule needs a name and a When. Herald answers yes or no, with a quote from the email.',
+				'Then it alerts you, sets the urgency, or closes the email quietly.',
+				'If two rules match, Alert me wins over Close quietly.',
+				'With no rules, urgent emails and very angry customers still alert you.',
+				`Up to ${MAX_RULES} rules.`
+			]
+		}
+	};
+
 	// A blank field shows its border, so a new, empty line is never invisible.
 	const lineField =
 		'min-w-0 flex-1 resize-none rounded-sm border px-2 py-1.5 text-md leading-snug field-sizing-content focus:border-control';
@@ -97,6 +141,19 @@
 	<span class="hidden text-right text-sm text-muted sm:inline">{text}</span>
 {/snippet}
 
+{#snippet guide({ about, required, points }: Info)}
+	<p class="font-bold text-ink">{about}</p>
+	<span
+		class={[
+			'mt-1.5 inline-block rounded-xs px-1.5 text-xs font-bold',
+			TONE_CLASSES[required ? 'warning' : 'neutral']
+		]}>{required ? 'Required' : 'Optional'}</span
+	>
+	<ul class="mt-2 flex list-disc flex-col gap-1 pl-4">
+		{#each points as point (point)}<li>{point}</li>{/each}
+	</ul>
+{/snippet}
+
 {#snippet lines(
 	list: LineList,
 	items: string[],
@@ -139,6 +196,7 @@
 
 <div bind:this={editor} class="flex flex-col gap-4">
 	<Panel title="Topics">
+		{#snippet info()}{@render guide(INFO.topics)}{/snippet}
 		{#snippet actions()}{@render cap(config.topics.length, MAX_TOPICS)}{/snippet}
 		<p class="mb-3 text-sm text-muted">Herald files every email under one of these.</p>
 		<ul aria-label="Topics">
@@ -193,6 +251,7 @@
 	</Panel>
 
 	<Panel title="What's true">
+		{#snippet info()}{@render guide(INFO.facts)}{/snippet}
 		{#snippet actions()}
 			{@render cap(facts.length, MAX_FACTS)}{@render help('Herald checks emails against these.')}
 		{/snippet}
@@ -206,6 +265,7 @@
 	</Panel>
 
 	<Panel title="What matters most">
+		{#snippet info()}{@render guide(INFO.guidance)}{/snippet}
 		{#snippet actions()}
 			{@render cap(guidance.length, MAX_GUIDANCE)}{@render help('How Herald judges urgency.')}
 		{/snippet}
@@ -219,6 +279,7 @@
 	</Panel>
 
 	<Panel title="What happens">
+		{#snippet info()}{@render guide(INFO.rules)}{/snippet}
 		{#snippet actions()}
 			{@render cap(rules.length, MAX_RULES)}
 			<!-- decide.py checks alert rules before close rules, so this holds whatever the order. -->
