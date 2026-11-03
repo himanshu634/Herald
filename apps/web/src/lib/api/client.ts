@@ -3,7 +3,6 @@ import type { components } from './schema';
 
 export type Workspace = components['schemas']['WorkspaceOut'];
 export type Email = components['schemas']['EmailOut'];
-export type EmailIn = components['schemas']['EmailIn'];
 export type EmailStatus = components['schemas']['EmailStatus'];
 export type WorkspaceConfig = components['schemas']['WorkspaceConfig'];
 export type Topic = components['schemas']['Topic'];
@@ -47,11 +46,6 @@ export const api = {
 			body: JSON.stringify({ name, config })
 		}),
 	listEmails: (workspaceId: string) => request<Email[]>(`/workspaces/${workspaceId}/emails`),
-	sendTestEmail: (workspaceId: string, email: EmailIn) =>
-		request<Email>(`/workspaces/${workspaceId}/emails`, {
-			method: 'POST',
-			body: JSON.stringify(email)
-		}),
 	act: (workspaceId: string, emailId: string, action: 'on-it' | 'not-urgent' | 'done') =>
 		request<Email>(`/workspaces/${workspaceId}/emails/${emailId}/${action}`, { method: 'POST' }),
 	/** Mail providers this server can connect, like ['gmail']. Empty when none is set up. */

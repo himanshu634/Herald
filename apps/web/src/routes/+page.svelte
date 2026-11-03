@@ -2,12 +2,11 @@
 	import { goto, replaceState } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { api, type Email, type EmailIn, type Mailbox, type Workspace } from '#lib/api/client.js';
+	import { api, type Email, type Mailbox, type Workspace } from '#lib/api/client.js';
 	import { WorkspaceEvents } from '#lib/events.svelte.js';
 	import BusinessMenu from '#lib/inbox/BusinessMenu.svelte';
 	import EmailPanel from '#lib/inbox/EmailPanel.svelte';
 	import EmailTable from '#lib/inbox/EmailTable.svelte';
-	import SendTestEmail from '#lib/inbox/SendTestEmail.svelte';
 	import ConnectGmail from '#lib/mailbox/ConnectGmail.svelte';
 	import MailboxMenu from '#lib/mailbox/MailboxMenu.svelte';
 	import { liveMailboxes, needsMailbox, readReturn, type Notice } from '#lib/mailbox/mailbox.js';
@@ -48,7 +47,6 @@
 	let fullId = $state<string | null>(null);
 
 	let search = $state<HTMLInputElement>();
-	let sender = $state<SendTestEmail>();
 
 	const live = new WorkspaceEvents();
 	// Only a saved setup takes email; drafts wait in the business menu.
@@ -183,17 +181,6 @@
 		}
 	}
 
-	async function send(draft: EmailIn) {
-		if (!workspaceId) return;
-		try {
-			await api.sendTestEmail(workspaceId, draft);
-			toast = 'Sent. Herald is reading it now.';
-			view = 'all';
-		} catch (e) {
-			fail(e);
-		}
-	}
-
 	async function act(action: Action) {
 		if (!selected || busy || !actionsFor(selected.status).includes(action)) return;
 		busy = true;
@@ -288,9 +275,6 @@
 				{/if}
 				{#if workspaces.length}
 					<BusinessMenu {workspaces} bind:selected={workspaceId} />
-				{/if}
-				{#if open}
-					<Button onclick={() => sender?.open()}>Send test email</Button>
 				{/if}
 			</div>
 		</header>
@@ -468,5 +452,4 @@
 	</div>
 </div>
 
-<SendTestEmail bind:this={sender} onsend={send} />
 <Toast message={toast} ondismiss={() => (toast = null)} />
