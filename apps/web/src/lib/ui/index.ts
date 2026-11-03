@@ -1,6 +1,7 @@
 // Herald's design system components. Rules: docs/design-system.md. Gallery: /design-system.
 export { default as AngerMeter } from './AngerMeter.svelte';
 export { default as Button } from './Button.svelte';
+export { default as Dialog } from './Dialog.svelte';
 export { default as FilterChip } from './FilterChip.svelte';
 export { default as HoverCard } from './HoverCard.svelte';
 export { default as Icon, type IconName } from './Icon.svelte';

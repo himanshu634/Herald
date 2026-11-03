@@ -65,7 +65,7 @@ function urgencyRank(email: Email): number {
 	return urgency ? URGENCY_RANK[urgency] : 4;
 }
 
-export type Filters = { query: string; urgentOnly: boolean; unsure: boolean };
+export type Filters = { query: string; urgentOnly: boolean };
 
 export function matches(email: Email, filters: Filters): boolean {
 	const query = filters.query.trim().toLowerCase();
@@ -77,12 +77,61 @@ export function matches(email: Email, filters: Filters): boolean {
 	}
 	if (filters.urgentOnly && (email.decision?.urgency ?? email.notes?.urgency) !== 'urgent')
 		return false;
-	if (filters.unsure && email.notes?.sure !== false) return false;
 	return true;
 }
 
+/**
+ * Herald is unsure and the owner has not taken the email over. These emails ask the owner a
+ * question above every view, whatever the tab and filters, until a re-read settles them or
+ * the owner marks them On it or Done. An unsure email can sit in any status decide sets:
+ * a close rule or an urgency default wins over "unsure", so one may be closed or alerted.
+ */
+export function asksOwner(email: Email): boolean {
+	return (
+		email.notes?.sure === false &&
+		email.status !== 'new' &&
+		email.status !== 'in_progress' &&
+		email.status !== 'done'
+	);
+}
+
+export function questionsFor(emails: Email[]): Email[] {
+	return emails.filter(asksOwner).toSorted(compareEmails);
+}
+
+/** The table under the questions. Questions are left out: they are already shown above it. */
 export function visibleEmails(emails: Email[], view: ViewId, filters: Filters): Email[] {
-	return emails.filter((e) => inView(e, view) && matches(e, filters)).toSorted(compareEmails);
+	return emails
+		.filter((e) => !asksOwner(e) && inView(e, view) && matches(e, filters))
+		.toSorted(compareEmails);
+}
+
+/** The most facts a business keeps (WorkspaceConfig.facts), and the longest one. */
+export const MAX_FACTS = 10;
+export const MAX_FACT_LENGTH = 200;
+
+/**
+ * The facts the owner would save from the question dialog: their edits to existing facts,
+ * plus the new fact, added or put in place of the one they picked. A fact emptied by an edit
+ * is dropped. At the limit a new fact needs a fact to replace, or the save would be refused.
+ */
+export function nextFacts(
+	edits: string[],
+	draft: string,
+	replace: number | null
+): { facts: string[]; error: string | null } {
+	const facts = edits.map((fact) => fact.trim());
+	const text = draft.trim();
+	if (text) {
+		if (replace !== null) facts[replace] = text;
+		else if (facts.filter(Boolean).length >= MAX_FACTS)
+			return {
+				facts: facts.filter(Boolean),
+				error: `You have ${MAX_FACTS} facts, the most Herald keeps. Pick one to replace, or change one instead.`
+			};
+		else facts.push(text);
+	}
+	return { facts: facts.filter(Boolean), error: null };
 }
 
 export function countByView(emails: Email[]): Record<ViewId, number> {

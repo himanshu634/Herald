@@ -89,11 +89,24 @@ class FakeModel:
         lower = text.lower()
         # Bulk-mail footers win over topic words: a sale email that names "orders" is still
         # not about this business.
+        named = None
         if any(marker in lower for marker in _FAKE_BULK_MARKERS):
             topic = SPAM_TOPIC
         else:
-            topic = next((t.name for t in config.topics if t.name.lower() in lower), None)
-            topic = topic or config.topics[0].name
+            named = next((t.name for t in config.topics if t.name.lower() in lower), None)
+            topic = named or config.topics[0].name
+        # Unsure, so lite mode can show Herald's questions: a customer question that touches
+        # no topic (no topic word's first five letters appear) and shares no long subject word
+        # with any fact. Saving a fact that uses one of those words makes the next read sure,
+        # which is the loop the inbox teaches.
+        stems = {w[:5] for t in config.topics for w in re.findall(r"[a-z]{5,}", t.name.lower())}
+        subject_words = set(re.findall(r"[a-z]{6,}", email.subject.lower()))
+        covered = (
+            named is not None
+            or any(stem in lower for stem in stems)
+            or any(w in fact.lower() for fact in config.facts for w in subject_words)
+        )
+        sure = topic == SPAM_TOPIC or covered or "?" not in text
         letters = [c for c in text if c.isalpha()]
         caps = sum(c.isupper() for c in letters) / max(len(letters), 1)
         anger = 5 if caps > 0.6 else 3 if text.count("!") >= 3 else 1
@@ -107,7 +120,8 @@ class FakeModel:
             anger=anger,
             risk_flags=flags,
             summary=email.subject[:120],
-            sure=True,
+            sure=sure,
+            question=None if sure else f"How should Herald handle emails like “{email.subject}”?",
         )
 
     async def judge_rules(

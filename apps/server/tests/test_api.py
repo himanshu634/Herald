@@ -155,3 +155,43 @@ async def test_only_the_seeded_demo_is_marked_demo(client):
 
     assert demo["demo"] is True
     assert setup["demo"] is False
+
+
+async def test_saved_fact_and_reread_settle_an_unsure_email(app, client):
+    ws = await demo_workspace(client)
+    other = await demo_workspace(client)
+    email = await send(app, client, ws, "Engraving", "Can you engrave my initials on the tag?")
+    assert email["status"] == "needs_a_look"
+    assert email["notes"]["sure"] is False
+    assert email["notes"]["question"]
+    url = f"/api/workspaces/{ws}/emails/{email['id']}/reread"
+
+    workspace = (await client.get(f"/api/workspaces/{ws}")).json()
+    config = workspace["config"] | {
+        "facts": [*workspace["config"]["facts"], "Engraving initials on a tag is free."]
+    }
+    saved = await client.put(
+        f"/api/workspaces/{ws}/config", json={"name": workspace["name"], "config": config}
+    )
+    assert saved.status_code == 200
+
+    assert (
+        await client.post(f"/api/workspaces/{other}/emails/{email['id']}/reread")
+    ).status_code == 404
+    response = await client.post(url)
+    assert response.status_code == 202
+    await app.state.queue.drain()
+    again = (await client.get(f"/api/workspaces/{ws}/emails/{email['id']}")).json()
+    assert again["notes"]["sure"] is True
+    assert again["notes"]["question"] is None
+    assert again["status"] == "inbox"
+
+
+async def test_reread_is_409_once_the_owner_took_it(app, client):
+    ws = await demo_workspace(client)
+    email = await send(app, client, ws, "Engraving", "Can you engrave my initials on the tag?")
+    assert (
+        await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/on-it")
+    ).status_code == 200
+    response = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/reread")
+    assert response.status_code == 409

@@ -46,6 +46,12 @@ and urgency from that, and say in the summary what kind of matter it is. This ne
 you from adding a risk flag. When you cannot tell how the owner would want it handled, set
 sure to false.
 
+When sure is false, write question: the one short question the owner could answer to settle
+it, in plain words, about their business rather than this customer ("Do you take back pairs
+bought from a stockist?"). Write fact_draft only when one plain fact would settle it: the
+fact as the owner might write it, under 200 characters. It is a guess the owner checks before
+saving, so keep it to what the question asks. When sure is true, leave both empty.
+
 Rules: for each rule, answer yes or no from the email,
 using the history only as background, and quote the line that decided it.
 Answer from what the condition means, not only its exact words. A rule matches only when the
