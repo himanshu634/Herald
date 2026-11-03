@@ -407,6 +407,34 @@ export interface components {
              */
             drafted: boolean;
         };
+        /**
+         * EmailContext
+         * @description What the agent looked up for one email: counts, the ids it saw, failures and timings.
+         */
+        EmailContext: {
+            /**
+             * Repeat 7D
+             * @default 0
+             */
+            repeat_7d: number;
+            /**
+             * Repeat 30D
+             * @default 0
+             */
+            repeat_30d: number;
+            /** Recent Ids */
+            recent_ids?: string[];
+            /** Thread Ids */
+            thread_ids?: string[];
+            /** Correction Ids */
+            correction_ids?: string[];
+            /** Failed */
+            failed?: string[];
+            /** Ms */
+            ms?: {
+                [key: string]: number;
+            };
+        };
         /** EmailIn */
         EmailIn: {
             /** Sender */
@@ -415,6 +443,8 @@ export interface components {
             subject: string;
             /** Body */
             body: string;
+            /** Thread Id */
+            thread_id?: string | null;
         };
         /** EmailOut */
         EmailOut: {
@@ -428,9 +458,12 @@ export interface components {
             subject: string;
             /** Body */
             body: string;
+            /** Thread Id */
+            thread_id: string | null;
             status: components["schemas"]["EmailStatus"];
             notes: components["schemas"]["Notes"] | null;
             decision: components["schemas"]["Decision"] | null;
+            context: components["schemas"]["EmailContext"] | null;
             /**
              * Received At
              * Format: date-time
