@@ -15,6 +15,7 @@ from herald_server.connectors.base import MailConnector
 from herald_server.crypto import BadSecret, SecretBox
 from herald_server.models import Mailbox, MailboxStatus
 from herald_server.settings import Settings
+from herald_server.tracing import Tracing, build_tracing
 
 
 @dataclass
@@ -27,6 +28,7 @@ class Services:
     http: httpx.AsyncClient
     secrets: SecretBox | None  # None when token_key is unset
     connectors: dict[str, MailConnector]
+    tracing: Tracing
 
 
 def _check_schema(engine: Engine) -> None:
@@ -105,6 +107,8 @@ def build_services(settings: Settings) -> Services:
         if settings.model_provider == "anthropic"
         else FakeModel()
     )
+    tracing = build_tracing(settings)
+    model = tracing.wrap_model(model)
     http = httpx.AsyncClient(timeout=20)
     return Services(
         settings=settings,
@@ -115,4 +119,5 @@ def build_services(settings: Settings) -> Services:
         http=http,
         secrets=secrets,
         connectors=build_connectors(settings, http),
+        tracing=tracing,
     )

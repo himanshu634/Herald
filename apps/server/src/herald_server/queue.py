@@ -60,7 +60,9 @@ class InlineQueue:
         task.add_done_callback(self._tasks.discard)
 
     async def enqueue_email(self, email_id: str) -> None:
-        self._spawn(process_email(self._api, self._services.graph, email_id))
+        self._spawn(
+            process_email(self._api, self._services.graph, email_id, self._services.tracing)
+        )
 
     async def enqueue_sync(self, mailbox_id: str) -> None:
         self._spawn(self._sync(mailbox_id))

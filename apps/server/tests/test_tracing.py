@@ -8,6 +8,7 @@ from pydantic import SecretStr
 import herald_server.tracing as tracing_module
 from herald_core.model import FakeModel, ModelError
 from herald_core.schema import Decision, Email, Notes, RiskFlag, Route, WorkspaceConfig
+from herald_server.pipeline import process_email, trial_read
 from herald_server.tracing import (
     NO_TRACING,
     LangfuseTracing,
@@ -238,3 +239,70 @@ def test_run_body_error_passes_through_a_failing_span_exit():
     with pytest.raises(ModelError, match="boom"):
         with tracing.run("email", user_id="w", session_id="e", tags=[], metadata={}):
             raise ModelError("boom")
+
+
+class RecordingTracing:
+    """A Tracing that records run() calls and scores, for pipeline tests."""
+
+    enabled = True
+
+    def __init__(self) -> None:
+        self.runs: list[tuple[str, dict]] = []
+        self.scores: list[tuple[str | None, str, object]] = []
+
+    def wrap_model(self, model):
+        return model
+
+    @contextmanager
+    def run(self, name, **kwargs):
+        self.runs.append((name, kwargs))
+        yield Run("t1", [])
+
+    def score(self, trace_id, name, value) -> None:
+        self.scores.append((trace_id, name, value))
+
+    def shutdown(self) -> None:
+        pass
+
+
+async def make_test_email(app, client) -> tuple[str, str]:
+    """Create a demo workspace and one email. The inline queue triages it once on arrival."""
+    ws = (await client.post("/api/workspaces/demo")).json()["id"]
+    response = await client.post(
+        f"/api/workspaces/{ws}/emails",
+        json={"sender": "riya@customer.in", "subject": "Hi", "body": "Does the bag fit Indigo?"},
+    )
+    assert response.status_code == 202
+    await app.state.queue.drain()
+    return ws, response.json()["id"]
+
+
+async def test_process_email_traces_one_run(app, client, agent_api):
+    ws, email_id = await make_test_email(app, client)
+    tracing = RecordingTracing()
+    await process_email(agent_api, app.state.services.graph, email_id, tracing)
+    ((name, kw),) = tracing.runs
+    assert name == "triage" and kw["session_id"] == email_id and "live" in kw["tags"]
+    assert kw["user_id"] == ws and kw["metadata"] == {"email_id": email_id}
+    assert {s[1] for s in tracing.scores} == {"route", "floor", "unsure", "ai_failed"}
+
+
+async def test_trial_read_is_traced_as_try(app, client, agent_api):
+    ws, email_id = await make_test_email(app, client)
+    config = (await agent_api.triage_input(email_id)).config
+    tracing = RecordingTracing()
+    await trial_read(agent_api, app.state.services.graph, email_id, config, tracing)
+    ((name, kw),) = tracing.runs
+    assert name == "trial-read" and kw["session_id"] == email_id and "try" in kw["tags"]
+    assert kw["user_id"] == ws
+    assert {s[1] for s in tracing.scores} == {"route", "floor", "unsure", "ai_failed"}
+
+
+async def test_tracing_errors_never_reach_triage(app, client, agent_api):
+    ws, email_id = await make_test_email(app, client)
+    tracing = LangfuseTracing(
+        StubClient(raise_all=True), model_name="fake", propagate=stub_propagate, handler=object
+    )
+    decision = await process_email(agent_api, app.state.services.graph, email_id, tracing)
+    detail = (await client.get(f"/api/workspaces/{ws}/emails/{email_id}")).json()
+    assert detail["decision"]["route"] == decision.route  # saved as usual

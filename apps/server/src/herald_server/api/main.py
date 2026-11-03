@@ -50,6 +50,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await services.bus.close()
         await services.http.aclose()
         services.engine.dispose()
+        # Last: the SDK batches spans in a background thread, and a process that exits without
+        # this flush loses the final ones.
+        services.tracing.shutdown()
 
     app = FastAPI(title="Herald", debug=settings.debug, lifespan=lifespan)
     for module in (

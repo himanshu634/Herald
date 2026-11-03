@@ -197,7 +197,9 @@ async def try_config(
     model thinks.
     """
     await asyncify(_check_email)(services, workspace.id, email_id)
-    notes, decision = await trial_read(agent_api, services.graph, email_id, data.config)
+    notes, decision = await trial_read(
+        agent_api, services.graph, email_id, data.config, services.tracing
+    )
     return TryOut(status=STATUS_FOR_ROUTE[decision.route], notes=notes, decision=decision)
 
 
