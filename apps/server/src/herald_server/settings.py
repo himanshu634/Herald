@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     # Send the traceback in 500 responses, so the web app shows it. Dev only: it leaks internals.
     debug: bool = False
+    # Level for Herald's own loggers. INFO prints one line per email arrival and pipeline step.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     web_url: str = "http://localhost:5173"
 

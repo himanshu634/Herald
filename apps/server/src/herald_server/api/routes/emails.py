@@ -1,5 +1,6 @@
 """Emails in one workspace: the test-email box, the inbox list and the owner's actions."""
 
+import logging
 from typing import Annotated
 
 from asyncer import asyncify
@@ -16,6 +17,8 @@ from herald_server.services import Services
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/emails", tags=["emails"])
 
 EmailId = Annotated[str, Path()]
+
+log = logging.getLogger(__name__)
 
 
 def _out(email: Email) -> EmailOut:
@@ -123,6 +126,7 @@ async def receive_test_email(
     if not workspace.setup_done:
         raise HTTPException(status_code=409, detail="Finish setup before sending email")
     email, event = await asyncify(_store_received)(services, workspace.id, data)
+    log.info("email %s arrived as a test email in workspace %s", email.id, workspace.id)
     await services.bus.publish(event)
     await queue.enqueue_email(email.id)
     return email
@@ -167,6 +171,7 @@ async def reread(
     ).first()
     if corrected is not None:
         raise HTTPException(status_code=409, detail="You moved this email yourself")
+    log.info("email %s queued for a re-read", email.id)
     await queue.enqueue_email(email.id)
     return _out(email)
 

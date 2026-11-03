@@ -222,3 +222,16 @@ async def test_reread_is_409_after_the_owner_moved_it(app, client):
     assert moved.json()["status"] == "inbox"
     response = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/reread")
     assert response.status_code == 409
+
+
+async def test_triage_logs_each_step_without_email_content(app, client, caplog):
+    caplog.set_level("INFO", logger="herald_core")
+    caplog.set_level("INFO", logger="herald_server")
+    ws = await demo_workspace(client)
+    email = await send(
+        app, client, ws, "Secret-subject-xyz", "Someone used my card", sender="leak@me.xyz"
+    )
+    for step in ("arrived", "word_check", "gather_context", "write_notes", "judge_rules", "decide"):
+        assert f"email {email['id']} {step}" in caplog.text
+    assert f"email {email['id']} triaged" in caplog.text and "route=alert" in caplog.text
+    assert "xyz" not in caplog.text and "Someone" not in caplog.text
