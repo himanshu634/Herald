@@ -207,7 +207,7 @@ The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt th
 | `POST .../pause`, `POST .../resume`, `DELETE .../{mailbox_id}` | Owner actions. 409 when the status does not allow it. |
 | `POST /api/webhooks/{provider}` | Provider push. Verified by the connector. |
 
-The OAuth callback always redirects to `HERALD_WEB_URL` with one outcome below. Once the state is checked, it also adds `workspace=<id>`, so the web opens the business the connect started from. `provider_unavailable` and `invalid_state` come before that check and name no workspace. A refusal at the provider (`access_denied`) is reported only with a valid state; with a bad one it is `invalid_state`.
+The OAuth callback always redirects to `HERALD_WEB_URL` with one outcome below. Once the state is checked, it also adds `workspace=<id>`, so the web opens the business the connect started from. The inbox keeps the same `workspace` param, with `view`, `q`, `urgent` and `email`, on its URL (`apps/web/src/lib/inbox/url.ts`); it drops `mailbox_connected` or `mailbox_error` once it has shown the notice. `provider_unavailable` and `invalid_state` come before that check and name no workspace. A refusal at the provider (`access_denied`) is reported only with a valid state; with a bad one it is `invalid_state`.
 
 | Query | Meaning |
 | --- | --- |
