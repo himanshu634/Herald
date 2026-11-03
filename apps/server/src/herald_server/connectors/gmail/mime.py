@@ -4,17 +4,25 @@ import base64
 import email
 import email.policy
 import re
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 from html.parser import HTMLParser
 from typing import NamedTuple
 
 BODY_LIMIT = 50_000
+# RFC 5322 caps a header line at 998 characters.
+MESSAGE_ID_LIMIT = 998
+# A reply carries the thread's ids in References. RFC 5322 3.6.4 lets a sender trim the oldest,
+# and Gmail threads on the newest, so a long thread cannot make the header too long.
+REFERENCES_KEEP = 20
 
 
 class ParsedMessage(NamedTuple):
     sender: str
     subject: str
     body: str
+    message_id: str | None = None
+    references: str | None = None
+    reply_to: str | None = None
 
 
 # Tags that end a line, and tags that end a paragraph (a blank line after).
@@ -116,7 +124,43 @@ def parse_raw_message(raw: str) -> ParsedMessage:
     if not body:
         # An empty text/plain part must not hide a populated text/html alternative.
         body = _body_text(msg, ("html",))
-    return ParsedMessage(sender, subject, body[:BODY_LIMIT])
+    return ParsedMessage(
+        sender,
+        subject,
+        body[:BODY_LIMIT],
+        message_id=_header(msg, "Message-ID", MESSAGE_ID_LIMIT),
+        references=_references(msg),
+        reply_to=_reply_to(msg),
+    )
+
+
+def _header(msg: email.message.Message, name: str, limit: int | None = None) -> str | None:
+    """One header value on a single line, or None.
+
+    The value comes from outside mail. Folding every whitespace run, CR and LF included, to a
+    space means it can never carry a line break into a header we send. A break there would let
+    a sender inject extra headers into the owner's reply.
+    """
+    value = _SPACE_RUN.sub(" ", str(msg.get(name, ""))).strip()
+    return value[:limit] or None
+
+
+def _references(msg: email.message.Message) -> str | None:
+    value = _header(msg, "References")
+    if value is None:
+        return None
+    return " ".join(value.split(" ")[-REFERENCES_KEEP:])
+
+
+def _reply_to(msg: email.message.Message) -> str | None:
+    """The first Reply-To address, lower-case. A contact form sets it to the customer."""
+    value = _header(msg, "Reply-To")
+    if value is None:
+        return None
+    for _name, address in getaddresses([value]):
+        if address:
+            return address.lower()
+    return None
 
 
 def _body_text(msg: email.message.Message, preference: tuple[str, ...]) -> str:

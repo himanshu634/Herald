@@ -14,6 +14,10 @@ class InboundMessage(BaseModel):
     body: str  # plain text, at most 50_000 chars
     received_at: datetime
     thread_id: str | None = None  # the provider's conversation id, if it has one
+    # RFC 5322 headers a reply needs. None when the mail has none.
+    internet_message_id: str | None = None  # Message-ID, with its angle brackets
+    references: str | None = None  # space-separated ids, newest last
+    reply_to: str | None = None  # one bare lower-case address
 
 
 class FetchResult(BaseModel):

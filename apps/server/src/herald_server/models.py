@@ -120,6 +120,10 @@ class Email(SQLModel, table=True):
     # A serialized herald_core.history.EmailContext: what the history tools gathered.
     context: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     received_at: datetime = Field(default_factory=_now)
+    # RFC 5322 headers an owner's reply needs. NULL for test-box mail and mail without them.
+    internet_message_id: str | None = None
+    references: str | None = None
+    reply_to: str | None = None
 
     def to_core(self) -> CoreEmail:
         return CoreEmail(

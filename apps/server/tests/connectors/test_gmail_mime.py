@@ -78,7 +78,7 @@ def test_long_body_is_cut_to_limit():
 
 def test_missing_subject_and_body():
     msg = _msg("x@y.com", subject=None, body=None)
-    assert parse_raw_message(_raw(msg)) == ("x@y.com", "", "")
+    assert parse_raw_message(_raw(msg)) == ParsedMessage("x@y.com", "", "")
 
 
 def test_unknown_charset_falls_back_to_utf8():
@@ -124,3 +124,34 @@ def test_doubled_carriage_return_is_one_line_break():
     raw = b"From: a@b.com\r\nContent-Type: text/plain\r\n\r\nGood Morning!\r\r\nOut now."
     body = parse_raw_message(base64.urlsafe_b64encode(raw).decode()).body
     assert body == "Good Morning!\nOut now."
+
+
+def test_parse_keeps_reply_headers():
+    msg = _msg()
+    msg["Message-ID"] = "<a1@mail.customer.in>"
+    msg["References"] = "<r0@x> <r1@x>"
+    msg["Reply-To"] = '"Riya" <Riya@Customer.in>'
+    parsed = parse_raw_message(_raw(msg))
+    assert parsed.message_id == "<a1@mail.customer.in>"
+    assert parsed.references == "<r0@x> <r1@x>"
+    assert parsed.reply_to == "riya@customer.in"
+
+
+def test_parse_without_reply_headers():
+    parsed = parse_raw_message(_raw(_msg()))
+    assert parsed.message_id is None
+    assert parsed.references is None
+    assert parsed.reply_to is None
+
+
+def test_reply_to_takes_the_first_address():
+    msg = _msg()
+    msg["Reply-To"] = "a@x.in, b@x.in"
+    assert parse_raw_message(_raw(msg)).reply_to == "a@x.in"
+
+
+def test_long_references_keep_the_newest_twenty():
+    ids = [f"<r{i}@x>" for i in range(30)]
+    msg = _msg()
+    msg["References"] = " ".join(ids)
+    assert parse_raw_message(_raw(msg)).references == " ".join(ids[-20:])
