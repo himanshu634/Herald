@@ -29,7 +29,7 @@ A rule can alert you, raise or lower an email's urgency, or close it quietly (co
 
 ## What it will never do
 
-- **It never replies to your customers.** You send every reply.
+- **It never replies on its own.** You write and send every reply.
 - **It never makes money decisions.** Refunds, credits and cancellations stay with you.
 - **The AI never decides what happens to an email.** It writes notes. Your rules and your clicks move an email between "needs you now", "in progress" and "done", and you can always see which rule fired.
 - **No rule can silence a real threat.** A safety floor sits under every rule and can't be switched off. It catches threats of violence or self-harm, a hacked account or data leak, and legal threats. A simple word check runs beside the AI, so an email written to trick the AI still alerts you.

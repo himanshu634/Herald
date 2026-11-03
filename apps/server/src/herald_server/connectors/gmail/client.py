@@ -9,9 +9,11 @@ from typing import Any, NamedTuple
 
 import httpx
 
-from herald_server.connectors.base import AuthRevoked, RateLimited
+from herald_server.connectors.base import AuthRevoked, RateLimited, SendNotAllowed, SendRejected
 
-SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+SCOPES = (READ_SCOPE, SEND_SCOPE)
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
@@ -43,6 +45,7 @@ class MessageUnavailable(Exception):
 class TokenSet(NamedTuple):
     access_token: str
     refresh_token: str | None
+    scope: str = ""  # Google's space-separated list of the scopes actually granted
 
 
 class Profile(NamedTuple):
@@ -112,6 +115,15 @@ def _is_rate_limited(response: httpx.Response) -> bool:
     return any(e.get("reason") in _RATE_LIMIT_REASONS for e in error.get("errors", []))
 
 
+def _is_scope_denied(response: httpx.Response) -> bool:
+    error = _json(response).get("error")
+    if not isinstance(error, dict):
+        return False
+    if any(e.get("reason") == "insufficientPermissions" for e in error.get("errors", [])):
+        return True
+    return "insufficient authentication scopes" in str(error.get("message", "")).lower()
+
+
 def _ms_to_datetime(ms: str | int) -> datetime:
     return datetime.fromtimestamp(int(ms) / 1000, tz=UTC)
 
@@ -169,7 +181,7 @@ class GmailClient:
                 "grant_type": "authorization_code",
             }
         )
-        return TokenSet(data["access_token"], data.get("refresh_token"))
+        return TokenSet(data["access_token"], data.get("refresh_token"), data.get("scope", ""))
 
     async def refresh(self, refresh_token: str) -> str:
         data = await self._token(
@@ -239,6 +251,28 @@ class GmailClient:
             params["pageToken"] = page_token
         data = await self._api("GET", "/messages", access, params=params)
         return MessagePage([m["id"] for m in data.get("messages", [])], data.get("nextPageToken"))
+
+    async def send_message(self, access: str, raw: str, thread_id: str | None) -> str:
+        """Send one raw message and return its new id.
+
+        The error split decides what the owner is told. AuthRevoked, RateLimited,
+        SendNotAllowed and SendRejected mean "not sent, nothing reached the customer". Any
+        other failure (a 5xx, a timeout, a dropped connection) propagates unchanged and means
+        "could not confirm, check Sent": Gmail may have sent it. So do not map those to
+        SendRejected, and never retry a send.
+        """
+        body: dict[str, str] = {"raw": raw}
+        if thread_id:
+            body["threadId"] = thread_id
+        # _request already raised RateLimited (429 and quota 403s) and AuthRevoked (401).
+        response = await self._request("POST", f"{API}/messages/send", access, json=body)
+        if response.status_code == 403 and _is_scope_denied(response):
+            raise SendNotAllowed("the account did not grant send permission")
+        # The messages name the status only, never the response body.
+        if 400 <= response.status_code < 500:
+            raise SendRejected(f"Gmail refused the message with {response.status_code}")
+        response.raise_for_status()
+        return str(_json(response)["id"])
 
     async def get_raw_message(self, access: str, message_id: str) -> RawMessage:
         response = await self._request(

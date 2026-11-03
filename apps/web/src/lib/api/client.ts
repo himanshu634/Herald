@@ -14,13 +14,38 @@ export type Mailbox = components['schemas']['MailboxOut'];
 export type MailboxStatus = components['schemas']['MailboxStatus'];
 export type ConnectOut = components['schemas']['ConnectOut'];
 export type TryOut = components['schemas']['TryOut'];
+export type Reply = components['schemas']['ReplyOut'];
+export type ReplyIn = components['schemas']['ReplyIn'];
+
+/** The server answered with an error status. The message stays "{status} {body}". */
+export class ApiError extends Error {
+	readonly status: number;
+	readonly body: string;
+
+	constructor(status: number, body: string) {
+		super(`${status} ${body}`);
+		this.name = 'ApiError';
+		this.status = status;
+		this.body = body;
+	}
+
+	/** FastAPI's `detail` when it is a string, like "already_sending". */
+	get detail(): string | null {
+		try {
+			const detail = JSON.parse(this.body)?.detail;
+			return typeof detail === 'string' ? detail : null;
+		} catch {
+			return null;
+		}
+	}
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	const response = await fetch(`/api${path}`, {
 		...init,
 		headers: { 'Content-Type': 'application/json', ...init?.headers }
 	});
-	if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+	if (!response.ok) throw new ApiError(response.status, await response.text());
 	return response.json() as Promise<T>;
 }
 
@@ -75,5 +100,17 @@ export const api = {
 			method: 'POST'
 		}),
 	disconnectMailbox: (workspaceId: string, mailboxId: string) =>
-		request<Mailbox>(`/workspaces/${workspaceId}/mailboxes/${mailboxId}`, { method: 'DELETE' })
+		request<Mailbox>(`/workspaces/${workspaceId}/mailboxes/${mailboxId}`, { method: 'DELETE' }),
+	/**
+	 * Send the owner's reply. Answers 200 whatever the outcome: read the reply's `status`.
+	 * A 409 means nothing was sent; its detail says why.
+	 */
+	reply: (workspaceId: string, emailId: string, data: ReplyIn) =>
+		request<Reply>(`/workspaces/${workspaceId}/emails/${emailId}/replies`, {
+			method: 'POST',
+			body: JSON.stringify(data)
+		}),
+	/** The email's replies, oldest first. */
+	replies: (workspaceId: string, emailId: string) =>
+		request<Reply[]>(`/workspaces/${workspaceId}/emails/${emailId}/replies`)
 };

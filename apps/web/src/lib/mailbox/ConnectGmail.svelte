@@ -47,7 +47,8 @@
 			</li>
 			<li class="flex items-start gap-2">
 				<span class="text-danger-fg"><Icon name="close" size={16} /></span>
-				It can’t send, reply, delete or change anything. Google grants read-only access.
+				It sends only replies you write and send yourself. It can’t delete or change your mail. Google
+				grants read and send access, nothing more.
 			</li>
 			<li class="flex items-start gap-2">
 				<span class="text-success-fg"><Icon name="check" size={16} /></span>

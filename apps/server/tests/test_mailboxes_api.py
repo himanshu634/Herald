@@ -379,6 +379,22 @@ async def test_reconnect_reuses_row_and_keeps_cursor(app, client, fake_connector
     assert mailbox.cursor == "8"
 
 
+async def test_reconnecting_an_active_mailbox_turns_on_sending(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    fake_connector.account.can_send = False
+    mailbox_id = await connect(app, client, ws)
+    [before] = (await client.get(f"/api/workspaces/{ws}/mailboxes")).json()
+    assert before["can_send"] is False
+
+    fake_connector.account.can_send = True
+    assert await connect(app, client, ws) == mailbox_id
+
+    [mailbox] = mailboxes_of(app, ws)
+    assert mailbox.status == MailboxStatus.ACTIVE
+    [after] = (await client.get(f"/api/workspaces/{ws}/mailboxes")).json()
+    assert after["can_send"] is True
+
+
 async def test_reconnect_after_disconnect_reuses_row_and_keeps_cursor(app, client, fake_connector):
     ws = await demo_workspace(client)
     mailbox_id = await connect(app, client, ws)

@@ -1,6 +1,9 @@
 """Tests for GmailConnector: OAuth, history sync, pagination and backfill."""
 
 import base64
+import email
+import email.policy
+import json
 import logging
 from collections.abc import AsyncIterator
 from email.message import EmailMessage
@@ -10,8 +13,14 @@ import httpx
 import pytest
 
 from herald_server.connectors import build_connectors
-from herald_server.connectors.base import MissingRefreshToken
-from herald_server.connectors.gmail.client import API, SCOPE, TOKEN_URL, GmailClient
+from herald_server.connectors.base import MissingRefreshToken, OutboundReply
+from herald_server.connectors.gmail.client import (
+    API,
+    READ_SCOPE,
+    SEND_SCOPE,
+    TOKEN_URL,
+    GmailClient,
+)
 from herald_server.connectors.gmail.connector import (
     BACKFILL_LIMIT,
     BACKFILL_QUERY,
@@ -41,6 +50,8 @@ class FakeGoogle:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.refresh_token: str | None = "r1"
+        # The `scope` field of the token response; None leaves it out.
+        self.granted_scope: str | None = f"{READ_SCOPE} {SEND_SCOPE}"
         self.email = "owner@shop.in"
         self.profile_history_id = "500"
         self.history_pages: dict[str | None, dict] = {}
@@ -70,6 +81,8 @@ class FakeGoogle:
             tokens = {"access_token": "acc"}
             if self.refresh_token is not None:
                 tokens["refresh_token"] = self.refresh_token
+            if self.granted_scope is not None:
+                tokens["scope"] = self.granted_scope
             return httpx.Response(200, json=tokens)
         if path == PROFILE:
             self.calls.append("profile")
@@ -181,11 +194,11 @@ async def connector(google) -> AsyncIterator[GmailConnector]:
 CREDS = {"refresh_token": "r1"}
 
 
-def test_authorization_url_requests_offline_readonly_access(connector):
+def test_authorization_url_requests_offline_access(connector):
     url = connector.authorization_url("st4te")
     assert url.startswith("https://accounts.google.com/o/oauth2/v2/auth?")
     query = {k: v[0] for k, v in parse_qs(urlsplit(url).query).items()}
-    assert query["scope"] == SCOPE == "https://www.googleapis.com/auth/gmail.readonly"
+    assert query["scope"] == f"{READ_SCOPE} {SEND_SCOPE}"
     assert query["access_type"] == "offline"
     assert query["prompt"] == "consent"
     assert query["state"] == "st4te"
@@ -193,6 +206,29 @@ def test_authorization_url_requests_offline_readonly_access(connector):
     assert query["redirect_uri"] == "https://api.example/cb"
     assert query["response_type"] == "code"
     assert query["include_granted_scopes"] == "true"
+
+
+def test_authorization_url_asks_to_read_and_send(connector):
+    url = connector.authorization_url("st4te")
+    query = {k: v[0] for k, v in parse_qs(urlsplit(url).query).items()}
+    assert query["scope"] == (
+        "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send"
+    )
+
+
+@pytest.mark.parametrize(
+    ("granted", "can_send"),
+    [
+        (f"{READ_SCOPE} {SEND_SCOPE}", True),
+        # Google's granular consent lets the owner untick a scope.
+        (READ_SCOPE, False),
+        (None, False),
+    ],
+)
+async def test_complete_authorization_reports_send_permission(connector, google, granted, can_send):
+    google.granted_scope = granted
+    account = await connector.complete_authorization("code")
+    assert account.can_send is can_send
 
 
 async def test_complete_authorization_without_refresh_token_raises(connector, google):
@@ -481,3 +517,38 @@ async def test_build_connectors_includes_gmail_when_configured():
         connectors = build_connectors(settings, http)
     assert isinstance(connectors["gmail"], GmailConnector)
     assert connectors["gmail"].provider == "gmail"
+
+
+async def test_send_reply_refreshes_and_sends_in_thread(connector, google):
+    sent = []
+    inner = google.handler
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == MESSAGES + "/send":
+            google.calls.append("send")
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"id": "m9"})
+        return inner(request)
+
+    connector._client._http._transport = httpx.MockTransport(handler)
+    result = await connector.send_reply(
+        CREDS,
+        OutboundReply(
+            from_address="owner@shop.in",
+            to_address="cust@x.in",
+            subject="Re: Hi",
+            body="Hello back",
+            in_reply_to="<a@x.in>",
+            references="<a@x.in>",
+            provider_thread_id="t1",
+        ),
+    )
+    assert result.provider_message_id == "m9"
+    assert google.calls == ["token", "send"]
+    assert sent[0]["threadId"] == "t1"
+    raw = sent[0]["raw"]
+    msg = email.message_from_bytes(
+        base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)), policy=email.policy.default
+    )
+    assert msg["In-Reply-To"] == "<a@x.in>"
+    assert msg["Subject"] == "Re: Hi"

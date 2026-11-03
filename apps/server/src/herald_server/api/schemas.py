@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from herald_core.history import EmailContext
 from herald_core.schema import Decision, Notes, WorkspaceConfig
-from herald_server.models import EmailStatus, MailboxStatus
+from herald_server.models import EmailStatus, MailboxStatus, ReplyError, ReplyStatus
 
 
 class WorkspaceIn(BaseModel):
@@ -52,7 +52,13 @@ class EmailIn(BaseModel):
 class EmailOut(BaseModel):
     id: str
     workspace_id: str
+    mailbox_id: str | None
     sender: str
+    reply_to: str | None
+    reply_address: str = Field(
+        description="Where a reply goes: Reply-To when it is one plain address, else the "
+        "sender. Empty when there is no usable address."
+    )
     subject: str
     body: str
     thread_id: str | None
@@ -61,6 +67,28 @@ class EmailOut(BaseModel):
     decision: Decision | None
     context: EmailContext | None
     received_at: datetime
+
+
+class ReplyIn(BaseModel):
+    body: str = Field(min_length=1, max_length=20_000)
+    client_key: str = Field(
+        min_length=8,
+        max_length=64,
+        description="The draft's id, made by the browser. The same key never sends twice.",
+    )
+    mark_done: bool = Field(default=False, description="Mark the email done if the reply is sent.")
+
+
+class ReplyOut(BaseModel):
+    id: str
+    email_id: str
+    to_address: str
+    subject: str
+    body: str
+    status: ReplyStatus
+    error: ReplyError | None
+    created_at: datetime
+    sent_at: datetime | None
 
 
 class TryIn(BaseModel):
@@ -85,6 +113,7 @@ class MailboxOut(BaseModel):
     provider: str
     email_address: str
     status: MailboxStatus
+    can_send: bool
     subscription_expires_at: datetime | None
     last_synced_at: datetime | None
     created_at: datetime

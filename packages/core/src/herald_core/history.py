@@ -56,6 +56,7 @@ class ThreadMessage(BaseModel):
     sender: str
     received_at: datetime
     body: str
+    from_owner: bool = False  # True for a reply the owner sent; `sender` is then their mailbox.
 
 
 class Thread(BaseModel):

@@ -10,10 +10,12 @@ from sqlmodel import Session, col, select
 from herald_server.api.deps import AgentApiDep, QueueDep, ServicesDep, SessionDep, WorkspaceDep
 from herald_server.api.schemas import EmailIn, EmailOut, TryIn, TryOut
 from herald_server.bus import BusEvent
-from herald_server.events import EMAIL_RECEIVED, EMAIL_STATUS, add_event, to_bus
+from herald_server.events import EMAIL_RECEIVED, add_event, to_bus
 from herald_server.models import STATUS_FOR_ROUTE, Correction, Email, EmailStatus
 from herald_server.pipeline import trial_read
+from herald_server.replies import recipient
 from herald_server.services import Services
+from herald_server.status import WrongStatus, stage_move
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/emails", tags=["emails"])
 
@@ -23,7 +25,8 @@ log = logging.getLogger(__name__)
 
 
 def _out(email: Email) -> EmailOut:
-    return EmailOut.model_validate(email, from_attributes=True)
+    # reply_address comes from the send's own rule, so the To line shows where the mail goes.
+    return EmailOut.model_validate({**email.model_dump(), "reply_address": recipient(email)})
 
 
 def _get_email(session: Session, workspace_id: str, email_id: str) -> Email:
@@ -60,10 +63,6 @@ def _store_received(
         return _out(email), to_bus(event)
 
 
-# The route decide chose, for each status the owner can send back to the inbox.
-_OVERRIDDEN_ROUTE = {EmailStatus.ALERTED: "alert", EmailStatus.CLOSED: "closed"}
-
-
 def _move(
     services: Services,
     workspace_id: str,
@@ -71,28 +70,14 @@ def _move(
     to: EmailStatus,
     only_from: EmailStatus | None,
 ) -> tuple[EmailOut, BusEvent]:
-    """Owner action: the only way, besides the decide step, that an email's status changes."""
     with Session(services.engine) as session:
         email = _get_email(session, workspace_id, email_id)
-        previous = email.status
-        if only_from is not None and previous is not only_from:
-            raise HTTPException(status_code=409, detail=f"Email is {previous}, not {only_from}")
-        email.status = to
-        event = add_event(
-            session, workspace_id, EMAIL_STATUS, {"email_id": email.id, "from": previous, "to": to}
-        )
-        # The owner overrode the decide step. Saved so the model sees it on later emails.
-        overridden = _OVERRIDDEN_ROUTE.get(previous) if to is EmailStatus.INBOX else None
-        if overridden is not None:
-            session.add(
-                Correction(
-                    workspace_id=workspace_id,
-                    email_id=email.id,
-                    field="route",
-                    from_value=overridden,
-                    to_value="inbox",
-                )
-            )
+        try:
+            event = stage_move(session, workspace_id, email, to, only_from)
+        except WrongStatus as exc:
+            raise HTTPException(
+                status_code=409, detail=f"Email is {exc.previous}, not {only_from}"
+            ) from exc
         session.commit()
         session.refresh(email)
         session.refresh(event)

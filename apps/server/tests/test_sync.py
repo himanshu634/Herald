@@ -33,7 +33,12 @@ def add_mailbox(app, workspace_id: str, **fields) -> str:
 
 
 def message(
-    provider_message_id: str, subject: str = "Product questions", thread_id: str | None = None
+    provider_message_id: str,
+    subject: str = "Product questions",
+    thread_id: str | None = None,
+    internet_message_id: str | None = None,
+    references: str | None = None,
+    reply_to: str | None = None,
 ) -> InboundMessage:
     return InboundMessage(
         provider_message_id=provider_message_id,
@@ -42,6 +47,9 @@ def message(
         body="Does the cabin bag fit Indigo?",
         received_at=datetime(2026, 11, 3, 9, 0, tzinfo=UTC),
         thread_id=thread_id,
+        internet_message_id=internet_message_id,
+        references=references,
+        reply_to=reply_to,
     )
 
 
@@ -74,6 +82,25 @@ async def test_sync_stores_new_mail_and_runs_triage(app, client, fake_connector)
     mailbox = load_mailbox(app, mailbox_id)
     assert mailbox.cursor == "1"
     assert mailbox.last_synced_at is not None
+
+
+async def test_sync_stores_reply_headers(app, client, fake_connector):
+    mailbox_id = add_mailbox(app, await demo_workspace(client))
+    fake_connector.queue = [
+        message(
+            "m1",
+            internet_message_id="<a1@mail.customer.in>",
+            references="<r0@x> <r1@x>",
+            reply_to="riya@customer.in",
+        )
+    ]
+
+    await sync(app, mailbox_id)
+
+    (email,) = emails_of(app, mailbox_id)
+    assert email.internet_message_id == "<a1@mail.customer.in>"
+    assert email.references == "<r0@x> <r1@x>"
+    assert email.reply_to == "riya@customer.in"
 
 
 async def test_sync_stores_the_thread_id_per_mailbox(app, client, fake_connector):

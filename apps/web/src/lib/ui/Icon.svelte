@@ -24,7 +24,9 @@
 		monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
 		sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
 		pause: '<path d="M9 6v12M15 6v12"/>',
-		play: '<path d="M8 5l11 7-11 7z"/>'
+		play: '<path d="M8 5l11 7-11 7z"/>',
+		send: '<path d="M4 12l16-8-6 16-3-7z"/>',
+		link: '<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>'
 	} as const;
 
 	export type IconName = keyof typeof PATHS;

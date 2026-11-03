@@ -11,6 +11,7 @@ from herald_server.api.routes import (
     mailboxes,
     oauth,
     providers,
+    replies,
     webhooks,
     workspaces,
 )
@@ -56,6 +57,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         health,
         workspaces,
         emails,
+        replies,
         events,
         mailboxes,
         oauth,

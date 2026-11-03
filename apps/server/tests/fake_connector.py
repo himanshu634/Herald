@@ -8,9 +8,11 @@ from herald_server.connectors.base import (
     ConnectedAccount,
     FetchResult,
     InboundMessage,
+    OutboundReply,
     PushIgnored,
     PushNotice,
     PushRejected,
+    SentReply,
     Subscription,
 )
 
@@ -25,9 +27,13 @@ class FakeConnector:
         self.raise_on_fetch: Exception | None = None
         self.raise_on_authorize: Exception | None = None
         self.raise_on_subscribe: Exception | None = None
+        self.sent: list[OutboundReply] = []
+        self.raise_on_send: Exception | None = None
         self.subscription = Subscription(expires_at=None, provider_state={})
         self.calls: list[str] = []
-        self.account = ConnectedAccount(email_address="owner@shop.in", credentials={"token": "t"})
+        self.account = ConnectedAccount(
+            email_address="owner@shop.in", credentials={"token": "t"}, can_send=True
+        )
 
     def authorization_url(self, state: str) -> str:
         self.calls.append("authorization_url")
@@ -65,6 +71,13 @@ class FakeConnector:
 
     async def revoke(self, credentials: dict[str, str]) -> None:
         self.calls.append("revoke")
+
+    async def send_reply(self, credentials: dict[str, str], reply: OutboundReply) -> SentReply:
+        self.calls.append("send_reply")
+        if self.raise_on_send is not None:
+            raise self.raise_on_send
+        self.sent.append(reply)
+        return SentReply(provider_message_id=f"sent-{len(self.sent)}")
 
     async def parse_push(self, headers: Mapping[str, str], body: bytes) -> PushNotice:
         self.calls.append("parse_push")

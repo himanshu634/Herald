@@ -119,7 +119,7 @@ A raised face sits `--press-depth` (3 px) above a darker base. On click it drops
 | `secondary` | Every other action (**Not urgent**, **Done**, **Test on past emails**) | White face, 3:1 edge |
 | `quiet` | Low-stakes actions and links in toolbars (**Open thread**) | No base, no press |
 
-- Pass `kbd` to show the shortcut. The owner actions are fixed: **O** On it, **N** Not urgent, **I** Move to Inbox, **D** Done, **E** read the whole email, **/** Search, **J** and **K** next and previous email. Wiring the key is the screen's job; the button only shows it.
+- Pass `kbd` to show the shortcut. The owner actions are fixed: **O** On it, **N** Not urgent, **I** Move to Inbox, **D** Done, **E** read the whole email, **R** Reply (in the composer, **Esc** goes back to the list and **⌘↵** or Ctrl+Enter is Send and mark done), **/** Search, **J** and **K** next and previous email. Wiring the key is the screen's job; the button only shows it.
 - Labels say what happens, and the result uses the same words: the button **Not urgent** gives the message "Moved to Inbox. Herald saved this as a correction."
 - There is no destructive red button. Herald never deletes; closing is reversible.
 
@@ -196,7 +196,7 @@ The mark is three emails on a tile, with one pulled out of the pile and lit char
 - Herald speaks plainly, in the second person, about the owner's mail: "Herald saved this as a correction." Not "Correction recorded successfully."
 - Name things the way the docs do: notes, rules, safety floor, important contacts, needs a look. Never "webhook", "pipeline", "LLM" or "classification" in the interface.
 - Quote the customer exactly, in quotation marks. Never paraphrase a quote.
-- Herald never replies to customers or touches money. Copy never suggests it does.
+- Herald never replies to customers on its own or touches money. Only the owner's own replies are sent, and copy never suggests the AI writes or sends them.
 - Sample data (fixtures, screenshots, the gallery) uses Tripfold and specific, believable emails, as in `apps/server/src/herald_server/seed.py`. Make it real enough to smile at, never lorem ipsum.
 
 ## Accessibility

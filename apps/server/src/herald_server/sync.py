@@ -65,6 +65,9 @@ def _store(
                 subject=message.subject,
                 body=message.body,
                 received_at=message.received_at,
+                internet_message_id=message.internet_message_id,
+                references=message.references,
+                reply_to=message.reply_to,
                 # A provider's thread id is unique only inside one account, and a workspace
                 # can hold several mailboxes, so the mailbox id keeps two threads apart.
                 thread_id=f"{mailbox_id}:{message.thread_id}" if message.thread_id else None,

@@ -1,9 +1,10 @@
+import json
 from datetime import UTC, datetime
 
 import httpx
 import pytest
 
-from herald_server.connectors.base import AuthRevoked, RateLimited
+from herald_server.connectors.base import AuthRevoked, RateLimited, SendNotAllowed, SendRejected
 from herald_server.connectors.gmail.client import (
     API,
     GmailClient,
@@ -177,3 +178,86 @@ async def test_revoke_swallows_400():
         return httpx.Response(400, json={"error": "invalid_token"})
 
     await make_client(handler).revoke("tok")
+
+
+async def test_send_posts_raw_and_thread():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"id": "m9"})
+
+    client = make_client(handler)
+    assert await client.send_message("acc", "RAW", "t1") == "m9"
+    assert await client.send_message("acc", "RAW", None) == "m9"
+    assert seen[0].method == "POST"
+    assert seen[0].url.path.endswith("/messages/send")
+    assert seen[0].headers["Authorization"] == "Bearer acc"
+    assert json.loads(seen[0].content) == {"raw": "RAW", "threadId": "t1"}
+    assert json.loads(seen[1].content) == {"raw": "RAW"}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"error": {"errors": [{"reason": "insufficientPermissions"}], "message": "x"}},
+        {"error": {"message": "Request had insufficient authentication scopes."}},
+    ],
+)
+async def test_send_403_insufficient_scope_is_send_not_allowed(body):
+    def handler(request):
+        return httpx.Response(403, json=body)
+
+    with pytest.raises(SendNotAllowed):
+        await make_client(handler).send_message("acc", "RAW", None)
+
+
+@pytest.mark.parametrize("status", [400, 404])
+async def test_send_4xx_is_rejected(status):
+    def handler(request):
+        return httpx.Response(status, json={"error": {"message": "leak-me-xyz"}})
+
+    with pytest.raises(SendRejected) as info:
+        await make_client(handler).send_message("acc", "RAW", None)
+    assert str(status) in str(info.value)
+    assert "leak-me-xyz" not in str(info.value)
+
+
+async def test_send_other_403_is_rejected():
+    def handler(request):
+        return httpx.Response(403, json={"error": {"message": "domain policy"}})
+
+    with pytest.raises(SendRejected):
+        await make_client(handler).send_message("acc", "RAW", None)
+
+
+async def test_send_5xx_is_unknown():
+    def handler(request):
+        return httpx.Response(500, json={})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await make_client(handler).send_message("acc", "RAW", None)
+
+
+async def test_send_transport_error_is_unknown():
+    def handler(request):
+        raise httpx.ReadTimeout("slow", request=request)
+
+    with pytest.raises(httpx.ReadTimeout):
+        await make_client(handler).send_message("acc", "RAW", None)
+
+
+async def test_send_429_is_rate_limited():
+    def handler(request):
+        return httpx.Response(429, headers={"Retry-After": "7"})
+
+    with pytest.raises(RateLimited):
+        await make_client(handler).send_message("acc", "RAW", None)
+
+
+async def test_send_401_is_auth_revoked():
+    def handler(request):
+        return httpx.Response(401, json={})
+
+    with pytest.raises(AuthRevoked):
+        await make_client(handler).send_message("acc", "RAW", None)

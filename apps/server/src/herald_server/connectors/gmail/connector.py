@@ -13,19 +13,23 @@ from herald_server.connectors.base import (
     InboundMessage,
     MailConnector,
     MissingRefreshToken,
+    OutboundReply,
     PushNotice,
     PushRejected,
+    SentReply,
     Subscription,
 )
 from herald_server.connectors.gmail.client import (
     AUTH_URL,
-    SCOPE,
+    SCOPES,
+    SEND_SCOPE,
     GmailClient,
     HistoryExpired,
     MessageGone,
     MessageUnavailable,
     is_inbox_mail,
 )
+from herald_server.connectors.gmail.compose import build_reply
 from herald_server.connectors.gmail.mime import parse_raw_message
 from herald_server.connectors.gmail.push import (
     decode_envelope,
@@ -70,7 +74,7 @@ class GmailConnector(MailConnector):
             "client_id": self._client_id,
             "redirect_uri": self._client.redirect_uri,
             "response_type": "code",
-            "scope": SCOPE,
+            "scope": " ".join(SCOPES),
             # offline + consent: Google returns a refresh token on every connect,
             # including a reconnect of an account that granted access before.
             "access_type": "offline",
@@ -88,6 +92,10 @@ class GmailConnector(MailConnector):
         return ConnectedAccount(
             email_address=profile.email_address.lower(),
             credentials={"refresh_token": tokens.refresh_token},
+            # Granular consent lets the owner untick "send" and still connect, so the scopes
+            # we asked for are not the scopes we got. A response with no `scope` field proves
+            # nothing, so it counts as no send permission.
+            can_send=SEND_SCOPE in tokens.scope.split(),
         )
 
     async def subscribe(
@@ -156,6 +164,9 @@ class GmailConnector(MailConnector):
                     body=parsed.body,
                     received_at=raw.internal_date,
                     thread_id=raw.thread_id,
+                    internet_message_id=parsed.message_id,
+                    references=parsed.references,
+                    reply_to=parsed.reply_to,
                 )
             )
         return FetchResult(messages=messages, cursor=new_cursor, has_more=has_more)
@@ -209,6 +220,15 @@ class GmailConnector(MailConnector):
                 break
             page = await self._client.list_history(access, cursor, page.next_page_token)
         return list(ids), first_page_history_id, False
+
+    async def send_reply(self, credentials: dict[str, str], reply: OutboundReply) -> SentReply:
+        access = await self._client.refresh(credentials["refresh_token"])
+        raw = build_reply(reply)
+        # Gmail keeps a reply in the customer's thread only when threadId, the matching
+        # References and In-Reply-To headers, and a matching subject all agree. Drop one and
+        # the reply starts a new conversation.
+        message_id = await self._client.send_message(access, raw, reply.provider_thread_id)
+        return SentReply(provider_message_id=message_id)
 
     async def parse_push(self, headers: Mapping[str, str], body: bytes) -> PushNotice:
         # Without both settings there is nothing to verify against. Reject instead of

@@ -6,7 +6,8 @@ export const EVENT_TYPES = [
 	'email.noted',
 	'email.status',
 	'alert.sent',
-	'mailbox.status'
+	'mailbox.status',
+	'reply.status'
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 

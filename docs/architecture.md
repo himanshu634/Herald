@@ -48,7 +48,7 @@ The worker's pipeline never opens the database. It loads the email, runs the age
 | --- | --- | --- |
 | `GET /internal/v1/emails/{id}/triage-input` | The pipeline | The email, the business name and the workspace config |
 | `GET .../history/sender` | `sender_history` tool | Sender counts for 7 and 30 days, first seen, top topics, latest few |
-| `GET .../history/thread` | `thread` tool | Earlier messages in the thread, oldest first |
+| `GET .../history/thread` | `thread` tool | Earlier messages in the thread with the owner's sent replies, oldest first |
 | `GET .../history/corrections` | `recent_corrections` tool | The owner's recent overrides in this business |
 | `POST .../triage-result` | The pipeline | Saves notes, decision and context, sets status with `STATUS_FOR_ROUTE`, records `email.noted` and, for an alert, `alert.sent`. One commit, then publish. |
 
@@ -128,13 +128,16 @@ The AI writes notes and never sets status. Status changes in two places only: th
 | Not urgent | `alerted` only | `inbox` | A correction is saved |
 | Move to Inbox | `closed` only | `inbox` | A correction is saved |
 | Done | any | `done` | — |
+| Send and mark done | any but `done` | `done` | Only when the reply is `sent` |
 | Re-read | `alerted`, `needs_a_look`, `inbox` or `closed` | whatever decide says | The email goes through triage again with the current setup |
+
+Both the action routes and "Send and mark done" change status through `status.stage_move`.
 
 Re-read (`POST .../emails/{id}/reread`, 202) is how an answered question settles: the owner saves a fact or rule change, then asks Herald to read the email again. Before saving, the question dialog can try the change: `POST .../emails/{id}/try` (200) runs triage in the request with the unsaved config the owner sends and returns the status, notes and decision Herald would give. It writes nothing and publishes no event, so the email, its status and the saved config stay as they were. Each try is one more AI call. It is refused (409) once the owner has taken the email (in progress or done) or moved it by hand (a route correction exists), so decide never moves an email the owner has already placed.
 
 ## Live events (SSE)
 
-- `GET /api/workspaces/{id}/events` streams `email.received`, `email.noted`, `email.status`, `mailbox.status` and `alert.sent`.
+- `GET /api/workspaces/{id}/events` streams `email.received`, `email.noted`, `email.status`, `mailbox.status`, `reply.status` and `alert.sent`.
 - Each event is stored in the `event` table first, then published to Redis channel `herald:ws:{id}`. A tab only hears its own workspace.
 - The browser's `EventSource` reconnects on its own and sends `Last-Event-ID`. The server replays missed events from the database.
 - FastAPI sends a keep-alive comment every 15 s.
@@ -149,6 +152,28 @@ Re-read (`POST .../emails/{id}/reread`, 202) is how an answered question settles
 - A workspace stays a draft (`setup_done = false`) until its setup is saved. A draft workspace refuses email with `409`, because its config is the AI's unchecked guess.
 - Owner guidance goes into the `<business>` block of the system prompt, after the facts (see "The prompt"). It shapes topic, urgency and anger only. The prompt says it cannot silence the safety floor, and the word check runs regardless. Routing stays with rules.
 - Planned: per-workspace caps on AI calls and emails per day.
+
+## Replies
+
+The owner writes a reply in the email's panel and sends it through the email's mailbox (`herald_server/replies.py`). Only `POST /api/workspaces/{id}/emails/{email_id}/replies` sends, after the owner presses Send; the AI never sends. `GET` on the same path lists the email's replies, oldest first.
+
+A send has three steps, so no database session is open while the provider is called:
+
+1. **Begin.** In one transaction: look up the draft's `client_key`, check the mailbox, then commit a `sending` row. A key already used for this email returns its row and sends nothing, so a double click or a second tab sends once. A key used for another email, or a second draft while one is `sending`, answers 409 `already_sending` (the partial unique index `uq_reply_one_sending` allows one `sending` row per email). An email with no mailbox, a mailbox that is not `active`, or one without send permission answers 409 `no_mailbox`, `mailbox_inactive` or `send_not_allowed`. An email with no usable recipient (a `From` the provider could not parse), or one whose reply would go to the mailbox's own address (a form sent from the shop with no usable `Reply-To`), answers 409 `no_recipient`. Every 409 saves nothing.
+2. **Send.** One call to `connector.send_reply`, under a 60 s timeout, and never retried.
+3. **Finish.** In one transaction: save the outcome, stage `reply.status` (`email_id`, `reply_id`, `status`), and for "Send and mark done" move the email to `done` if the reply was sent. Commit, then publish.
+
+The answer is 200 whatever the outcome; the reply's `status` says it:
+
+| Status | Meaning | `error` |
+| --- | --- | --- |
+| `sent` | The provider took it | — |
+| `not_sent` | The provider refused; nothing went out | `rate_limited`, `auth` (the grant was revoked or the stored credentials no longer open; the mailbox moves to `needs_reauth`), `send_not_allowed` (`can_send` turns off until a reconnect), `rejected` |
+| `unknown` | A timeout, a 5xx or any other error. The customer may have it, so the owner checks the mailbox's Sent folder | `unknown` |
+
+A `sending` row older than 2 minutes belongs to a process that died mid-send. The next reply to that email, or a resend of the same draft, turns it `unknown` (and stages `reply.status`), so it never blocks the email. Until then the API reports it as `unknown` (error `unknown`) wherever it returns the reply, without writing, so the panel never says "Sending…" forever. Two minutes is longer than the slowest send: two requests (a token refresh and the send) under the 60 s timeout.
+
+The reply goes to the email's `Reply-To` when that is one plain address (a contact form sends from a no-reply address), and to `From` otherwise. `EmailOut.reply_address` carries that address (empty when there is none), so the web app's To line uses the server's rule instead of a copy of it. It carries `In-Reply-To` and `References`, and the provider's thread id, so it lands in the customer's thread.
 
 ## Mail connectors
 
@@ -188,7 +213,7 @@ sequenceDiagram
 - Later syncs read the history since the cursor. The new cursor is the `historyId` of the first page, so a re-read is possible but a loss is not. Stored mail is deduped on `(mailbox_id, provider_message_id)`.
 - One fetch downloads at most 100 messages. A long gap (a reconnect or a resume keeps the cursor) is read in batches: the fetch stops before the history record that would pass the cap, its cursor is the last record it took, and it reports `has_more`. Each batch is stored with its cursor, and the caller fetches again (see Sync job). A single record with more than 100 messages is taken whole. Records at or before the start cursor are skipped, so the cursor always moves (Gmail documents only records after it, but a fetch that returned its own start cursor would loop on the mailbox forever).
 - A mail that cannot be parsed is skipped, so one bad email cannot block the mailbox. A message that Gmail refuses with 400 or 410 is skipped and logged the same way. Any other refusal of a message (another 403, a 408 or a 5xx) fails the fetch, so the cursor does not move and the next sync (a push or the 15-minute catch-up) reads it again. A 403 for a daily or project quota is a rate limit.
-- Only inbox mail is read. Sent mail and drafts are skipped. The scope is `gmail.readonly`.
+- Only inbox mail is read. Sent mail and drafts are skipped. Herald reads inbox mail and sends only replies the owner writes. The scopes are `gmail.readonly` and `gmail.send`. Google lets the owner untick a scope, so each mailbox records whether send was granted (`can_send`).
 - Credentials are encrypted with `HERALD_TOKEN_KEY` and never leave the server. The OAuth `state` is signed with the same key and expires after 10 minutes.
 - Push is verified: the Pub/Sub JWT must match the audience and service account in the settings. A bad signature gets 401. A good push for an unknown or inactive address gets 204, so Pub/Sub does not retry it.
 
@@ -253,7 +278,7 @@ The OAuth callback always redirects to `HERALD_WEB_URL` with one outcome below. 
 
 Both jobs run across all workspaces on purpose. The times are the worker's local time (arq cron).
 
-Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscription) is a manual step. It is described in the mail connectors plan.
+Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscription) is a manual step. It is described in the mail connectors plan. In the OAuth consent screen, under Data access, add the scope `https://www.googleapis.com/auth/gmail.send` too. Without it Google never grants send.
 
 ## Plug-in points
 
@@ -287,7 +312,7 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 
 ### Upgrading an existing dev database
 
-There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. The same happens to a database made before the history tools, which added `email.thread_id`, `email.context` and the sender index. A `mailbox` table made before the one-business-per-mailbox rule also lacks the index `uq_mailbox_live_address` (startup does not add indexes to a table that exists); the connect check still applies, but a racing connect is not caught. Start from an empty database:
+There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. The same happens to a database made before the history tools, which added `email.thread_id`, `email.context` and the sender index. A `mailbox` table made before the one-business-per-mailbox rule also lacks the index `uq_mailbox_live_address` (startup does not add indexes to a table that exists); the connect check still applies, but a racing connect is not caught. A database made before owner replies lacks the `email` columns `internet_message_id`, `references` and `reply_to` and the `mailbox` column `can_send`; the `reply` table and its index `uq_reply_one_sending` are created on startup. Start from an empty database:
 
 - Lite mode: delete `apps/server/herald-dev.db`.
 - Postgres: run `docker compose down -v`, then `make infra`.

@@ -313,6 +313,13 @@ def test_quotes_in_the_from_attribute_are_removed():
     assert '<message from="a date=1999-01-01" date="2026-10-30">' in block
 
 
+def test_owner_reply_is_labelled():
+    reply = msg(sender="owner@shop.in", from_owner=True)
+    block = history_block(History(thread=Thread(messages=[reply])))
+    assert '<message from="the owner" date="2026-10-30">' in block
+    assert "owner@shop.in" not in block
+
+
 def test_untriaged_past_email_falls_back_to_subject():
     recent = [past(topic=None, urgency=None, summary=None, status="new", subject="Where is it?")]
     line = "- 2026-11-01 · new · Where is it?"

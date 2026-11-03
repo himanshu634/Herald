@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Email } from '#lib/api/client.js';
+	import type { Email, Reply } from '#lib/api/client.js';
 	import { AngerMeter, Button, Icon, StatusTag, Tag, URGENCY } from '#lib/ui/index.js';
 	import {
 		ACTIONS,
@@ -10,13 +10,20 @@
 		tidyBody,
 		type Action
 	} from './inbox';
+	import ReplyLine from './ReplyLine.svelte';
+	import { REPLY_COPY, STATE_LOOK, STATUS_LOOK, replyNotice, type ReplyState } from './reply';
 
 	let {
 		email,
 		busy,
 		full,
 		ontogglefull,
-		onact
+		onact,
+		replyState,
+		replies,
+		connecting,
+		onreply,
+		onreconnect
 	}: {
 		email: Email;
 		busy: boolean;
@@ -24,6 +31,15 @@
 		full: boolean;
 		ontogglefull: () => void;
 		onact: (action: Action) => void;
+		/** Whether the owner can reply from the mailbox this email came in on. */
+		replyState: ReplyState;
+		/** The owner's replies to this email, oldest first. */
+		replies: Reply[];
+		/** A Gmail connect is starting; the Reconnect button waits. */
+		connecting: boolean;
+		/** Open the composer (the R key or the Reply button). */
+		onreply: () => void;
+		onreconnect: () => void;
 	} = $props();
 
 	const floor = $derived(floorLabel(email.decision?.floor_flags ?? []));
@@ -143,7 +159,32 @@
 			{/if}
 		</section>
 
-		{#if actions.length}
+		{#if replies.length}
+			<section
+				aria-labelledby="replies-title"
+				class="flex flex-col gap-3 border-t border-dashed border-line-dashed px-5 py-4"
+			>
+				<h3 id="replies-title" class="text-sm font-bold text-muted">Your replies</h3>
+				{#each replies as reply (reply.id)}
+					<div class="flex flex-col gap-2">
+						<ReplyLine look={STATUS_LOOK[reply.status]} text={replyNotice(reply)} />
+						<p class="text-sm whitespace-pre-line text-body">{reply.body}</p>
+					</div>
+				{/each}
+			</section>
+		{/if}
+
+		{#if replyState !== 'ok'}
+			<div class="border-t border-dashed border-line-dashed px-5 py-4">
+				<ReplyLine look={STATE_LOOK[replyState]} text={REPLY_COPY[replyState]}>
+					{#if replyState === 'reconnect'}
+						<Button size="sm" disabled={connecting} onclick={onreconnect}>Reconnect Gmail</Button>
+					{/if}
+				</ReplyLine>
+			</div>
+		{/if}
+
+		{#if actions.length || replyState === 'ok'}
 			<div class="mt-auto flex flex-wrap gap-2 border-t border-dashed border-line-dashed px-5 py-4">
 				{#each actions as action, i (action)}
 					<Button
@@ -153,6 +194,12 @@
 						onclick={() => onact(action)}>{ACTIONS[action].label}</Button
 					>
 				{/each}
+				{#if replyState === 'ok'}
+					<!-- Primary only when nothing else is: one main action per view. -->
+					<Button variant={actions.length ? 'secondary' : 'primary'} kbd="R" onclick={onreply}
+						>Reply</Button
+					>
+				{/if}
 			</div>
 		{/if}
 	</div>

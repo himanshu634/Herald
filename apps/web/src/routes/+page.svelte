@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import { untrack } from 'svelte';
 	import {
 		api,
 		type Email,
@@ -15,6 +16,9 @@
 	import EmailTable from '#lib/inbox/EmailTable.svelte';
 	import QuestionDialog from '#lib/inbox/QuestionDialog.svelte';
 	import QuestionStrip from '#lib/inbox/QuestionStrip.svelte';
+	import ReplyBox from '#lib/inbox/ReplyBox.svelte';
+	import { ReplyDesk, lockHint } from '#lib/inbox/replies.svelte.js';
+	import { replyMailbox, replyState, sentToast } from '#lib/inbox/reply.js';
 	import ConnectGmail from '#lib/mailbox/ConnectGmail.svelte';
 	import MailboxMenu from '#lib/mailbox/MailboxMenu.svelte';
 	import { liveMailboxes, needsMailbox, readReturn, type Notice } from '#lib/mailbox/mailbox.js';
@@ -47,6 +51,8 @@
 
 	let workspaces = $state.raw<Workspace[]>([]);
 	let emails = $state.raw<Email[]>([]);
+	// The workspace `emails` belongs to: the last business's list stays until the new one loads.
+	let emailsFor = $state<string | null>(null);
 	let loaded = $state(false);
 	let error = $state<string | null>(null);
 	let toast = $state<string | null>(null);
@@ -93,8 +99,42 @@
 	const questions = $derived(questionsFor(emails));
 	// Closes by itself once the email stops asking, say after On it from another tab.
 	const asking = $derived(questions.find((e) => e.id === askingId) ?? null);
+	// The email the owner just replied to stays open, even once "Send and mark done" drops it
+	// from the view, so its "Your replies" shows. So does one whose composer came back from
+	// Reconnect. J/K, a row click or a tab lets it go.
+	let pinnedId = $state<string | null>(null);
+	const pinned = $derived(emails.find((e) => e.id === pinnedId) ?? null);
 	// Keep the owner's choice while it is in view; otherwise open the top email.
-	const selected = $derived(visible.find((e) => e.id === params.email) ?? visible[0] ?? null);
+	const selected = $derived(
+		pinned ?? visible.find((e) => e.id === params.email) ?? visible[0] ?? null
+	);
+
+	const replies = new ReplyDesk({
+		onsent: async (to, emailId, shown, before) => {
+			// Only if the panel still shows it: the owner may have moved on while the POST
+			// was out, and pinning would pull the panel back to the answered email.
+			if (shown) pinnedId = emailId;
+			// "And marked done" only if the refreshed list has it done and it wasn't before the
+			// press, never from the button: a press under an earlier key gets that send's row
+			// and its mark_done, not this one's.
+			const list = workspaceId ? await refresh(workspaceId) : null;
+			toast = sentToast(
+				to,
+				before,
+				list?.find((e) => e.id === emailId)
+			);
+		},
+		onmailbox: () => workspaceId && refreshMailboxes(workspaceId),
+		onerror: fail
+	});
+	// The email being answered, found in all emails rather than the view: a reply marked done
+	// elsewhere leaves the view, and the composer must not slide over to the next customer.
+	const composing = $derived(emails.find((e) => e.id === replies.composingId) ?? null);
+	const draft = $derived(composing ? replies.drafts[composing.id] : undefined);
+	// The email in the panel and the one O/N/I/D/E act on: while composing, the one answered.
+	const current = $derived(composing ?? selected);
+	const currentId = $derived(current?.id ?? null);
+	const canReply = $derived(current ? replyState(current, mailboxes) : 'no_mailbox');
 	const tabs = $derived<TabItem[]>(
 		VIEWS.map((v) => ({ id: v.id, label: v.label, count: counts[v.id], countTone: v.countTone }))
 	);
@@ -128,9 +168,17 @@
 		const id = workspaceId;
 		refresh(id);
 		refreshMailboxes(id);
+		// Drafts saved before a reload, or before the trip to Google on Reconnect. Untracked:
+		// restore reads the drafts, and this effect must not rerun when one changes.
+		untrack(() => replies.restore(id));
 		live.connect(id);
 		const stop = live.onEvent((event) => {
 			if (event.type === 'mailbox.status') return refreshMailboxes(id);
+			// Another tab's send, or this one's settling: the panel's list catches up.
+			if (event.type === 'reply.status') {
+				if (current && event.data.email_id === current.id) replies.load(current);
+				return;
+			}
 			const done = event.type === 'email.noted' ? rereading : null;
 			if (done && event.data.email_id === done.id) {
 				toast = rereadOutcome(done.sender, event.data);
@@ -142,6 +190,26 @@
 			stop();
 			live.close();
 		};
+	});
+
+	// Back from Google after the composer's Reconnect: open that composer again. Only once
+	// both lists are this business's, or the email would look missing and the id be spent.
+	$effect(() => {
+		if (!workspaceId || emailsFor !== workspaceId || mailboxesFor !== workspaceId) return;
+		const id = workspaceId;
+		// Untracked: reopen writes the drafts and the composer, and reads both lists.
+		const email = untrack(() => replies.reopen(id, emails, (e) => replyState(e, mailboxes)));
+		if (email) {
+			pinnedId = email.id;
+			params.email = email.id;
+		}
+	});
+
+	// The panel's replies load when another email opens, not on every refresh of the list.
+	$effect(() => {
+		if (!currentId) return;
+		const email = untrack(() => current);
+		if (email) replies.load(email);
 	});
 
 	// Messages clear themselves after a few seconds.
@@ -156,11 +224,15 @@
 		loaded = true;
 	}
 
-	async function refresh(id: string) {
+	/** Load the business's emails. Returns them, or null when the load failed. */
+	async function refresh(id: string): Promise<Email[] | null> {
 		try {
 			emails = await api.listEmails(id);
+			emailsFor = id;
+			return emails;
 		} catch (e) {
 			fail(e);
+			return null;
 		}
 	}
 
@@ -173,17 +245,30 @@
 		}
 	}
 
-	async function connectGmail() {
-		if (!workspaceId || connecting) return;
+	/** Start the connect. Returns whether the page is leaving for Google. */
+	async function connectGmail(): Promise<boolean> {
+		if (!workspaceId || connecting) return false;
 		connecting = true;
 		try {
 			const { authorization_url } = await api.startConnect(workspaceId, 'gmail');
 			// A full page redirect: Google sends the browser back to / with the outcome on the URL.
 			window.location.assign(authorization_url);
+			return true;
 		} catch (e) {
 			connecting = false;
 			fail(e);
+			return false;
 		}
+	}
+
+	// The composer's Reconnect, the only one that brings the composer back: the drafts are
+	// saved, but without this the owner would land on the list and think theirs was gone.
+	async function reconnectFromComposer() {
+		const id = workspaceId;
+		if (!id || connecting) return;
+		// Saved before the request: once it answers, the page may already be leaving.
+		replies.keepComposing(id);
+		if (!(await connectGmail())) replies.forgetComposing(id);
 	}
 
 	async function mailboxAct(
@@ -223,7 +308,7 @@
 
 	async function act(
 		action: Action,
-		email: Email | null = selected,
+		email: Email | null = current,
 		allowed: (status: Email['status']) => Action[] = actionsFor
 	) {
 		if (!email || busy || !allowed(email.status).includes(action)) return;
@@ -241,10 +326,15 @@
 
 	// Another business's email id means nothing here, so switching drops it.
 	function chooseWorkspace(id: string | null) {
+		replies.close();
+		pinnedId = null;
 		params.update({ workspace: id ?? '', email: '' });
 	}
 
+	// A tab means the owner wants the list back. The draft stays for when they return.
 	function chooseView(id: string) {
+		replies.close();
+		pinnedId = null;
 		params.view = id;
 	}
 
@@ -287,13 +377,24 @@
 	}
 
 	function move(step: number) {
-		if (!visible.length) return;
-		const index = selected ? visible.indexOf(selected) : -1;
+		// The list is hidden while composing; moving would change the panel under the draft.
+		if (composing || !visible.length) return;
+		// Step from the open email, pinned or not. One that left the view starts from the top.
+		const from = selected;
+		pinnedId = null;
+		const index = from ? visible.indexOf(from) : -1;
 		params.email = visible[Math.min(visible.length - 1, Math.max(0, index + step))].id;
 	}
 
 	function toggleFull() {
-		if (selected) fullId = fullId === selected.id ? null : selected.id;
+		if (current) fullId = fullId === current.id ? null : current.id;
+	}
+
+	// Only from the open email, never from a table row: the panel's notes stay beside the draft.
+	function openReply() {
+		if (!current || canReply !== 'ok') return;
+		if (replies.composingId === current.id) document.getElementById('reply-body')?.focus();
+		else replies.open(current);
 	}
 
 	// Owner shortcuts, from docs/design-system.md. Never while typing or in a dialog.
@@ -311,7 +412,8 @@
 			i: () => act('to-inbox'),
 			d: () => act('done'),
 			e: toggleFull,
-			'/': () => search?.focus()
+			r: openReply,
+			'/': () => !composing && search?.focus()
 		};
 		const run = keys[event.key];
 		if (!run) return;
@@ -420,65 +522,98 @@
 				<main
 					class="flex min-w-0 flex-1 flex-col gap-3 p-4 lg:overflow-y-auto lg:border-t lg:border-line"
 				>
-					{#if questions.length}
-						<QuestionStrip {questions} onanswer={(id) => (askingId = id)} />
-					{/if}
-
-					<div class="flex flex-wrap items-center gap-2">
-						<label class="sr-only" for="search">Search mail</label>
-						<input
-							id="search"
-							bind:this={search}
-							bind:value={query}
-							oninput={() => (params.q = query)}
-							type="search"
-							placeholder="Search mail  /"
-							class="h-control-md w-56 rounded-sm border border-control bg-surface px-2.5 text-sm"
-						/>
-						<FilterChip bind:pressed={params.urgent}>Urgent</FilterChip>
-					</div>
-
-					{#if visible.length}
-						<EmailTable
-							emails={visible}
-							selectedId={selected?.id ?? null}
-							onselect={(id) => (params.email = id)}
+					{#if composing && draft}
+						<ReplyBox
+							email={composing}
+							from={replyMailbox(composing, mailboxes)?.email_address}
+							state={canReply}
+							bind:body={
+								() => draft?.body ?? '', (body) => composing && replies.setBody(composing, body)
+							}
+							sending={draft.sending}
+							waiting={!!draft.waiting}
+							lockHint={lockHint(draft)}
+							last={draft.last}
+							problem={draft.problem}
+							{connecting}
+							onsend={(markDone) => composing && replies.send(composing, markDone)}
+							onclose={() => replies.close()}
+							ondiscard={() => composing && replies.discard(composing)}
+							onreconnect={reconnectFromComposer}
 						/>
 					{:else}
-						<div
-							class="rounded-lg border border-dashed border-line-strong bg-surface px-6 py-10 text-center"
-						>
-							<p class="text-lg font-bold">
-								{filters.query || filters.urgentOnly
-									? 'No emails match these filters.'
-									: EMPTY[view]}
-							</p>
-						</div>
-					{/if}
-
-					<p class="text-sm text-muted">
-						Also: {counts.inbox} in the inbox, {counts['in-progress']} in progress,
-						{counts.closed} closed quietly.
-						{#if view !== 'all'}
-							<button
-								type="button"
-								class="cursor-pointer font-bold text-ink underline underline-offset-2"
-								onclick={() => chooseView('all')}>Show all {counts.all}</button
-							>
+						{#if questions.length}
+							<QuestionStrip {questions} onanswer={(id) => (askingId = id)} />
 						{/if}
-					</p>
+
+						<div class="flex flex-wrap items-center gap-2">
+							<label class="sr-only" for="search">Search mail</label>
+							<input
+								id="search"
+								bind:this={search}
+								bind:value={query}
+								oninput={() => (params.q = query)}
+								type="search"
+								placeholder="Search mail  /"
+								class="h-control-md w-56 rounded-sm border border-control bg-surface px-2.5 text-sm"
+							/>
+							<FilterChip bind:pressed={params.urgent}>Urgent</FilterChip>
+						</div>
+
+						{#if visible.length}
+							<EmailTable
+								emails={visible}
+								selectedId={selected?.id ?? null}
+								onselect={(id) => {
+									pinnedId = null;
+									params.email = id;
+								}}
+							/>
+						{:else}
+							<div
+								class="rounded-lg border border-dashed border-line-strong bg-surface px-6 py-10 text-center"
+							>
+								<p class="text-lg font-bold">
+									{filters.query || filters.urgentOnly
+										? 'No emails match these filters.'
+										: EMPTY[view]}
+								</p>
+							</div>
+						{/if}
+
+						<p class="text-sm text-muted">
+							Also: {counts.inbox} in the inbox, {counts['in-progress']} in progress,
+							{counts.closed} closed quietly.
+							{#if view !== 'all'}
+								<button
+									type="button"
+									class="cursor-pointer font-bold text-ink underline underline-offset-2"
+									onclick={() => chooseView('all')}>Show all {counts.all}</button
+								>
+							{/if}
+						</p>
+					{/if}
 				</main>
 
-				{#if selected}
+				{#if current}
+					<!-- At phone width the composer takes the screen, as the list does there. -->
 					<div
-						class="px-4 pb-4 lg:flex lg:w-panel lg:flex-none lg:border-t lg:border-line lg:py-4 lg:pr-4 lg:pl-0"
+						class={[
+							'px-4 pb-4 lg:flex lg:w-panel lg:flex-none lg:border-t lg:border-line lg:py-4 lg:pr-4 lg:pl-0',
+							composing && 'max-lg:hidden'
+						]}
 					>
 						<EmailPanel
-							email={selected}
+							email={current}
 							{busy}
-							full={fullId === selected.id}
+							full={fullId === current.id}
 							ontogglefull={toggleFull}
 							onact={act}
+							replyState={canReply}
+							replies={replies.list}
+							{connecting}
+							onreply={openReply}
+							onreconnect={connectGmail}
 						/>
 					</div>
 				{/if}

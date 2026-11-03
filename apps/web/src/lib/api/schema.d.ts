@@ -280,6 +280,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/emails/{email_id}/replies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Replies */
+        get: operations["get_replies_api_workspaces__workspace_id__emails__email_id__replies_get"];
+        put?: never;
+        /**
+         * Post Reply
+         * @description Send the owner's reply. The outcome is the reply's `status`, so a failed send is a 200.
+         */
+        post: operations["post_reply_api_workspaces__workspace_id__emails__email_id__replies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/events": {
         parameters: {
             query?: never;
@@ -524,8 +545,17 @@ export interface components {
             id: string;
             /** Workspace Id */
             workspace_id: string;
+            /** Mailbox Id */
+            mailbox_id: string | null;
             /** Sender */
             sender: string;
+            /** Reply To */
+            reply_to: string | null;
+            /**
+             * Reply Address
+             * @description Where a reply goes: Reply-To when it is one plain address, else the sender. Empty when there is no usable address.
+             */
+            reply_address: string;
             /** Subject */
             subject: string;
             /** Body */
@@ -567,6 +597,8 @@ export interface components {
             /** Email Address */
             email_address: string;
             status: components["schemas"]["MailboxStatus"];
+            /** Can Send */
+            can_send: boolean;
             /** Subscription Expires At */
             subscription_expires_at: string | null;
             /** Last Synced At */
@@ -625,6 +657,51 @@ export interface components {
              */
             text: string;
         };
+        /** ReplyIn */
+        ReplyIn: {
+            /** Body */
+            body: string;
+            /**
+             * Client Key
+             * @description The draft's id, made by the browser. The same key never sends twice.
+             */
+            client_key: string;
+            /**
+             * Mark Done
+             * @description Mark the email done if the reply is sent.
+             * @default false
+             */
+            mark_done: boolean;
+        };
+        /** ReplyOut */
+        ReplyOut: {
+            /** Id */
+            id: string;
+            /** Email Id */
+            email_id: string;
+            /** To Address */
+            to_address: string;
+            /** Subject */
+            subject: string;
+            /** Body */
+            body: string;
+            status: components["schemas"]["ReplyStatus"];
+            /** Error */
+            error: ("rate_limited" | "auth" | "send_not_allowed" | "rejected" | "unknown") | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Sent At */
+            sent_at: string | null;
+        };
+        /**
+         * ReplyStatus
+         * @description Where an owner's reply stands. UNKNOWN: the send may or may not have reached the customer.
+         * @enum {string}
+         */
+        ReplyStatus: "sending" | "sent" | "not_sent" | "unknown";
         /**
          * RiskFlag
          * @enum {string}
@@ -1291,6 +1368,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_replies_api_workspaces__workspace_id__emails__email_id__replies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                email_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplyOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_reply_api_workspaces__workspace_id__emails__email_id__replies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                email_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplyOut"];
                 };
             };
             /** @description Validation Error */

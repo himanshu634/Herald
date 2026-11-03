@@ -97,6 +97,14 @@
 				</p>
 			</div>
 			<hr class="mx-1 mb-1.5 border-t border-dashed border-line-dashed" />
+			{#if mailbox.status === 'active' && !mailbox.can_send}
+				<!-- Connected before replies existed, or "send" was unticked on Google's screen.
+					The same connect flow asks again; reconnecting an active mailbox turns sending on. -->
+				<button type="button" class={item} disabled={busy} onclick={() => run(onreconnect)}>
+					<Icon name="send" size={16} /><span class="flex-1">Allow replies</span>
+					<span class="text-sm text-muted">reconnect Gmail</span>
+				</button>
+			{/if}
 			{#if mailbox.status === 'paused'}
 				<button type="button" class={item} disabled={busy} onclick={() => run(onresume)}>
 					<Icon name="play" size={16} />Resume
