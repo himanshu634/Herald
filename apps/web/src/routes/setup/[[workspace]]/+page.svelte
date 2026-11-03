@@ -246,22 +246,29 @@
 					<div
 						class="sticky bottom-0 mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line-strong bg-surface px-4 py-3"
 					>
-						<div class="flex flex-wrap items-center gap-3">
-							{#if confirmRedraft}
-								<p class="text-sm font-semibold">Replace your edits with a new draft?</p>
+						<!-- Redraft throws away edits, so it stays quiet next to Save and asks first. -->
+						{#if confirmRedraft}
+							<div
+								role="alert"
+								class="flex flex-wrap items-center gap-2.5 rounded-md bg-warning-bg px-2.5 py-1.5 text-sm font-semibold text-warning-fg"
+							>
+								<Icon name="alert" size={16} />
+								<p>Replace your edits with a fresh draft?</p>
 								<Button size="sm" onclick={redraft} disabled={busy}>Replace</Button>
-								<Button variant="quiet" size="sm" onclick={() => (confirmRedraft = false)}
-									>Keep editing</Button
+								<button
+									type="button"
+									class="cursor-pointer font-bold underline underline-offset-3"
+									onclick={() => (confirmRedraft = false)}>Keep editing</button
 								>
-							{:else}
-								<Button onclick={redraft} disabled={busy}
-									><Icon name="redo" size={16} />Redraft</Button
-								>
-								<span class="text-sm text-muted"
-									>Reads your description again and replaces this draft.</span
-								>
-							{/if}
-						</div>
+							</div>
+						{:else}
+							<button
+								type="button"
+								class="inline-flex h-control-md cursor-pointer items-center gap-1.5 text-sm font-bold text-neutral-fg underline underline-offset-3 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+								onclick={redraft}
+								disabled={busy}><Icon name="redo" size={16} />Redraft from my description</button
+							>
+						{/if}
 						<Button variant="primary" kbd="⌘↵" onclick={save} disabled={busy}>
 							{busy ? 'Saving…' : 'Save and open inbox'}
 						</Button>
