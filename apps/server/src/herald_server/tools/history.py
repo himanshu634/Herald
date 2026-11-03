@@ -95,6 +95,7 @@ class SenderHistoryTool(_Bound):
         topics = Counter(topic for row in rows if row.notes and (topic := row.notes.get("topic")))
         return SenderHistory(
             first_seen=first_seen,
+            as_of=self.before,
             count_7d=sum(1 for row in rows if row.received_at >= week_start),
             count_30d=sum(1 for row in rows if row.received_at >= month_start),
             top_topics=[topic for topic, _ in topics.most_common(3)],
