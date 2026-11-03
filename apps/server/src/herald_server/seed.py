@@ -1,6 +1,6 @@
 """Demo workspace: Tripfold, a made-up online luggage brand. Data only; no code knows about it."""
 
-from herald_core.schema import Rule, RuleAction, Urgency, WorkspaceConfig
+from herald_core.schema import Rule, RuleAction, Topic, Urgency, WorkspaceConfig
 
 TRIPFOLD_NAME = "Tripfold"
 
@@ -11,13 +11,40 @@ TRIPFOLD = WorkspaceConfig(
         "and no delivery."
     ),
     topics=[
-        "Orders and delivery",
-        "Returns and exchanges",
-        "Damaged or defective",
-        "Warranty claims",
-        "Payments and refunds",
-        "Product questions",
-        "Corporate gifting",
+        Topic(
+            name="Orders and delivery",
+            meaning="where an order is, late or missing parcels, address changes",
+        ),
+        Topic(
+            name="Returns and exchanges",
+            meaning="sending back an unused bag, or swapping size or colour",
+        ),
+        Topic(
+            name="Damaged or defective",
+            meaning="arrived broken, or broke within 30 days of delivery",
+        ),
+        Topic(
+            name="Warranty claims",
+            meaning="broke after 30 days, under the 2-year warranty",
+        ),
+        Topic(
+            name="Payments and refunds",
+            meaning="charges, failed payments, refund status",
+        ),
+        Topic(
+            name="Product questions",
+            meaning="sizes, airline cabin limits, materials, before buying",
+        ),
+        Topic(
+            name="Corporate gifting",
+            meaning="bulk or branded orders from companies",
+        ),
+    ],
+    facts=[
+        "Returns are accepted within 7 days of delivery, unused and with tags.",
+        "Every bag has a 2-year warranty on wheels, zips and handles.",
+        "Metro orders arrive in 2-4 days, other cities in 5-7 days.",
+        "Refunds reach the original payment method 5-7 days after the return is picked up.",
     ],
     important_contacts=["corporate-gifts@bigcorp.example"],
     rules=[

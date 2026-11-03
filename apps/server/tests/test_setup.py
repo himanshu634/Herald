@@ -8,6 +8,7 @@ from herald_core.schema import (
     TopicDraft,
     Urgency,
 )
+from herald_server.seed import TRIPFOLD
 from herald_server.setup import FALLBACK_TOPICS, clean_draft
 
 DESCRIPTION = "We bake custom cakes to order and deliver them. A missed delivery is a disaster."
@@ -199,3 +200,8 @@ async def test_put_accepts_string_topics(client):
     )
     assert response.status_code == 200
     assert response.json()["config"]["topics"] == [{"name": "Orders", "meaning": None}]
+
+
+def test_tripfold_seed_has_meanings_and_facts():
+    assert all(t.meaning for t in TRIPFOLD.topics)
+    assert len(TRIPFOLD.facts) == 4
