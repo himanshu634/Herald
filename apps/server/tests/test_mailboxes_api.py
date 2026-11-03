@@ -265,6 +265,32 @@ async def test_callback_reports_connected_when_failure_happens_after_save(
     assert "leak-me-xyz" not in caplog.text
 
 
+async def test_callback_reports_connected_when_refresh_fails_after_commit(
+    app, client, fake_connector, monkeypatch
+):
+    ws = await demo_workspace(client)
+    state = await start_connect(client, ws)
+    real_refresh = Session.refresh
+    failures = [RuntimeError("leak-me-xyz")]
+
+    def refresh_failing_once(self, instance, *args, **kwargs):
+        # The first refresh in the flow would be the one right after the connect's commit.
+        if failures:
+            raise failures.pop()
+        return real_refresh(self, instance, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "refresh", refresh_failing_once)
+
+    response = await callback(client, code="c", state=state)
+    monkeypatch.undo()
+    await app.state.queue.drain()
+
+    [mailbox] = mailboxes_of(app, ws)
+    assert redirect_query(response) == {"mailbox_connected": [mailbox.id]}
+    assert mailbox.status == MailboxStatus.ACTIVE
+    assert status_events(app, ws) == ["active"]
+
+
 async def test_callback_reports_connected_when_saving_subscription_fails(
     app, client, fake_connector, monkeypatch, caplog
 ):

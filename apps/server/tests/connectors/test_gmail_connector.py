@@ -385,7 +385,7 @@ async def test_server_error_on_a_message_fails_the_fetch(connector, google):
     google.message_errors["flaky"] = 503
     google.add_message("m1")
 
-    # A 5xx may pass: fail the fetch so the cursor stays and the retry reads it again.
+    # A 5xx may pass: fail the fetch so the cursor stays and the next sync reads it again.
     with pytest.raises(httpx.HTTPStatusError):
         await connector.fetch_changes(CREDS, "400")
 

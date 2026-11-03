@@ -163,7 +163,11 @@ def upsert_connected(
     if services.secrets is None:
         raise RuntimeError("token_key is not set")
     email_address = account.email_address.lower()
-    with Session(services.engine) as session:
+    # expire_on_commit=False: every field is set in Python or by the flush (the event id), so
+    # the objects are complete at commit and nothing after it touches the database. A refresh
+    # after the commit could fail with the mailbox already saved, and connect_mailbox promises
+    # its caller that an exception means nothing was saved.
+    with Session(services.engine, expire_on_commit=False) as session:
         mailbox = session.exec(
             select(Mailbox).where(
                 Mailbox.workspace_id == workspace_id,
@@ -180,8 +184,6 @@ def upsert_connected(
         session.add(mailbox)
         event = stage_status_event(session, mailbox)
         session.commit()
-        session.refresh(mailbox)
-        session.refresh(event)
         return mailbox, to_bus(event)
 
 
