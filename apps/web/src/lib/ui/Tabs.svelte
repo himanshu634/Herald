@@ -29,8 +29,10 @@
 	}
 </script>
 
+<!-- The strip still scrolls sideways on narrow screens; the scrollbar is hidden because
+	 the tabs' -mb-px overlap makes the box 1px taller than its content, which shows a stray bar. -->
 <div
-	class="flex gap-1 overflow-x-auto border-b border-line"
+	class="flex [scrollbar-width:none] gap-1 overflow-x-auto border-b border-line [&::-webkit-scrollbar]:hidden"
 	role="tablist"
 	aria-label={label}
 	tabindex="-1"
