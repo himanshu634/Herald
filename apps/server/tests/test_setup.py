@@ -1,6 +1,13 @@
 from herald_core.graph import build_graph
 from herald_core.model import FakeModel, ModelError
-from herald_core.schema import SPAM_TOPIC, RuleAction, RuleDraft, SetupDraft, Urgency
+from herald_core.schema import (
+    SPAM_TOPIC,
+    RuleAction,
+    RuleDraft,
+    SetupDraft,
+    TopicDraft,
+    Urgency,
+)
 from herald_server.setup import FALLBACK_TOPICS, clean_draft
 
 DESCRIPTION = "We bake custom cakes to order and deliver them. A missed delivery is a disaster."
@@ -10,31 +17,64 @@ def rule(name: str, action=RuleAction.ALERT, urgency=None) -> RuleDraft:
     return RuleDraft(name=name, when="It is about a cake", action=action, urgency=urgency)
 
 
+def topic(name: str, meaning: str = "") -> TopicDraft:
+    return TopicDraft(name=name, meaning=meaning)
+
+
 def test_clean_draft_tidies_topics():
     draft = SetupDraft(
-        topics=[" Orders ", "orders", SPAM_TOPIC, "", "Allergies"], guidance=[], rules=[]
+        topics=[
+            topic(" Orders ", " Where an order is "),
+            topic("orders"),
+            topic(SPAM_TOPIC),
+            topic(""),
+            topic("Allergies"),
+        ],
+        facts=[],
+        guidance=[],
+        rules=[],
     )
-    assert [t.name for t in clean_draft(draft, DESCRIPTION).topics] == ["Orders", "Allergies"]
+    topics = clean_draft(draft, DESCRIPTION).topics
+    assert [t.name for t in topics] == ["Orders", "Allergies"]
+    assert topics[0].meaning == "Where an order is"
+
+
+def test_clean_draft_cleans_facts_and_meanings():
+    draft = SetupDraft(
+        topics=[topic("Orders", "m" * 200), topic("Allergies", "  ")],
+        facts=[" Returns in 7 days ", "", "x" * 300, *[f"Fact {i}" for i in range(12)]],
+        guidance=[],
+        rules=[],
+    )
+    config = clean_draft(draft, DESCRIPTION)
+    assert len(config.facts) <= 10
+    assert config.facts[0] == "Returns in 7 days"
+    assert all(0 < len(f) <= 200 for f in config.facts)
+    assert len(config.topics[0].meaning) == 120
+    assert config.topics[1].meaning is None
 
 
 def test_clean_draft_falls_back_when_no_topics_are_left():
-    draft = SetupDraft(topics=[SPAM_TOPIC, "  "], guidance=[], rules=[])
-    assert [t.name for t in clean_draft(draft, DESCRIPTION).topics] == FALLBACK_TOPICS
+    draft = SetupDraft(topics=[topic(SPAM_TOPIC), topic("  ")], facts=[], guidance=[], rules=[])
+    assert clean_draft(draft, DESCRIPTION).topics == FALLBACK_TOPICS
 
 
 def test_clean_draft_caps_counts():
     draft = SetupDraft(
-        topics=[f"Topic {i}" for i in range(20)],
+        topics=[topic(f"Topic {i}") for i in range(20)],
+        facts=[f"Fact {i}" for i in range(20)],
         guidance=[f"Line {i}" for i in range(20)],
         rules=[rule(f"Rule {i}") for i in range(20)],
     )
     config = clean_draft(draft, DESCRIPTION)
-    assert (len(config.topics), len(config.guidance), len(config.rules)) == (12, 8, 8)
+    counts = (len(config.topics), len(config.guidance), len(config.rules), len(config.facts))
+    assert counts == (12, 8, 8, 10)
 
 
 def test_clean_draft_fixes_rules():
     draft = SetupDraft(
-        topics=["Orders"],
+        topics=[topic("Orders")],
+        facts=[],
         guidance=[],
         rules=[
             rule("Same day"),
@@ -73,7 +113,8 @@ async def test_setup_falls_back_when_the_ai_fails(app, client):
     app.state.services.model = BrokenModel()
     body = await start(client)
     assert body["drafted"] is False
-    assert [t["name"] for t in body["workspace"]["config"]["topics"]] == FALLBACK_TOPICS
+    topics = body["workspace"]["config"]["topics"]
+    assert topics == [t.model_dump(mode="json") for t in FALLBACK_TOPICS]
 
 
 async def test_draft_workspace_takes_no_email_until_saved(app, client):
@@ -148,3 +189,13 @@ async def test_setup_routes_are_scoped_to_their_workspace(client):
     assert stored_b["setup_done"] is False
     missing = await client.put("/api/workspaces/nope/config", json={"name": "A", "config": config})
     assert missing.status_code == 404
+
+
+async def test_put_accepts_string_topics(client):
+    workspace = (await start(client))["workspace"]
+    config = workspace["config"] | {"topics": ["Orders"]}
+    response = await client.put(
+        f"/api/workspaces/{workspace['id']}/config", json={"name": "Crumb", "config": config}
+    )
+    assert response.status_code == 200
+    assert response.json()["config"]["topics"] == [{"name": "Orders", "meaning": None}]

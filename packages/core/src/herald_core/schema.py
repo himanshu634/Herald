@@ -135,10 +135,18 @@ class RuleDraft(BaseModel):
     urgency: Urgency | None = None
 
 
+class TopicDraft(BaseModel):
+    """A topic the AI suggests at setup, with a one-line meaning."""
+
+    name: str
+    meaning: str
+
+
 class SetupDraft(BaseModel):
     """The AI's first guess at a business's setup, read from its description."""
 
-    topics: list[str]
+    topics: list[TopicDraft]
+    facts: list[str]
     guidance: list[str]
     rules: list[RuleDraft]
 

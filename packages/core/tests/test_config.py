@@ -37,7 +37,13 @@ async def test_fake_suggest_setup_is_deterministic():
     description = "We take cake orders and deliver on the day. Refunds by bank transfer."
     first = await model.suggest_setup("Crumb", description)
     assert first == await model.suggest_setup("Crumb", description)
-    assert first.topics == ["Orders and delivery", "Payments and refunds", "Questions"]
+    assert [t.name for t in first.topics] == [
+        "Orders and delivery",
+        "Payments and refunds",
+        "Questions",
+    ]
+    assert all(t.meaning for t in first.topics)
+    assert first.facts == []
     assert first.rules
 
 

@@ -21,6 +21,7 @@ from herald_core.schema import (
     RuleDraft,
     RuleVerdict,
     SetupDraft,
+    TopicDraft,
     Urgency,
     WorkspaceConfig,
 )
@@ -46,11 +47,19 @@ class TriageModel(Protocol):
 
 # FakeModel's topic guesses: a word in the description gives a topic.
 _FAKE_TOPICS = [
-    (("order", "deliver", "ship"), "Orders and delivery"),
-    (("refund", "payment", "invoice", "billing"), "Payments and refunds"),
-    (("book", "appointment", "session"), "Bookings"),
-    (("return", "exchange"), "Returns and exchanges"),
-    (("subscription", "account", "login"), "Accounts and subscriptions"),
+    (("order", "deliver", "ship"), "Orders and delivery", "Where an order is and when it arrives"),
+    (
+        ("refund", "payment", "invoice", "billing"),
+        "Payments and refunds",
+        "Charges, invoices and money back",
+    ),
+    (("book", "appointment", "session"), "Bookings", "Making, moving or cancelling a booking"),
+    (("return", "exchange"), "Returns and exchanges", "Sending an item back or swapping it"),
+    (
+        ("subscription", "account", "login"),
+        "Accounts and subscriptions",
+        "Signing in, plans and account changes",
+    ),
 ]
 
 
@@ -92,9 +101,17 @@ class FakeModel:
 
     async def suggest_setup(self, name: str, description: str) -> SetupDraft:
         lower = description.lower()
-        topics = [topic for words, topic in _FAKE_TOPICS if any(w in lower for w in words)]
+        topics = [
+            TopicDraft(name=name, meaning=meaning)
+            for words, name, meaning in _FAKE_TOPICS
+            if any(w in lower for w in words)
+        ]
         return SetupDraft(
-            topics=[*topics, "Questions"],
+            topics=[
+                *topics,
+                TopicDraft(name="Questions", meaning="Anything that fits no other topic"),
+            ],
+            facts=[],
             guidance=["Customers who mention a deadline in the next two days are urgent."],
             rules=[
                 RuleDraft(
@@ -113,9 +130,14 @@ class _Verdicts(BaseModel):
 _SETUP_INSTRUCTIONS = """A small business owner is setting up email triage. From their business
 name and description, draft a setup they will review and edit.
 
-- topics: 4 to 8 short labels, in the customer's words, for what customers write about.
-- guidance: up to 5 lines. Facts about this business that change how urgent or important an
-  email is, e.g. "Wedding orders for this weekend are always urgent".
+- topics: 4 to 8. Each has a name (a short label, in the customer's words) and a meaning
+  (one line, under 120 characters, saying what belongs there and how it differs from close
+  topics).
+- facts: up to 6 short lines of policy the description states, such as a return window,
+  warranty length or delivery times. Only what the description says. Return an empty list
+  when it states none. Never invent a policy.
+- guidance: up to 5 lines. How this business judges urgency and importance, e.g.
+  "Wedding orders for this weekend are always urgent".
 - rules: 2 to 5. Each has a short name, a plain "when" condition about one email, and one
   action: alert (cannot wait a day), set_urgency (with an urgency), or close (clutter such as
   newsletters).
