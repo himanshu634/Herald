@@ -1,0 +1,199 @@
+"""Checks on the eval harness itself. No scores are asserted: those come from a real model."""
+
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from herald_core.model import FakeModel, ModelError
+from herald_core.schema import Decision, Notes, Quote, Route, RuleVerdict, Urgency
+from herald_evals import dataset as ds
+from herald_evals.cli import main
+from herald_evals.report import markdown
+from herald_evals.runner import Trial, run_all
+from herald_evals.score import check, grounded, score_trials, summarise
+from herald_server.seed import TRIPFOLD
+
+
+@pytest.mark.parametrize("name", ds.builtin_names())
+def test_builtin_datasets_load(name):
+    data = ds.load_named(name)
+    assert data.cases
+    # Every case says something that can be scored beyond the route, or is about the route.
+    assert all(c.expect.route for c in data.cases)
+
+
+def test_tripfold_uses_the_seed_config():
+    # A copy would drift from the product the first time someone edits a seed rule.
+    assert ds.load_named("tripfold").config is TRIPFOLD
+
+
+def _dataset(tmp_path: Path, expect: str) -> Path:
+    path = tmp_path / "shop.toml"
+    path.write_text(
+        f"""
+business = "Shop"
+config_ref = "herald_server.seed:TRIPFOLD"
+
+[[cases]]
+id = "c1"
+sender = "a@b.in"
+subject = "Hi"
+body = "Where is my order?"
+[cases.expect]
+{expect}
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_unknown_rule_in_a_label_is_refused(tmp_path):
+    with pytest.raises(ValidationError, match="unknown rules"):
+        ds.load(_dataset(tmp_path, 'route = "inbox"\nrules = { nope = true }'))
+
+
+def test_unknown_topic_in_a_label_is_refused(tmp_path):
+    with pytest.raises(ValidationError, match="unknown topics"):
+        ds.load(_dataset(tmp_path, 'route = "inbox"\ntopic = "Shoes"'))
+
+
+def test_one_or_several_routes(tmp_path):
+    one = ds.load(_dataset(tmp_path, 'route = "alert"')).cases[0].expect
+    several = ds.load(_dataset(tmp_path, 'route = ["inbox", "alert"]')).cases[0].expect
+    none = ds.load(_dataset(tmp_path, 'route = "inbox"')).cases[0].expect
+    assert (one.should_alert, several.should_alert, none.should_alert) == (True, None, False)
+
+
+def _case(**expect):
+    return ds.Case(
+        id="c1",
+        sender="a@b.in",
+        subject="Flight   tomorrow",
+        body="My bag has not arrived.\nI fly tomorrow at 7 am.",
+        expect=ds.Expect(**expect),
+    )
+
+
+def _trial(route=Route.INBOX, quotes=(), verdicts=(), word_flags=(), errors=()):
+    notes = Notes(
+        topic="Orders and delivery",
+        urgency=Urgency.HIGH,
+        anger=2,
+        summary="Bag late before a flight.",
+        quotes=[Quote(note="urgency", text=t) for t in quotes],
+        sure=True,
+    )
+    return Trial(
+        dataset="d",
+        case_id="c1",
+        run=0,
+        notes=notes,
+        verdicts=list(verdicts),
+        word_flags=list(word_flags),
+        decision=Decision(route=route, urgency=Urgency.HIGH, reason="test"),
+        errors=list(errors),
+        ms=5,
+    )
+
+
+def test_quotes_are_matched_with_whitespace_collapsed():
+    case = _case(route="alert")
+    assert grounded("I fly   tomorrow at 7 am.", case)
+    assert grounded('"Flight tomorrow"', case)
+    assert not grounded("I fly on Friday", case)
+    assert not grounded("  ", case)
+
+
+def test_checks_cover_each_label():
+    case = _case(
+        route="alert",
+        topic="Orders and delivery",
+        anger=[3, 4],
+        rules={"travel-soon": True, "damaged": False},
+        no_flags=["legal_threat"],
+    )
+    trial = _trial(
+        quotes=["I fly tomorrow at 7 am.", "from the history"],
+        verdicts=[RuleVerdict(rule_id="travel-soon", matched=True)],
+        word_flags=["legal_threat"],
+    )
+    results = {c.name: c.ok for c in check(case, trial)}
+    assert results == {
+        "route": False,
+        "topic": True,
+        "anger": False,
+        "no_flag:legal_threat": False,
+        "rule:travel-soon": True,
+        # Not judged counts as "no", which is what this label wants.
+        "rule:damaged": True,
+        "quote": False,
+    }
+
+
+def test_model_errors_are_left_out_of_quality_numbers():
+    case = _case(route="alert")
+    cases = {("d", "c1"): case}
+    ok = score_trials(cases, [_trial(route=Route.ALERT)])
+    broken = score_trials(cases, [_trial(route=Route.NEEDS_A_LOOK, errors=["write_notes: 429"])])
+    scores = summarise([*ok, *broken])
+    assert scores.model_errors == 1
+    assert str(scores.missed_alerts) == "0% (0/1)"
+    assert str(scores.needs_a_look) == "0% (0/1)"
+
+
+def test_false_alarms_count_alerts_on_should_not_alert_cases():
+    cases = {("d", "c1"): _case(route="inbox")}
+    scores = summarise(score_trials(cases, [_trial(route=Route.ALERT)]))
+    assert str(scores.false_alarms) == "100% (1/1)"
+    assert str(scores.missed_alerts) == "—"
+
+
+class FailingModel(FakeModel):
+    async def write_notes(self, email, business_name, config, history=None):
+        raise ModelError("rate limited")
+
+
+async def test_runner_records_model_errors_the_graph_swallows():
+    data = ds.load_named("tripfold")
+    trials = await run_all(FailingModel(), [(data, data.cases[0])])
+    assert trials[0].errors == ["write_notes: rate limited"]
+    assert trials[0].decision.route is Route.NEEDS_A_LOOK
+
+
+async def test_runner_feeds_recorded_history_to_the_model():
+    seen = []
+
+    class Spy(FakeModel):
+        async def write_notes(self, email, business_name, config, history=None):
+            seen.append((email.thread_id, history))
+            return await super().write_notes(email, business_name, config, history)
+
+    data = ds.load_named("tripfold")
+    case = next(c for c in data.cases if c.history and c.history.thread)
+    await run_all(Spy(), [(data, case)])
+    thread_id, history = seen[0]
+    assert thread_id is not None
+    assert history.thread and history.thread.messages
+
+
+def test_fake_run_writes_a_report(tmp_path, capsys):
+    main(["--model", "fake", "--out", str(tmp_path)])
+    files = sorted(p.suffix for p in tmp_path.iterdir())
+    assert files == [".json", ".md"]
+    assert "# Herald score report" in capsys.readouterr().out
+
+
+def test_report_names_unreviewed_cases():
+    cases = {("d", "c1"): _case(route="inbox")}
+    meta = {
+        "model": "fake",
+        "model_name": "fake",
+        "temperature": "n/a",
+        "repeats": 1,
+        "prompt_hash": "x",
+        "commit": "y",
+        "started": "now",
+    }
+    text = markdown(meta, score_trials(cases, [_trial()]))
+    assert "1 of 1 cases are not hand-checked yet" in text

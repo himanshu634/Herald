@@ -8,6 +8,7 @@ Herald is one monorepo with a SvelteKit front end, a FastAPI back end with a sep
 | --- | --- | --- |
 | `packages/core` | `herald_core`: shared types, safety-floor word check, decide step, LangGraph graph, AI model adapters, plug-in interfaces. No database and no Redis. | uv, pytest |
 | `apps/server` | `herald_server`: the FastAPI API (`herald_server.api.main:app`) and the arq worker (`herald_server.worker.main.WorkerSettings`). They share the tables, event bus and pipeline. | uv, FastAPI CLI, arq |
+| `packages/evals` | `herald_evals`: test emails with known answers, run through the real graph, and the score report. See [evals.md](evals.md). | uv, pytest |
 | `apps/web` | SvelteKit (Svelte 5, runes) built as a static single-page app. API types are generated from FastAPI's OpenAPI schema. | pnpm, Vite, svelte-check, Vitest |
 | `docs` | Scope, decisions and this file | — |
 
@@ -268,7 +269,7 @@ There are no migrations yet. Startup creates missing tables, but it does not add
 - Alembic migrations (tables are created on startup for now; see "Upgrading an existing dev database")
 - Auth and per-workspace limits
 - A settings page for editing a workspace after setup (`PUT /config` is ready for it)
-- The rule test, the score report and the test-email set
+- The rule test (the score report and the test-email set are in `packages/evals`)
 - An Outlook connector, and IMAP
 - Filter-based watch labels (Gmail watches the whole inbox)
 - Binding the OAuth `state` to the browser that started the connect. It needs auth or a state cookie.

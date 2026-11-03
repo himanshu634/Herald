@@ -6,7 +6,7 @@ UVICORN := uv run uvicorn herald_server.api.main:app --port 8000 \
 	--reload --reload-dir src --reload-dir ../../packages/core/src
 
 .PHONY: help install infra infra-down dev api worker web lite docker-dev docker-prod docker-prod-down \
-	test lint format gen-api
+	test eval lint format gen-api
 
 help: ## List tasks
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -57,6 +57,10 @@ docker-prod-down: ## Stop the production stack (keeps its data)
 test: ## Run all tests
 	uv run pytest
 	pnpm -C apps/web test
+
+# ARGS passes options through, e.g. make eval ARGS="--repeats 3" or ARGS="--case sue-is-a-name".
+eval: ## Run the triage evals on Claude and write the score report (needs ANTHROPIC_API_KEY)
+	uv run herald-evals $(ARGS)
 
 lint: ## Lint, format-check and type-check everything
 	uv run ruff check .
