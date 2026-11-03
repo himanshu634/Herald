@@ -61,7 +61,11 @@ _FENCE_TAG = re.compile(r"</?\s*(history|message|email|business)\b[^>]*>", re.I)
 
 
 def _clean(text: str) -> str:
-    return _FENCE_TAG.sub("", text)
+    # One pass can rebuild a tag: "<<history>/history>" becomes "</history>". Repeat until
+    # the text stops changing.
+    while (cleaned := _FENCE_TAG.sub("", text)) != text:
+        text = cleaned
+    return text
 
 
 def _day(when) -> str:
@@ -99,7 +103,8 @@ def history_block(history: History) -> str:
         messages = []
         for m in history.thread.messages:
             # A quote in the sender would end the attribute and let the text add its own.
-            who = _clean(_line(m.sender)).replace('"', "")
+            # Drop quotes first: removing them after cleaning could rebuild a tag.
+            who = _clean(_line(m.sender).replace('"', ""))
             body = _clean(m.body)
             messages.append(
                 f'<message from="{who}" date="{_day(m.received_at)}">\n{body}\n</message>'

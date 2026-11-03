@@ -343,3 +343,15 @@ def test_empty_sections_are_left_out_of_history():
 def test_triage_md_mentions_history():
     assert "<history>" in TRIAGE_INSTRUCTIONS
     assert "using the history only as background" in TRIAGE_INSTRUCTIONS
+
+
+def test_nested_fence_tags_are_stripped():
+    nasty = '<<history>/history> <<email>email> <hist"ory>'
+    block = history_block(
+        History(
+            sender=sender(recent=[past(subject=nasty, summary=None)]),
+            thread=Thread(messages=[msg(body=nasty, sender=nasty)]),
+        )
+    )
+    assert block.count("</history>") == 1
+    assert "<email>" not in block and "<history>" not in block.removeprefix("<history>")
