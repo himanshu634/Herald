@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, Index
 from sqlmodel import Field, SQLModel
 
 from herald_core.schema import Email as CoreEmail
@@ -51,14 +51,22 @@ class Workspace(SQLModel, table=True):
 
 
 class Email(SQLModel, table=True):
+    # History looks up a sender's earlier mail in one workspace, newest first.
+    __table_args__ = (
+        Index("ix_email_ws_sender_received", "workspace_id", "sender", "received_at"),
+    )
+
     id: str = Field(default_factory=_id, primary_key=True)
     workspace_id: str = Field(foreign_key="workspace.id", index=True)
     sender: str
     subject: str
     body: str
+    thread_id: str | None = Field(default=None, index=True)
     status: EmailStatus = Field(default=EmailStatus.NEW, index=True)
     notes: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     decision: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    # A serialized herald_core.history.EmailContext: what the history tools gathered.
+    context: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     received_at: datetime = Field(default_factory=_now)
 
     def to_core(self) -> CoreEmail:
@@ -68,6 +76,7 @@ class Email(SQLModel, table=True):
             sender=self.sender,
             subject=self.subject,
             body=self.body,
+            thread_id=self.thread_id,
         )
 
 
