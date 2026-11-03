@@ -15,6 +15,7 @@ Herald ships as a multi-tenant framework, and the demo shows one business: Tripf
 | 2026-11-03 | **One push channel first: ntfy.** SSE reaches only an open tab, so alerts also need a push to the phone. | Least work for a real phone buzz. Notifier is an interface, so Web Push or Slack can be added later. |
 | 2026-11-03 | **Notes are trimmed.** Repeat contact and "going public" / "abusive" flags are cut for now. | Repeat contact needs customer identity and threads. |
 | 2026-11-03 | **Stack: SvelteKit (Svelte 5) + FastAPI + LangGraph, with Postgres and Redis.** FastAPI streams events to the browser over SSE. Details in [architecture.md](architecture.md). | Chosen by the owner of this repo. |
+| 2026-11-03 | **Mail connectors are provider-neutral; Gmail is the first.** One `Mailbox` table and one sync job serve every provider; provider details live in the connector and its opaque cursor. | Outlook and IMAP can be added later without changing tables or routes. |
 
 ## Cuts
 
