@@ -59,15 +59,18 @@
 		<!-- Broken: one click reconnects, no menu in the way. -->
 		<button
 			type="button"
+			title={mailbox.email_address}
 			class="inline-flex h-control-md cursor-pointer items-center gap-2 rounded-sm border border-danger-fg bg-danger-bg px-2.5 text-sm font-semibold text-danger-fg"
 			disabled={busy}
 			onclick={onreconnect}
 		>
-			<Icon name="alert" size={16} />{mailbox.email_address}<span class="font-bold">Reconnect</span>
+			<Icon name="alert" size={16} /><span class="max-w-56 truncate">{mailbox.email_address}</span
+			><span class="font-bold">Reconnect</span>
 		</button>
 	{:else}
 		<button
 			type="button"
+			title={mailbox.email_address}
 			aria-haspopup="true"
 			aria-expanded={open}
 			class="inline-flex h-control-md cursor-pointer items-center gap-2 rounded-sm border border-control bg-surface px-2.5 text-sm font-semibold"
@@ -76,8 +79,8 @@
 			<span
 				class={['size-2 rounded-full', mailbox.status === 'active' ? 'bg-live' : 'bg-line-strong']}
 			></span>
-			{mailbox.email_address}
-			<span class="font-medium text-muted">{summary}</span>
+			<span class="max-w-56 truncate">{mailbox.email_address}</span>
+			<span class="font-medium whitespace-nowrap text-muted">{summary}</span>
 			<Icon name="down" size={16} />
 		</button>
 	{/if}
@@ -86,7 +89,7 @@
 			class="absolute top-full right-0 z-10 mt-1.5 flex w-80 flex-col rounded-lg border border-line-strong bg-surface p-1.5 shadow-popover"
 		>
 			<div class="px-2.5 pt-2 pb-2.5">
-				<p class="font-bold">{mailbox.email_address}</p>
+				<p class="font-bold wrap-anywhere">{mailbox.email_address}</p>
 				<p class="text-sm text-muted">
 					Gmail · {mailbox.status === 'paused' ? 'paused, mail waits' : 'live'}{synced
 						? ` · checked ${synced}`

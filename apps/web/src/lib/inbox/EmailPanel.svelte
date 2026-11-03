@@ -17,7 +17,7 @@
 
 <aside
 	aria-label="Herald on this email"
-	class="flex min-w-0 flex-1 flex-col border-l border-line bg-surface max-lg:border-t max-lg:border-l-0"
+	class="flex min-w-0 flex-1 flex-col border-l border-line bg-surface max-lg:border-t max-lg:border-l-0 lg:overflow-y-auto"
 >
 	<header class="border-b border-dashed border-line-dashed px-5 py-4">
 		<div class="flex items-center justify-between gap-3">

@@ -240,7 +240,9 @@
 <div class="flex min-h-screen">
 	<Rail />
 
-	<div class="flex min-w-0 flex-1 flex-col">
+	<!-- Wide screens: fit the viewport so the list and the email panel scroll on their own.
+		Otherwise a long email scrolls the list and header away with it. -->
+	<div class={['flex min-w-0 flex-1 flex-col', open && 'lg:h-screen']}>
 		<header
 			class="flex flex-wrap items-end justify-between gap-3 border-b border-line px-4 pt-2.5 lg:border-b-0"
 		>
@@ -331,8 +333,10 @@
 		{/if}
 
 		{#if open}
-			<div class="flex flex-1 flex-col lg:flex-row">
-				<main class="flex min-w-0 flex-1 flex-col gap-3 p-4 lg:border-t lg:border-line">
+			<div class="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
+				<main
+					class="flex min-w-0 flex-1 flex-col gap-3 p-4 lg:overflow-y-auto lg:border-t lg:border-line"
+				>
 					<div class="flex flex-wrap items-center gap-2">
 						<label class="sr-only" for="search">Search mail</label>
 						<input
