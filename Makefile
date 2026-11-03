@@ -9,7 +9,7 @@ UVICORN := uv run uvicorn herald_server.api.main:app --port 8000 \
 	--reload --reload-dir src --reload-dir ../../packages/core/src
 
 .PHONY: help install infra infra-down dev api worker web lite docker-dev docker-prod docker-prod-down \
-	test eval lint format gen-api
+	test eval lint format gen-api langfuse langfuse-down
 
 help: ## List tasks
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -23,6 +23,12 @@ infra: ## Start Postgres and Redis (Docker)
 
 infra-down: ## Stop Postgres and Redis
 	docker compose -f infra/docker-compose.yml down
+
+langfuse: ## Start local Langfuse on :3000 (dev tracing, Docker)
+	docker compose -f infra/docker-compose.langfuse.yml up -d --wait
+
+langfuse-down: ## Stop local Langfuse (keeps its data)
+	docker compose -f infra/docker-compose.langfuse.yml down
 
 # --wait holds until the healthchecks pass, so the API and worker never start before
 # Postgres accepts connections. The API and worker each run create_all on startup; on an
