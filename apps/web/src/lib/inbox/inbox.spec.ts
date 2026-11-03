@@ -17,7 +17,9 @@ function email(id: string, over: Partial<Email> = {}): Email {
 	return {
 		id,
 		workspace_id: 'w1',
+		mailbox_id: null,
 		sender: `${id}@customer.in`,
+		reply_to: null,
 		subject: `Subject ${id}`,
 		body: 'Body',
 		thread_id: null,

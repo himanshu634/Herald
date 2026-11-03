@@ -92,6 +92,18 @@ async def mark_needs_reauth(services: Services, mailbox_id: str) -> None:
         await services.bus.publish(event)
 
 
+def clear_can_send(services: Services, mailbox_id: str) -> None:
+    """Record that the provider refused to send for this mailbox. A reconnect sets it again."""
+    with Session(services.engine) as session:
+        # By id alone: the caller loaded this mailbox filtered by workspace_id.
+        mailbox = session.get(Mailbox, mailbox_id)
+        if mailbox is None:
+            return
+        mailbox.can_send = False
+        session.add(mailbox)
+        session.commit()
+
+
 def active_mailbox_ids_for_address(
     services: Services, provider: str, email_address: str
 ) -> list[str]:

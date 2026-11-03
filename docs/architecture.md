@@ -104,10 +104,13 @@ The AI writes notes and never sets status. Status changes in two places only: th
 | Not urgent | `alerted` only | `inbox` | A correction is saved |
 | Move to Inbox | `closed` only | `inbox` | A correction is saved |
 | Done | any | `done` | — |
+| Send and mark done | any but `done` | `done` | Only when the reply is `sent` |
+
+Both the action routes and "Send and mark done" change status through `status.stage_move`.
 
 ## Live events (SSE)
 
-- `GET /api/workspaces/{id}/events` streams `email.received`, `email.noted`, `email.status`, `mailbox.status` and `alert.sent`.
+- `GET /api/workspaces/{id}/events` streams `email.received`, `email.noted`, `email.status`, `mailbox.status`, `reply.status` and `alert.sent`.
 - Each event is stored in the `event` table first, then published to Redis channel `herald:ws:{id}`. A tab only hears its own workspace.
 - The browser's `EventSource` reconnects on its own and sends `Last-Event-ID`. The server replays missed events from the database.
 - FastAPI sends a keep-alive comment every 15 s.
@@ -122,6 +125,28 @@ The AI writes notes and never sets status. Status changes in two places only: th
 - A workspace stays a draft (`setup_done = false`) until its setup is saved. A draft workspace refuses email with `409`, because its config is the AI's unchecked guess.
 - Owner guidance goes into the `<business>` block of the system prompt, after the facts (see "The prompt"). It shapes topic, urgency and anger only. The prompt says it cannot silence the safety floor, and the word check runs regardless. Routing stays with rules.
 - Planned: per-workspace caps on AI calls and emails per day.
+
+## Replies
+
+The owner writes a reply in the email's panel and sends it through the email's mailbox (`herald_server/replies.py`). Only `POST /api/workspaces/{id}/emails/{email_id}/replies` sends, after the owner presses Send; the AI never sends. `GET` on the same path lists the email's replies, oldest first.
+
+A send has three steps, so no database session is open while the provider is called:
+
+1. **Begin.** In one transaction: look up the draft's `client_key`, check the mailbox, then commit a `sending` row. A key already used for this email returns its row and sends nothing, so a double click or a second tab sends once. A key used for another email, or a second draft while one is `sending`, answers 409 `already_sending` (the partial unique index `uq_reply_one_sending` allows one `sending` row per email). An email with no mailbox, a mailbox that is not `active`, or one without send permission answers 409 `no_mailbox`, `mailbox_inactive` or `send_not_allowed`.
+2. **Send.** One call to `connector.send_reply`, under a 60 s timeout, and never retried.
+3. **Finish.** In one transaction: save the outcome, stage `reply.status` (`email_id`, `reply_id`, `status`), and for "Send and mark done" move the email to `done` if the reply was sent. Commit, then publish.
+
+The answer is 200 whatever the outcome; the reply's `status` says it:
+
+| Status | Meaning | `error` |
+| --- | --- | --- |
+| `sent` | The provider took it | — |
+| `not_sent` | The provider refused; nothing went out | `rate_limited`, `auth` (the mailbox moves to `needs_reauth`), `send_not_allowed` (`can_send` turns off until a reconnect), `rejected` |
+| `unknown` | A timeout, a 5xx or any other error. The customer may have it, so the owner checks the mailbox's Sent folder | `unknown` |
+
+A `sending` row older than 2 minutes belongs to a process that died mid-send. The next reply to that email turns it `unknown` (and stages `reply.status`), so it never blocks the email. Two minutes is longer than the slowest send: two requests (a token refresh and the send) under the 60 s timeout.
+
+The reply goes to the email's `Reply-To` when that is one plain address (a contact form sends from a no-reply address), and to `From` otherwise. It carries `In-Reply-To` and `References`, and the provider's thread id, so it lands in the customer's thread.
 
 ## Mail connectors
 
@@ -257,7 +282,7 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 
 ### Upgrading an existing dev database
 
-There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. The same happens to a database made before the history tools, which added `email.thread_id`, `email.context` and the sender index. A `mailbox` table made before the one-business-per-mailbox rule also lacks the index `uq_mailbox_live_address` (startup does not add indexes to a table that exists); the connect check still applies, but a racing connect is not caught. Start from an empty database:
+There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. The same happens to a database made before the history tools, which added `email.thread_id`, `email.context` and the sender index. A `mailbox` table made before the one-business-per-mailbox rule also lacks the index `uq_mailbox_live_address` (startup does not add indexes to a table that exists); the connect check still applies, but a racing connect is not caught. A database made before owner replies lacks the `email` columns `internet_message_id`, `references` and `reply_to` and the `mailbox` column `can_send`; the `reply` table and its index `uq_reply_one_sending` are created on startup. Start from an empty database:
 
 - Lite mode: delete `apps/server/herald-dev.db`.
 - Postgres: run `docker compose down -v`, then `make infra`.

@@ -10,6 +10,7 @@ from herald_server.api.routes import (
     mailboxes,
     oauth,
     providers,
+    replies,
     webhooks,
     workspaces,
 )
@@ -38,7 +39,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         services.engine.dispose()
 
     app = FastAPI(title="Herald", debug=settings.debug, lifespan=lifespan)
-    for module in (health, workspaces, emails, events, mailboxes, oauth, providers, webhooks):
+    for module in (
+        health,
+        workspaces,
+        emails,
+        replies,
+        events,
+        mailboxes,
+        oauth,
+        providers,
+        webhooks,
+    ):
         app.include_router(module.router)
     return app
 

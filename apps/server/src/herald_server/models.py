@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from sqlalchemy import JSON, Column, Index, UniqueConstraint
@@ -135,6 +135,54 @@ class Email(SQLModel, table=True):
             body=self.body,
             thread_id=self.thread_id,
         )
+
+
+class ReplyStatus(StrEnum):
+    """Where an owner's reply stands. UNKNOWN: the send may or may not have reached the customer."""
+
+    SENDING = "sending"
+    SENT = "sent"
+    NOT_SENT = "not_sent"
+    UNKNOWN = "unknown"
+
+
+# Why a reply is NOT_SENT or UNKNOWN. A fixed kind, never the provider's text.
+ReplyError = Literal["rate_limited", "auth", "send_not_allowed", "rejected", "unknown"]
+
+
+class Reply(SQLModel, table=True):
+    """A reply the owner wrote and sent from Herald. Kept whatever the outcome."""
+
+    # client_key is the browser's draft id. Unique per workspace, so a double click or a
+    # second tab with the same draft finds this row and never sends twice.
+    __table_args__ = (UniqueConstraint("workspace_id", "client_key"),)
+
+    id: str = Field(default_factory=_id, primary_key=True)
+    workspace_id: str = Field(foreign_key="workspace.id", index=True)
+    email_id: str = Field(foreign_key="email.id", index=True)
+    mailbox_id: str = Field(foreign_key="mailbox.id")
+    client_key: str
+    from_address: str
+    to_address: str
+    subject: str
+    body: str
+    status: ReplyStatus = Field(default=ReplyStatus.SENDING, index=True)
+    error: str | None = None  # A ReplyError.
+    provider_message_id: str | None = None
+    created_at: datetime = Field(default_factory=_now)
+    sent_at: datetime | None = None
+
+
+# At most one reply per email is in flight, so two drafts cannot both reach the customer.
+# Partial, because the finished rows are history. Built from the column, not a SQL string: the
+# status column stores the enum name ('SENDING').
+Index(
+    "uq_reply_one_sending",
+    col(Reply.email_id),
+    unique=True,
+    postgresql_where=col(Reply.status) == ReplyStatus.SENDING,
+    sqlite_where=col(Reply.status) == ReplyStatus.SENDING,
+)
 
 
 class Correction(SQLModel, table=True):

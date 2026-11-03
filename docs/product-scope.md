@@ -59,13 +59,13 @@ The product sorts, flags and alerts; it never replies to customers on its own an
 | AI notes | Topic, urgency, anger, risk flags, a one-line summary and the quoted lines behind each note | Training a custom model |
 | Alerts | Phone or email alert for urgent emails; one reminder if it is not opened | Phone calls, on-call rotations |
 | Inbox | Sorted list, email detail, "on it" or "not urgent", corrections | Assigning to others, team views |
-| Replies | Nothing sent to customers | Auto-replies; drafts are a stretch goal and always sent by the owner |
+| Replies | The owner writes and sends a reply from Herald, through the connected mailbox | Auto-replies; AI drafts are still roadmap and always sent by the owner |
 | Quality | Test emails with known answers and a score report | Live experiments |
 | Accounts | One owner per workspace | Teams, roles, billing |
 
 Non-goals, even in a later version:
 
-- **No replying on the owner's behalf.** The AI may draft; the owner sends.
+- **No replying on the owner's behalf.** The owner can now write and send replies from Herald. AI drafts are still roadmap: the AI may draft, and the owner always sends.
 - **No money or account decisions.** Refunds, credits and cancellations stay with the owner.
 - **No rule can silence a safety, security or legal warning.**
 - **No helpdesk replacement.** A business that outgrows one person moves to a tool like Zendesk; this product is for before that.
