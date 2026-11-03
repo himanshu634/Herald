@@ -126,7 +126,7 @@ async def test_to_inbox_is_409_unless_closed(app, client):
     alerted = await send(app, client, ws, "Hello", "Someone used my card.")
     assert (inbox["status"], alerted["status"]) == ("inbox", "alerted")
     done = await send(app, client, ws, "Thanks", "Got it, thanks.")
-    await client.post(f"/api/workspaces/{ws}/emails/{done['id']}/done")
+    assert (await client.post(f"/api/workspaces/{ws}/emails/{done['id']}/done")).status_code == 200
     for email in (inbox, alerted, done):
         response = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/to-inbox")
         assert response.status_code == 409
