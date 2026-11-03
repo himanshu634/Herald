@@ -16,14 +16,14 @@ from herald_server.services import Services
 log = logging.getLogger(__name__)
 
 
-def _load(services: Services, email_id: str) -> tuple[Email, WorkspaceConfig]:
+def _load(services: Services, email_id: str) -> tuple[Email, str, WorkspaceConfig]:
     with Session(services.engine) as session:
         email = session.get(Email, email_id)
         if email is None:
             raise LookupError(f"email {email_id} not found")
         workspace = session.get(Workspace, email.workspace_id)
         assert workspace is not None
-        return email, WorkspaceConfig.model_validate(workspace.config)
+        return email, workspace.name, WorkspaceConfig.model_validate(workspace.config)
 
 
 def _save(
@@ -61,8 +61,8 @@ def _record_alert(services: Services, email: Email, alert: Alert) -> list[BusEve
 
 
 async def process_email(services: Services, email_id: str) -> Decision:
-    email, config = await asyncify(_load)(services, email_id)
-    state = await triage(services.graph, email.to_core(), config)
+    email, name, config = await asyncify(_load)(services, email_id)
+    state = await triage(services.graph, email.to_core(), config, business_name=name)
     notes, decision = state.get("notes"), state["decision"]
 
     email, events = await asyncify(_save)(services, email_id, notes, decision)

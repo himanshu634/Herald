@@ -96,9 +96,9 @@ async def test_saved_guidance_reaches_the_notes_model(app, client):
     seen = []
 
     class RecordingModel(FakeModel):
-        async def write_notes(self, email, config):
-            seen.append(config.guidance)
-            return await super().write_notes(email, config)
+        async def write_notes(self, email, business_name, config):
+            seen.append((business_name, config.guidance))
+            return await super().write_notes(email, business_name, config)
 
     workspace = (await start(client))["workspace"]
     ws = workspace["id"]
@@ -109,7 +109,7 @@ async def test_saved_guidance_reaches_the_notes_model(app, client):
     email = {"sender": "riya@customer.in", "subject": "Order", "body": "Where is my cake?"}
     await client.post(f"/api/workspaces/{ws}/emails", json=email)
     await app.state.queue.drain()
-    assert seen == [["Wedding cakes are always urgent."]]
+    assert seen == [("Crumb", ["Wedding cakes are always urgent."])]
 
 
 async def test_config_needs_a_topic(client):
