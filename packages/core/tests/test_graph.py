@@ -160,6 +160,26 @@ async def test_model_failure_lands_in_needs_a_look():
     assert state["decision"].route is Route.NEEDS_A_LOOK
 
 
+class CrashingModel(FakeModel):
+    # Errors the SDK raises outside APIError, like a missing API key (TypeError).
+    async def write_notes(self, email, business_name, config, history=None):
+        raise TypeError("Could not resolve authentication method")
+
+    async def judge_rules(self, email, business_name, config, history=None):
+        raise TypeError("Could not resolve authentication method")
+
+
+async def test_any_model_crash_lands_in_needs_a_look():
+    state = await triage(
+        build_graph(CrashingModel()),
+        email("Order", "Where is it?"),
+        CONFIG,
+        business_name="Tripfold",
+    )
+    assert state["notes"] is None
+    assert state["decision"].route is Route.NEEDS_A_LOOK
+
+
 SENDER = SenderHistory(first_seen=None, count_7d=2, count_30d=3, top_topics=[], recent=[])
 CORRECTIONS = Corrections(items=[])
 

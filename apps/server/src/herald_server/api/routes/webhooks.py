@@ -35,6 +35,7 @@ async def receive_push(
     mailbox_ids = await asyncify(active_mailbox_ids_for_address)(
         services, connector.provider, notice.email_address
     )
+    log.info("push accepted: %d mailbox(es) queued for sync", len(mailbox_ids))
     for mailbox_id in mailbox_ids:
         await queue.enqueue_sync(mailbox_id)
     # An unknown or inactive address still gets 204: a 4xx or 5xx would make Pub/Sub retry a

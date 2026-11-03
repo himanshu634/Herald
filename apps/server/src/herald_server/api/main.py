@@ -13,6 +13,7 @@ from herald_server.api.routes import (
     webhooks,
     workspaces,
 )
+from herald_server.logs import setup_logging
 from herald_server.queue import ArqQueue, InlineQueue, JobQueue
 from herald_server.services import Services, build_services
 from herald_server.settings import Settings, get_settings
@@ -20,6 +21,8 @@ from herald_server.settings import Settings, get_settings
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    # After uvicorn's own logging setup, which runs before it imports the app.
+    setup_logging(settings.log_level)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

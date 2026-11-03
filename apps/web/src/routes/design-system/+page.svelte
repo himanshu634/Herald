@@ -3,6 +3,7 @@
 	import {
 		AngerMeter,
 		Button,
+		Dialog,
 		FilterChip,
 		Icon,
 		Logo,
@@ -61,6 +62,7 @@
 	];
 	let tab = $state('needs-you');
 	let anger4 = $state(true);
+	let dialogOpen = $state(false);
 	let toast = $state<string | null>(null);
 	const th = 'h-8.5 border-b border-line bg-sunken px-3 text-left text-xs font-bold text-muted';
 	const td = 'h-row border-b border-dashed border-line-dashed px-3 whitespace-nowrap';
@@ -215,6 +217,27 @@
 				>
 				<span class="text-sm text-muted">Bottom centre, the action's own words.</span>
 			</div>
+		</Panel>
+
+		<Panel title="Dialog">
+			<div class="flex flex-wrap items-center gap-3">
+				<Button onclick={() => (dialogOpen = true)}>Open a dialog</Button>
+				<span class="text-sm text-muted"
+					>80% of the window, full screen on a phone. Esc closes it.</span
+				>
+			</div>
+			<Dialog open={dialogOpen} label="Example dialog" onclose={() => (dialogOpen = false)}>
+				{#snippet header()}
+					<h2 class="text-xl font-extrabold">Do you take back pairs bought from a stockist?</h2>
+				{/snippet}
+				<div class="flex-1 px-5 py-4 text-md text-body">
+					The body is laid out in columns from md up, and scrolls inside the dialog.
+				</div>
+				{#snippet footer()}
+					<Button variant="primary" onclick={() => (dialogOpen = false)}>Save</Button>
+					<Button variant="quiet" onclick={() => (dialogOpen = false)}>Not now</Button>
+				{/snippet}
+			</Dialog>
 		</Panel>
 
 		<Panel title="Theme switch">

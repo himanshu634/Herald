@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from herald_core.model import DEFAULT_MODEL
@@ -8,7 +9,10 @@ from herald_core.model import DEFAULT_MODEL
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="HERALD_", env_file=(".env", "../../.env"), extra="ignore"
+        env_prefix="HERALD_",
+        env_file=(".env", "../../.env"),
+        extra="ignore",
+        populate_by_name=True,
     )
 
     database_url: str = "postgresql+psycopg://herald:herald@localhost:5432/herald"
@@ -20,9 +24,14 @@ class Settings(BaseSettings):
 
     model_provider: Literal["anthropic", "fake"] = "fake"
     model_name: str = DEFAULT_MODEL
+    # Read here, not by the SDK: values in .env never reach os.environ, so a bare
+    # AsyncAnthropic() would start without a key and fail on every email.
+    anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
 
     # Send the traceback in 500 responses, so the web app shows it. Dev only: it leaks internals.
     debug: bool = False
+    # Level for Herald's own loggers. INFO prints one line per email arrival and pipeline step.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     web_url: str = "http://localhost:5173"
 

@@ -12,6 +12,8 @@ most the tool timeout (2 s). Parallel nodes write different state keys.
 
 import asyncio
 import logging
+import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -32,12 +34,18 @@ from herald_core.history import (
     Thread,
     ThreadIn,
 )
-from herald_core.model import ModelError, TriageModel
+from herald_core.model import TriageModel
 from herald_core.safety import word_check
 from herald_core.schema import Decision, Email, Notes, RiskFlag, RuleVerdict, WorkspaceConfig
 from herald_core.tools import Toolbox
 
+# Each node logs one line keyed by email id, so runs of parallel emails can be told apart.
+# Only ids, enums, counts and timings: never the sender, subject, body or the model's free text.
 log = logging.getLogger(__name__)
+
+
+def _names(items: Iterable[str]) -> str:
+    return ",".join(sorted(items)) or "none"
 
 
 @dataclass
@@ -61,7 +69,9 @@ class TriageState(TypedDict, total=False):
 def build_graph(model: TriageModel) -> CompiledStateGraph:
     def run_word_check(state: TriageState) -> TriageState:
         email = state["email"]
-        return {"word_flags": word_check(f"{email.subject}\n{email.body}")}
+        flags = word_check(f"{email.subject}\n{email.body}")
+        log.info("email %s word_check: flags=%s", email.id, _names(flags))
+        return {"word_flags": flags}
 
     async def gather_context(state: TriageState, runtime: Runtime[TriageContext]) -> TriageState:
         tools = runtime.context.tools
@@ -78,49 +88,90 @@ def build_graph(model: TriageModel) -> CompiledStateGraph:
         sender = next((r for r in results if isinstance(r, SenderHistory)), None)
         corrections = next((r for r in results if isinstance(r, Corrections)), None)
         thread = next((r for r in results if isinstance(r, Thread)), None)
+        log.info(
+            "email %s gather_context: sender_30d=%s thread=%s corrections=%s",
+            email.id,
+            sender.count_30d if sender else "-",
+            len(thread.messages) if thread else "-",
+            len(corrections.items) if corrections else "-",
+        )
         return {"history": History(sender=sender, thread=thread, corrections=corrections)}
 
     async def write_notes(state: TriageState) -> TriageState:
+        email_id = state["email"].id
+        log.info("email %s write_notes: asking the model", email_id)
+        started = time.perf_counter()
         try:
-            return {
-                "notes": await model.write_notes(
-                    state["email"],
-                    state["business_name"],
-                    state["config"],
-                    history=state.get("history"),
-                )
-            }
-        except ModelError as exc:
-            log.warning("write_notes failed for email %s: %s", state["email"].id, exc)
+            notes = await model.write_notes(
+                state["email"],
+                state["business_name"],
+                state["config"],
+                history=state.get("history"),
+            )
+        # Any failure, not only ModelError: an uncaught one (a missing API key raises
+        # TypeError) fails the whole run and leaves the email unread for good.
+        except Exception:
+            log.exception("write_notes failed for email %s", email_id)
             return {"notes": None}
+        log.info(
+            "email %s write_notes: urgency=%s anger=%d sure=%s flags=%s in %d ms",
+            email_id,
+            notes.urgency,
+            notes.anger,
+            notes.sure,
+            _names(notes.risk_flags),
+            round((time.perf_counter() - started) * 1000),
+        )
+        return {"notes": notes}
 
     async def judge_rules(state: TriageState) -> TriageState:
-        config, notes = state["config"], state.get("notes")
+        config, notes, email_id = state["config"], state.get("notes"), state["email"].id
         # Mail that decide will close before the rules needs no verdicts: skip the model call.
-        if (
-            not config.rules
-            or notes is None
-            or not_for_business(notes, config, state["email"].sender)
-        ):
+        if not config.rules:
+            skip = "no rules"
+        elif notes is None:
+            skip = "no notes"
+        elif not_for_business(notes, config, state["email"].sender):
+            skip = "not for the business"
+        else:
+            skip = None
+        if skip:
+            log.info("email %s judge_rules: skipped (%s)", email_id, skip)
             return {"verdicts": []}
+        started = time.perf_counter()
         try:
             verdicts = await model.judge_rules(
                 state["email"], state["business_name"], config, history=state.get("history")
             )
-            return {"verdicts": verdicts}
-        except ModelError:
+        except Exception:
+            log.exception("judge_rules failed for email %s", email_id)
             return {"verdicts": []}
+        log.info(
+            "email %s judge_rules: %d rules, matched=%s in %d ms",
+            email_id,
+            len(config.rules),
+            _names(v.rule_id for v in verdicts if v.matched),
+            round((time.perf_counter() - started) * 1000),
+        )
+        return {"verdicts": verdicts}
 
     def run_decide(state: TriageState) -> TriageState:
-        return {
-            "decision": decide(
-                notes=state.get("notes"),
-                word_flags=state.get("word_flags", set()),
-                verdicts=state.get("verdicts", []),
-                config=state["config"],
-                sender=state["email"].sender,
-            )
-        }
+        decision = decide(
+            notes=state.get("notes"),
+            word_flags=state.get("word_flags", set()),
+            verdicts=state.get("verdicts", []),
+            config=state["config"],
+            sender=state["email"].sender,
+        )
+        # The reason is built from fixed strings and the owner's rule names, not the email.
+        log.info(
+            "email %s decide: route=%s urgency=%s reason=%r",
+            state["email"].id,
+            decision.route,
+            decision.urgency,
+            decision.reason,
+        )
+        return {"decision": decision}
 
     graph = StateGraph(TriageState, context_schema=TriageContext)
     graph.add_node("word_check", run_word_check)

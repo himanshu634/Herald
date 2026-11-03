@@ -155,3 +155,83 @@ async def test_only_the_seeded_demo_is_marked_demo(client):
 
     assert demo["demo"] is True
     assert setup["demo"] is False
+
+
+async def test_saved_fact_and_reread_settle_an_unsure_email(app, client):
+    ws = await demo_workspace(client)
+    other = await demo_workspace(client)
+    email = await send(app, client, ws, "Engraving", "Can you engrave my initials on the tag?")
+    assert email["status"] == "needs_a_look"
+    assert email["notes"]["sure"] is False
+    assert email["notes"]["question"]
+    url = f"/api/workspaces/{ws}/emails/{email['id']}/reread"
+
+    workspace = (await client.get(f"/api/workspaces/{ws}")).json()
+    config = workspace["config"] | {
+        "facts": [*workspace["config"]["facts"], "Engraving initials on a tag is free."]
+    }
+    saved = await client.put(
+        f"/api/workspaces/{ws}/config", json={"name": workspace["name"], "config": config}
+    )
+    assert saved.status_code == 200
+
+    assert (
+        await client.post(f"/api/workspaces/{other}/emails/{email['id']}/reread")
+    ).status_code == 404
+    response = await client.post(url)
+    assert response.status_code == 202
+    await app.state.queue.drain()
+    again = (await client.get(f"/api/workspaces/{ws}/emails/{email['id']}")).json()
+    assert again["notes"]["sure"] is True
+    assert again["notes"]["question"] is None
+    assert again["status"] == "inbox"
+
+
+async def test_reread_is_409_once_the_owner_took_it(app, client):
+    ws = await demo_workspace(client)
+    email = await send(app, client, ws, "Engraving", "Can you engrave my initials on the tag?")
+    assert (
+        await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/on-it")
+    ).status_code == 200
+    response = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/reread")
+    assert response.status_code == 409
+
+
+async def test_unsure_mail_a_close_rule_won_can_be_marked_done(app, client):
+    from sqlmodel import Session, select
+
+    from herald_server.models import Correction
+
+    ws = await demo_workspace(client)
+    email = await send(
+        app, client, ws, "Courier pickup slot", "Can our courier collect from your warehouse at 9?"
+    )
+    assert (email["status"], email["notes"]["sure"]) == ("closed", False)
+    done = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/done")
+    assert done.json()["status"] == "done"
+    with Session(app.state.services.engine) as session:
+        assert session.exec(select(Correction)).all() == []
+
+
+async def test_reread_is_409_after_the_owner_moved_it(app, client):
+    ws = await demo_workspace(client)
+    email = await send(
+        app, client, ws, "Courier pickup slot", "Can our courier collect from your warehouse at 9?"
+    )
+    moved = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/to-inbox")
+    assert moved.json()["status"] == "inbox"
+    response = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/reread")
+    assert response.status_code == 409
+
+
+async def test_triage_logs_each_step_without_email_content(app, client, caplog):
+    caplog.set_level("INFO", logger="herald_core")
+    caplog.set_level("INFO", logger="herald_server")
+    ws = await demo_workspace(client)
+    email = await send(
+        app, client, ws, "Secret-subject-xyz", "Someone used my card", sender="leak@me.xyz"
+    )
+    for step in ("arrived", "word_check", "gather_context", "write_notes", "judge_rules", "decide"):
+        assert f"email {email['id']} {step}" in caplog.text
+    assert f"email {email['id']} triaged" in caplog.text and "route=alert" in caplog.text
+    assert "xyz" not in caplog.text and "Someone" not in caplog.text
