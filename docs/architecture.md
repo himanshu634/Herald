@@ -252,6 +252,7 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 | `HERALD_BUS` | `redis` | `memory` |
 | `HERALD_QUEUE` | `arq` | `inline` |
 | `HERALD_MODEL_PROVIDER` | `fake` | `fake` |
+| `HERALD_LOG_LEVEL` | `INFO` (one line per email arrival and pipeline step, in the API or worker terminal) | same |
 | `HERALD_TOKEN_KEY` | unset (Gmail off: it needs this, the Google client id and secret, and the topic) | unset |
 | `HERALD_PUBLIC_API_URL` | `http://localhost:8000` | same |
 | `HERALD_WEB_URL` | `http://localhost:5173` | same |

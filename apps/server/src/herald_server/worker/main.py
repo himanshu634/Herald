@@ -15,6 +15,7 @@ from asyncer import asyncify
 from redis.exceptions import LockNotOwnedError
 
 from herald_server.connectors.base import RateLimited
+from herald_server.logs import setup_logging
 from herald_server.mailboxes import active_mailbox_ids, renew_subscriptions
 from herald_server.pipeline import process_email
 from herald_server.queue import PROCESS_EMAIL_JOB, SYNC_MAILBOX_JOB
@@ -37,6 +38,8 @@ SYNC_PENDING_TTL = 3600
 
 
 async def startup(ctx: dict[str, Any]) -> None:
+    # Here, not at import: the arq CLI sets up its own logging after it imports this module.
+    setup_logging(settings.log_level)
     ctx["services"] = build_services(settings)
 
 
