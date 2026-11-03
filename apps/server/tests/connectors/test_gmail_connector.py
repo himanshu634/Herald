@@ -15,6 +15,7 @@ from herald_server.connectors.gmail.client import API, SCOPE, TOKEN_URL, GmailCl
 from herald_server.connectors.gmail.connector import (
     BACKFILL_LIMIT,
     BACKFILL_QUERY,
+    MAX_MESSAGES_PER_FETCH,
     GmailConnector,
 )
 from herald_server.settings import Settings
@@ -43,11 +44,17 @@ class FakeGoogle:
         self.email = "owner@shop.in"
         self.profile_history_id = "500"
         self.history_pages: dict[str | None, dict] = {}
+        # When set, history is served from these (record id, message ids) like Gmail does:
+        # only records after startHistoryId, HISTORY_PAGE_SIZE records per page.
+        self.history_records: list[tuple[int, list[str]]] | None = None
+        self.history_id_now = "5000"
         # Page tokens (None is the first page) whose history request answers 404.
         self.expired_pages: set[str | None] = set()
         self.listed_ids: list[str] = []
         # id -> (raw, labelIds); a missing id answers 404.
         self.messages: dict[str, tuple[str, list[str]]] = {}
+        # id -> HTTP status the message get answers with instead.
+        self.message_errors: dict[str, int] = {}
 
     def add_message(self, message_id: str, labels: tuple[str, ...] = ("INBOX",), **kw) -> None:
         self.messages[message_id] = (_raw(**kw), list(labels))
@@ -71,9 +78,12 @@ class FakeGoogle:
             return httpx.Response(200, json={"historyId": "9", "expiration": "2000"})
         if path == HISTORY:
             page_token = params.get("pageToken")
-            self.calls.append(f"history:{page_token}")
+            start = params["startHistoryId"]
+            self.calls.append(f"history:{start}:{page_token}")
             if page_token in self.expired_pages:
                 return httpx.Response(404, json={"error": {"code": 404}})
+            if self.history_records is not None:
+                return httpx.Response(200, json=self._records_page(int(start), page_token))
             return httpx.Response(200, json=self.history_pages[page_token])
         # Match the list path exactly before treating the path as /messages/{id}.
         if path == MESSAGES:
@@ -84,6 +94,10 @@ class FakeGoogle:
         if path.startswith(MESSAGES + "/"):
             message_id = path.rsplit("/", 1)[1]
             self.calls.append(f"get:{message_id}")
+            if message_id in self.message_errors:
+                return httpx.Response(
+                    self.message_errors[message_id], json={"error": {"message": "leak-me-xyz"}}
+                )
             if message_id not in self.messages:
                 return httpx.Response(404, json={"error": {"code": 404}})
             raw, labels = self.messages[message_id]
@@ -93,12 +107,42 @@ class FakeGoogle:
             )
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
+    def _records_page(self, start: int, page_token: str | None) -> dict:
+        assert self.history_records is not None
+        after = [r for r in self.history_records if r[0] > start]
+        offset = int(page_token or 0)
+        chunk = after[offset : offset + HISTORY_PAGE_SIZE]
+        page: dict = {
+            "historyId": self.history_id_now,
+            "history": [
+                {
+                    "id": str(record_id),
+                    "messagesAdded": [
+                        {"message": {"id": i, "labelIds": ["INBOX"]}} for i in message_ids
+                    ],
+                }
+                for record_id, message_ids in chunk
+            ],
+        }
+        if offset + HISTORY_PAGE_SIZE < len(after):
+            page["nextPageToken"] = str(offset + HISTORY_PAGE_SIZE)
+        return page
+
+
+HISTORY_PAGE_SIZE = 40
+
 
 def _history_page(history_id: str, ids: list[str], next_page: str | None = None) -> dict:
+    # One record per message, with ids counting up to the page's historyId.
+    first = int(history_id) - len(ids) + 1
     page: dict = {
         "historyId": history_id,
         "history": [
-            {"messagesAdded": [{"message": {"id": i, "labelIds": ["INBOX"]}}]} for i in ids
+            {
+                "id": str(first + n),
+                "messagesAdded": [{"message": {"id": i, "labelIds": ["INBOX"]}}],
+            }
+            for n, i in enumerate(ids)
         ],
     }
     if next_page:
@@ -219,6 +263,82 @@ async def test_message_deleted_between_list_and_get_is_skipped(connector, google
 
     assert "get:gone" in google.calls
     assert [m.provider_message_id for m in result.messages] == ["m1"]
+
+
+def history_starts(google: FakeGoogle) -> list[str]:
+    """The startHistoryId of each history request, in order."""
+    return [c.split(":")[1] for c in google.calls if c.startswith("history:")]
+
+
+async def test_history_gap_is_fetched_in_capped_batches(connector, google):
+    # 250 new messages, two per record, records 1001..1125, served 40 records per page.
+    assert MAX_MESSAGES_PER_FETCH == 100
+    google.history_records = [(1000 + n, [f"m{2 * n - 1}", f"m{2 * n}"]) for n in range(1, 126)]
+    for n in range(1, 251):
+        google.add_message(f"m{n}")
+
+    first = await connector.fetch_changes(CREDS, "1000")
+
+    assert len(first.messages) == 100
+    assert first.has_more is True
+    # The last record fully taken: Gmail lists records after it on the next fetch.
+    assert first.cursor == "1050"
+    # The walk stopped inside the second page: no third page was requested.
+    assert history_starts(google) == ["1000", "1000"]
+
+    google.calls.clear()
+    second = await connector.fetch_changes(CREDS, first.cursor)
+    assert history_starts(google)[0] == "1050"
+    assert (len(second.messages), second.has_more, second.cursor) == (100, True, "1100")
+
+    third = await connector.fetch_changes(CREDS, second.cursor)
+    # Every page read: the cursor is the first page's historyId again (ruling R8).
+    assert (len(third.messages), third.has_more, third.cursor) == (50, False, "5000")
+
+    fetched = [m.provider_message_id for r in (first, second, third) for m in r.messages]
+    assert sorted(fetched) == sorted(f"m{n}" for n in range(1, 251))
+
+
+async def test_single_record_larger_than_cap_is_taken_whole(connector, google):
+    big = [f"b{n}" for n in range(150)]
+    google.history_records = [(1001, big), (1002, ["m1"])]
+    for message_id in [*big, "m1"]:
+        google.add_message(message_id)
+
+    first = await connector.fetch_changes(CREDS, "1000")
+
+    # Stopping before the record would never move the cursor: take it whole instead.
+    assert [m.provider_message_id for m in first.messages] == big
+    assert (first.cursor, first.has_more) == ("1001", True)
+
+    second = await connector.fetch_changes(CREDS, first.cursor)
+    assert [m.provider_message_id for m in second.messages] == ["m1"]
+    assert (second.cursor, second.has_more) == ("5000", False)
+
+
+async def test_permanent_message_error_is_skipped(connector, google, caplog):
+    google.history_pages = {None: _history_page("600", ["bad", "m1"])}
+    google.message_errors["bad"] = 400
+    google.add_message("m1")
+
+    with caplog.at_level(logging.WARNING, logger="herald_server.connectors.gmail.connector"):
+        result = await connector.fetch_changes(CREDS, "400")
+
+    assert [m.provider_message_id for m in result.messages] == ["m1"]
+    assert result.cursor == "600"
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("bad" in w and "MessageUnavailable" in w for w in warnings)
+    assert "leak-me-xyz" not in caplog.text
+
+
+async def test_server_error_on_a_message_fails_the_fetch(connector, google):
+    google.history_pages = {None: _history_page("600", ["flaky", "m1"])}
+    google.message_errors["flaky"] = 503
+    google.add_message("m1")
+
+    # A 5xx may pass: fail the fetch so the cursor stays and the retry reads it again.
+    with pytest.raises(httpx.HTTPStatusError):
+        await connector.fetch_changes(CREDS, "400")
 
 
 async def test_message_without_inbox_label_is_skipped(connector, google):

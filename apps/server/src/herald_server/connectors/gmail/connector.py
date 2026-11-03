@@ -23,6 +23,7 @@ from herald_server.connectors.gmail.client import (
     GmailClient,
     HistoryExpired,
     MessageGone,
+    MessageUnavailable,
     is_inbox_mail,
 )
 from herald_server.connectors.gmail.mime import parse_raw_message
@@ -36,6 +37,11 @@ log = logging.getLogger(__name__)
 
 BACKFILL_QUERY = "in:inbox newer_than:2d"
 BACKFILL_LIMIT = 50
+# Messages downloaded by one fetch at most. A long gap (a reconnect or resume keeps the
+# cursor) could hold thousands: one fetch for all of them would outlast the job timeout,
+# get cancelled before it stores anything, and never move the cursor. Capped, each fetch
+# stores its batch and moves the cursor, and `has_more` asks the caller for the next one.
+MAX_MESSAGES_PER_FETCH = 100
 
 
 class GmailConnector(MailConnector):
@@ -102,11 +108,12 @@ class GmailConnector(MailConnector):
 
     async def fetch_changes(self, credentials: dict[str, str], cursor: str | None) -> FetchResult:
         access = await self._client.refresh(credentials["refresh_token"])
+        has_more = False  # the backfill is at most BACKFILL_LIMIT, under the cap
         if cursor is None:
             ids, new_cursor = await self._backfill(access)
         else:
             try:
-                ids, new_cursor = await self._history(access, cursor)
+                ids, new_cursor, has_more = await self._history(access, cursor)
             except HistoryExpired:
                 # Gmail keeps about a week of history. Any ids gathered from earlier pages are
                 # dropped: the backfill below covers the recent inbox and gives a fresh cursor.
@@ -119,6 +126,13 @@ class GmailConnector(MailConnector):
                 raw = await self._client.get_raw_message(access, message_id)
             except MessageGone:
                 continue  # deleted between the listing and now
+            except MessageUnavailable as exc:
+                # A permanent refusal for this one message: raising would fail every sync at
+                # it and the cursor would never move. Log the id and error type only.
+                log.warning(
+                    "skipping unavailable gmail message %s (%s)", message_id, type(exc).__name__
+                )
+                continue
             if not is_inbox_mail(raw.label_ids):
                 # Archived since it was listed, or the owner's own mail: the backfill query
                 # in:inbox also matches mail the owner sent to themselves.
@@ -142,7 +156,7 @@ class GmailConnector(MailConnector):
                     received_at=raw.internal_date,
                 )
             )
-        return FetchResult(messages=messages, cursor=new_cursor)
+        return FetchResult(messages=messages, cursor=new_cursor, has_more=has_more)
 
     async def _backfill(self, access: str) -> tuple[list[str], str]:
         """Recent inbox mail and a fresh cursor, for a first sync or an expired cursor."""
@@ -154,22 +168,37 @@ class GmailConnector(MailConnector):
         page = await self._client.list_messages(access, BACKFILL_QUERY, BACKFILL_LIMIT)
         return page.message_ids, profile.history_id
 
-    async def _history(self, access: str, cursor: str) -> tuple[list[str], str]:
-        """Inbox message ids added since the cursor, across every page, and the next cursor."""
+    async def _history(self, access: str, cursor: str) -> tuple[list[str], str, bool]:
+        """Inbox message ids added since the cursor, the next cursor, and whether more wait.
+
+        Takes whole history records, in order, until MAX_MESSAGES_PER_FETCH would be passed.
+        """
         ids: dict[str, None] = {}  # insertion-ordered set: a message can show up on two pages
         page = await self._client.list_history(access, cursor)
-        # The cursor is the FIRST page's historyId. Every history record up to it is enumerated
-        # by the pages, so this is loss-safe whether Gmail pages a snapshot or a live list.
-        # Records added mid-paging are simply re-read on the next sync, and dedupe absorbs them.
-        # The last page's id would be newer: if paging is a snapshot, records added mid-paging
-        # would sit before that cursor without being returned, and be skipped forever.
-        new_cursor = page.history_id
+        # When every page is read, the cursor is the FIRST page's historyId. Every history
+        # record up to it is enumerated by the pages, so this is loss-safe whether Gmail pages
+        # a snapshot or a live list. Records added mid-paging are simply re-read on the next
+        # sync, and dedupe absorbs them. The last page's id would be newer: if paging is a
+        # snapshot, records added mid-paging would sit before that cursor without being
+        # returned, and be skipped forever.
+        first_page_history_id = page.history_id
+        last_taken: str | None = None
         while True:
-            ids.update(dict.fromkeys(page.message_ids))
+            for record in page.records:
+                new = [i for i in record.message_ids if i not in ids]
+                # Stop before a record that would pass the cap, never inside one: the cursor
+                # can only name a whole record. Gmail lists records AFTER startHistoryId, so
+                # the last record taken is a loss-free start for the next fetch. The first
+                # record is taken whole, however big: stopping before it would leave the
+                # cursor where it is and loop on it forever.
+                if last_taken is not None and len(ids) + len(new) > MAX_MESSAGES_PER_FETCH:
+                    return list(ids), last_taken, True
+                ids.update(dict.fromkeys(new))
+                last_taken = record.id
             if page.next_page_token is None:
                 break
             page = await self._client.list_history(access, cursor, page.next_page_token)
-        return list(ids), new_cursor
+        return list(ids), first_page_history_id, False
 
     async def parse_push(self, headers: Mapping[str, str], body: bytes) -> PushNotice:
         # Without both settings there is nothing to verify against. Reject instead of

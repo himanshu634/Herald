@@ -18,6 +18,9 @@ class InboundMessage(BaseModel):
 class FetchResult(BaseModel):
     messages: list[InboundMessage]
     cursor: str  # where the next fetch starts
+    # True when the connector stopped early (a per-fetch cap) and more changes are waiting
+    # after `cursor`. The caller fetches again; one huge fetch could outlast the job timeout.
+    has_more: bool = False
 
 
 class ConnectedAccount(BaseModel):

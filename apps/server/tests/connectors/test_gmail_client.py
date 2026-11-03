@@ -8,7 +8,9 @@ from herald_server.connectors.gmail.client import (
     API,
     GmailClient,
     HistoryExpired,
+    HistoryRecord,
     MessageGone,
+    MessageUnavailable,
 )
 
 
@@ -37,9 +39,12 @@ async def test_list_history_keeps_inbox_and_drops_sent_and_drafts():
     body = {
         "historyId": "200",
         "history": [
-            {"messagesAdded": [{"message": {"id": "m1", "labelIds": ["INBOX"]}}]},
-            {"messagesAdded": [{"message": {"id": "m2", "labelIds": ["SENT"]}}]},
-            {"messagesAdded": [{"message": {"id": "m3", "labelIds": ["DRAFT", "INBOX"]}}]},
+            {"id": "101", "messagesAdded": [{"message": {"id": "m1", "labelIds": ["INBOX"]}}]},
+            {"id": "102", "messagesAdded": [{"message": {"id": "m2", "labelIds": ["SENT"]}}]},
+            {
+                "id": "103",
+                "messagesAdded": [{"message": {"id": "m3", "labelIds": ["DRAFT", "INBOX"]}}],
+            },
         ],
     }
 
@@ -47,7 +52,12 @@ async def test_list_history_keeps_inbox_and_drops_sent_and_drafts():
         return httpx.Response(200, json=body)
 
     page = await make_client(handler).list_history("tok", "100")
-    assert page.message_ids == ["m1"]
+    # Records left with no inbox mail are kept, so the cursor can move past them.
+    assert page.records == [
+        HistoryRecord("101", ["m1"]),
+        HistoryRecord("102", []),
+        HistoryRecord("103", []),
+    ]
     assert page.history_id == "200"
     assert page.next_page_token is None
 
@@ -113,6 +123,24 @@ async def test_get_raw_message_404_raises_message_gone():
         return httpx.Response(404, json={})
 
     with pytest.raises(MessageGone):
+        await make_client(handler).get_raw_message("tok", "m1")
+
+
+@pytest.mark.parametrize("status", [400, 403, 410])
+async def test_get_raw_message_other_4xx_raises_message_unavailable(status):
+    def handler(request):
+        return httpx.Response(status, json={"error": {"message": "leak-me-xyz"}})
+
+    with pytest.raises(MessageUnavailable) as exc:
+        await make_client(handler).get_raw_message("tok", "m1")
+    assert "leak-me-xyz" not in str(exc.value)
+
+
+async def test_get_raw_message_5xx_still_raises():
+    def handler(request):
+        return httpx.Response(503, json={})
+
+    with pytest.raises(httpx.HTTPStatusError):
         await make_client(handler).get_raw_message("tok", "m1")
 
 

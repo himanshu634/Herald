@@ -29,6 +29,10 @@ class MessageGone(Exception):
     """The message was deleted before we fetched it."""
 
 
+class MessageUnavailable(Exception):
+    """Gmail refuses this one message for good (a 4xx other than auth, rate limit or 404)."""
+
+
 class TokenSet(NamedTuple):
     access_token: str
     refresh_token: str | None
@@ -44,8 +48,13 @@ class WatchResult(NamedTuple):
     expiration: datetime
 
 
+class HistoryRecord(NamedTuple):
+    id: str
+    message_ids: list[str]  # inbox mail only; may be empty
+
+
 class HistoryPage(NamedTuple):
-    message_ids: list[str]
+    records: list[HistoryRecord]
     history_id: str
     next_page_token: str | None
 
@@ -203,13 +212,16 @@ class GmailClient:
             raise HistoryExpired("start history id is too old")
         response.raise_for_status()
         data = _json(response)
-        ids: list[str] = []
+        records: list[HistoryRecord] = []
         for record in data.get("history", []):
-            for added in record.get("messagesAdded", []):
-                message = added["message"]
-                if is_inbox_mail(message.get("labelIds", [])):
-                    ids.append(message["id"])
-        return HistoryPage(ids, str(data["historyId"]), data.get("nextPageToken"))
+            ids = [
+                added["message"]["id"]
+                for added in record.get("messagesAdded", [])
+                if is_inbox_mail(added["message"].get("labelIds", []))
+            ]
+            # A record left with no inbox mail is kept: the cursor may still move past it.
+            records.append(HistoryRecord(str(record["id"]), ids))
+        return HistoryPage(records, str(data["historyId"]), data.get("nextPageToken"))
 
     async def list_messages(
         self, access: str, q: str, max_results: int, page_token: str | None = None
@@ -226,6 +238,12 @@ class GmailClient:
         )
         if response.status_code == 404:
             raise MessageGone(message_id)
+        # 401 and rate limits were raised by _request already. Any other 4xx will answer the
+        # same next time, so the connector skips this message instead of failing every sync
+        # at it. 5xx still raises: it may pass, and the retry reads the message again.
+        # The message names the id only, never the response body.
+        if 400 <= response.status_code < 500:
+            raise MessageUnavailable(f"{message_id} answered {response.status_code}")
         response.raise_for_status()
         data = _json(response)
         return RawMessage(
