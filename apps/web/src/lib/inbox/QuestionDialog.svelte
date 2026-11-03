@@ -6,7 +6,6 @@
 		Button,
 		Dialog,
 		Icon,
-		STATUS,
 		StatusTag,
 		TONE_CLASSES,
 		Tag,
@@ -20,7 +19,9 @@
 		putFact,
 		putRule,
 		ruleMark,
+		replacedFact,
 		ruleProblem,
+		tryOutcome,
 		withDraft,
 		type Draft,
 		type Edit,
@@ -216,10 +217,14 @@
 			</div>
 			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
 				{#if edit.kind === 'fact'}
-					{#if edit.index !== null && saved.facts[edit.index] !== undefined && saved.facts[edit.index] !== factText}
+					{@const before =
+						edit.index === null
+							? null
+							: replacedFact(saved.facts, draft.facts.with(edit.index, factText), edit.index)}
+					{#if before}
 						<div>
 							<p class="text-xs font-bold text-muted">Saved now</p>
-							<p class="text-sm text-muted line-through">{saved.facts[edit.index]}</p>
+							<p class="text-sm text-muted line-through">{before}</p>
 						</div>
 					{/if}
 					<div class="flex flex-col gap-1.5">
@@ -378,10 +383,8 @@
 				Herald is trying your changes on this email…
 			</div>
 		{:else if result}
-			<!-- A rule can move an email Herald is still unsure about, so "moved" and "sure" are
-				told apart: the question stays up until the owner handles it either way. -->
+			{@const outcome = tryOutcome(email.status, result)}
 			{@const moved = result.status !== email.status}
-			{@const sure = result.notes?.sure !== false}
 			<div
 				role="status"
 				class="overflow-hidden rounded-lg border-[1.5px] border-ink shadow-[0_3px_0_var(--color-ink)]"
@@ -389,15 +392,13 @@
 				<p
 					class={[
 						'flex items-center gap-2 px-4 py-3 text-lg font-extrabold',
-						moved || sure ? 'bg-success-bg text-success-fg' : 'bg-warning-bg text-warning-fg'
+						outcome.tone === 'success'
+							? 'bg-success-bg text-success-fg'
+							: 'bg-warning-bg text-warning-fg'
 					]}
 				>
-					<Icon name={moved || sure ? 'check' : 'info'} size={18} />
-					{moved
-						? `With your changes, it goes to ${STATUS[result.status].label}`
-						: sure
-							? `Herald is sure now. It stays in ${STATUS[result.status].label}`
-							: `No change: still unsure, still in ${STATUS[result.status].label}`}
+					<Icon name={outcome.tone === 'success' ? 'check' : 'info'} size={18} />
+					{outcome.title}
 				</p>
 				<div class="flex flex-col gap-3 bg-surface px-4 py-3">
 					<p class="text-sm text-muted">
@@ -425,7 +426,7 @@
 							</div>
 						{/each}
 					</div>
-					{#if !sure}
+					{#if outcome.unsure}
 						<p class="text-md font-bold">
 							Herald is still unsure{result.notes?.question
 								? `. It asks: ${result.notes.question}`

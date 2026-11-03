@@ -6,10 +6,42 @@ import {
 	factMark,
 	putFact,
 	putRule,
+	replacedFact,
 	ruleMark,
 	ruleProblem,
+	tryOutcome,
 	withDraft
 } from './draft';
+
+describe('tryOutcome', () => {
+	const unsure = { sure: false };
+	const sure = { sure: true };
+
+	it('says a rule moved it, even while Herald is still unsure', () => {
+		expect(tryOutcome('needs_a_look', { status: 'alerted', notes: unsure })).toEqual({
+			tone: 'success',
+			title: 'With your changes, it goes to Needs you now',
+			unsure: true
+		});
+	});
+
+	it('says sure and not moved, and unchanged and unsure', () => {
+		expect(tryOutcome('closed', { status: 'closed', notes: sure }).title).toBe(
+			'Herald is sure now. It stays in Closed quietly'
+		);
+		const same = tryOutcome('needs_a_look', { status: 'needs_a_look', notes: unsure });
+		expect([same.tone, same.unsure]).toEqual(['warning', true]);
+	});
+
+	it('never calls a failed read sure', () => {
+		const failed = tryOutcome('needs_a_look', { status: 'needs_a_look', notes: null });
+		expect(failed).toEqual({
+			tone: 'warning',
+			title: 'Herald couldn’t read it with your changes',
+			unsure: false
+		});
+	});
+});
 
 function rule(over: Partial<Rule> = {}): Rule {
 	return { id: 'r1', name: 'Stockist', when: 'A stockist writes', action: 'alert', ...over };
@@ -60,6 +92,7 @@ describe('ruleProblem', () => {
 describe('marks and counts', () => {
 	it('marks new and changed facts and rules', () => {
 		expect(factMark(['a', 'b'], ['a', 'x', 'y'], 0)).toBeNull();
+		expect(factMark(['a', 'b'], ['b'], 0)).toBeNull();
 		expect(factMark(['a', 'b'], ['a', 'x', 'y'], 1)).toBe('changed');
 		expect(factMark(['a', 'b'], ['a', 'x', 'y'], 2)).toBe('new');
 		expect(ruleMark([rule()], rule())).toBeNull();
@@ -73,6 +106,20 @@ describe('marks and counts', () => {
 		const draft = { facts: ['a', 'c', 'd'], rules: [rule({ id: 'r2' })] };
 		// Fact 2 changed, fact 3 added, rule r1 removed, rule r2 added.
 		expect(countChanges(saved, draft)).toBe(4);
+	});
+
+	it('compares facts by text, so removing one is one change and marks nothing', () => {
+		const saved = config({ facts: TEN });
+		const removed = { facts: TEN.filter((_, i) => i !== 1), rules: [rule()] };
+		expect(countChanges(saved, removed)).toBe(1);
+		expect(removed.facts.map((_, i) => factMark(TEN, removed.facts, i))).toEqual(
+			Array(9).fill(null)
+		);
+		expect(replacedFact(TEN, removed.facts, 1)).toBeNull();
+		const replaced = { facts: putFact(TEN, null, 'new', 5), rules: [rule()] };
+		expect(countChanges(saved, replaced)).toBe(1);
+		expect(factMark(TEN, replaced.facts, 5)).toBe('changed');
+		expect(replacedFact(TEN, replaced.facts, 5)).toBe('fact 6');
 	});
 
 	it('draftOf copies, so editing the draft leaves the saved config alone', () => {

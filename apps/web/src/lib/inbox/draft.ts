@@ -1,6 +1,7 @@
 // The question dialog's draft: the owner's unsaved fact and rule changes. Pure, so it is tested
 // on its own. Nothing here saves; the dialog tries the draft on one email, then keeps it.
-import type { Rule, WorkspaceConfig } from '#lib/api/client.js';
+import type { EmailStatus, Rule, WorkspaceConfig } from '#lib/api/client.js';
+import { STATUS } from '#lib/ui/tones.js';
 import { MAX_FACTS } from './inbox';
 
 export type Draft = { facts: string[]; rules: Rule[] };
@@ -52,10 +53,54 @@ export function ruleProblem(rule: Rule): string | null {
 	return null;
 }
 
-/** A fact's mark against the saved list, by place. Removing a fact shifts the ones after it. */
+/**
+ * A fact's mark against the saved list, by text, not by place: removing a fact shifts the
+ * ones after it, and they must not all read as changed.
+ */
 export function factMark(saved: string[], facts: string[], index: number): Mark {
-	if (index >= saved.length) return 'new';
-	return facts[index] === saved[index] ? null : 'changed';
+	if (saved.includes(facts[index])) return null;
+	return index < saved.length ? 'changed' : 'new';
+}
+
+/** The saved text a draft fact replaced, when that is clear: same count, old text gone. */
+export function replacedFact(saved: string[], facts: string[], index: number): string | null {
+	const before = saved[index];
+	// After an add or a removal the places no longer line up, so it can't be told.
+	if (before === undefined || facts.length !== saved.length) return null;
+	return facts.includes(before) ? null : before;
+}
+
+/** Lines in `a` that `b` lacks, counting a repeated line once per copy. */
+function missing(a: string[], b: string[]): number {
+	const left = [...b];
+	let count = 0;
+	for (const line of a) {
+		const at = left.indexOf(line);
+		if (at === -1) count++;
+		else left.splice(at, 1);
+	}
+	return count;
+}
+
+export type Outcome = { tone: 'success' | 'warning'; title: string; unsure: boolean };
+
+/**
+ * The trial's headline. A rule can move an email Herald is still unsure about, so "moved"
+ * and "sure" are told apart; and no notes means the AI failed, which is never "sure".
+ */
+export function tryOutcome(
+	now: EmailStatus,
+	result: { status: EmailStatus; notes: { sure: boolean } | null }
+): Outcome {
+	const label = STATUS[result.status].label;
+	if (!result.notes)
+		return { tone: 'warning', title: 'Herald couldn’t read it with your changes', unsure: false };
+	const unsure = !result.notes.sure;
+	if (result.status !== now)
+		return { tone: 'success', title: `With your changes, it goes to ${label}`, unsure };
+	if (!unsure)
+		return { tone: 'success', title: `Herald is sure now. It stays in ${label}`, unsure };
+	return { tone: 'warning', title: `No change: still unsure, still in ${label}`, unsure };
 }
 
 export function ruleMark(saved: Rule[], rule: Rule): Mark {
@@ -67,9 +112,8 @@ export function ruleMark(saved: Rule[], rule: Rule): Mark {
 /** How many facts and rules the draft changes, added or removed: the footer's count. */
 export function countChanges(config: WorkspaceConfig, draft: Draft): number {
 	const saved = draftOf(config);
-	let count = 0;
-	const longest = Math.max(saved.facts.length, draft.facts.length);
-	for (let i = 0; i < longest; i++) if (saved.facts[i] !== draft.facts[i]) count++;
+	// An add, a change, a removal or a replace each count once, whatever their place.
+	let count = Math.max(missing(draft.facts, saved.facts), missing(saved.facts, draft.facts));
 	const ids = new Set([...saved.rules, ...draft.rules].map((r) => r.id));
 	for (const id of ids) {
 		const before = saved.rules.find((r) => r.id === id);
