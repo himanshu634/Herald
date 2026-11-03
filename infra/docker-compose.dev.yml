@@ -31,6 +31,9 @@ x-server: &server
     HERALD_BUS: redis
     HERALD_QUEUE: arq
     HERALD_DEBUG: "1"
+    # The worker reaches the database for triage only through the API's internal routes.
+    HERALD_INTERNAL_API_URL: http://api:8000
+    HERALD_INTERNAL_TOKEN: ${HERALD_INTERNAL_TOKEN:-herald-dev-internal-token-not-secret}
 
 services:
   api:

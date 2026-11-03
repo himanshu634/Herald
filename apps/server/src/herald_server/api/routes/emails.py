@@ -7,7 +7,7 @@ from asyncer import asyncify
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from sqlmodel import Session, col, select
 
-from herald_server.api.deps import QueueDep, ServicesDep, SessionDep, WorkspaceDep
+from herald_server.api.deps import AgentApiDep, QueueDep, ServicesDep, SessionDep, WorkspaceDep
 from herald_server.api.schemas import EmailIn, EmailOut, TryIn, TryOut
 from herald_server.bus import BusEvent
 from herald_server.events import EMAIL_RECEIVED, EMAIL_STATUS, add_event, to_bus
@@ -187,6 +187,7 @@ async def try_config(
     data: TryIn,
     workspace: WorkspaceDep,
     services: ServicesDep,
+    agent_api: AgentApiDep,
     email_id: EmailId,
 ) -> TryOut:
     """Read the email with a draft config and say what Herald would do. Saves nothing.
@@ -196,7 +197,7 @@ async def try_config(
     model thinks.
     """
     await asyncify(_check_email)(services, workspace.id, email_id)
-    notes, decision = await trial_read(services, email_id, data.config)
+    notes, decision = await trial_read(agent_api, services.graph, email_id, data.config)
     return TryOut(status=STATUS_FOR_ROUTE[decision.route], notes=notes, decision=decision)
 
 

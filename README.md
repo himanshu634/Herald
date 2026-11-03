@@ -114,7 +114,7 @@ Or run the whole stack in Docker, with hot reload for the API, worker and web ap
 make docker-dev
 ```
 
-Production runs nginx (serving the web app and proxying `/api`), the API, the worker, Postgres and Redis. Copy `.env.example` to `.env`, set `POSTGRES_PASSWORD`, `ANTHROPIC_API_KEY` and `HERALD_WEB_URL`, then:
+Production runs nginx (serving the web app and proxying `/api`), the API, the worker, Postgres and Redis. Copy `.env.example` to `.env`, set `POSTGRES_PASSWORD`, `ANTHROPIC_API_KEY`, `HERALD_WEB_URL` and `HERALD_INTERNAL_TOKEN` (the secret the worker sends to the API; `python -c "import secrets; print(secrets.token_urlsafe(32))"`), then:
 
 ```bash
 make docker-prod

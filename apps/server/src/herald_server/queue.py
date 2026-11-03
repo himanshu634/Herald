@@ -8,6 +8,7 @@ from typing import Any, Protocol, Self
 from arq import ArqRedis, create_pool
 from arq.connections import RedisSettings
 
+from herald_server.internal.client import AgentApi
 from herald_server.pipeline import process_email
 from herald_server.services import Services
 from herald_server.sync import sync_mailbox
@@ -45,8 +46,11 @@ class ArqQueue:
 
 
 class InlineQueue:
-    def __init__(self, services: Services) -> None:
+    def __init__(self, services: Services, api: AgentApi) -> None:
         self._services = services
+        # The pipeline reaches the database through the API even here, over an in-memory
+        # client, so lite mode runs the same code path as the worker.
+        self._api = api
         self._tasks: set[asyncio.Task] = set()
         self._sync_locks: dict[str, asyncio.Lock] = {}
 
@@ -56,7 +60,7 @@ class InlineQueue:
         task.add_done_callback(self._tasks.discard)
 
     async def enqueue_email(self, email_id: str) -> None:
-        self._spawn(process_email(self._services, email_id))
+        self._spawn(process_email(self._api, self._services.graph, email_id))
 
     async def enqueue_sync(self, mailbox_id: str) -> None:
         self._spawn(self._sync(mailbox_id))

@@ -6,6 +6,7 @@ from fake_connector import FakeConnector
 from httpx import ASGITransport, AsyncClient
 
 from herald_server.api.main import create_app
+from herald_server.internal.client import AgentApi
 from herald_server.settings import Settings
 
 
@@ -18,6 +19,8 @@ def settings(tmp_path) -> Settings:
         queue="inline",
         model_provider="fake",
         token_key=Fernet.generate_key().decode(),
+        # Set here so a token in .env or the shell cannot leak into the tests.
+        internal_token=None,
     )
 
 
@@ -39,3 +42,11 @@ def fake_connector(app) -> FakeConnector:
     connector = FakeConnector()
     app.state.services.connectors["fake"] = connector
     return connector
+
+
+@pytest.fixture
+async def agent_api(app) -> AsyncIterator[AgentApi]:
+    # The worker's client, calling the internal routes in memory.
+    api = AgentApi.in_process(app, app.state.internal_token)
+    yield api
+    await api.close()

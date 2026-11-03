@@ -7,7 +7,7 @@ Herald is one monorepo with a SvelteKit front end, a FastAPI back end with a sep
 | Path | What it is | Tooling |
 | --- | --- | --- |
 | `packages/core` | `herald_core`: shared types, safety-floor word check, decide step, LangGraph graph, AI model adapters, plug-in interfaces. No database and no Redis. | uv, pytest |
-| `apps/server` | `herald_server`: the FastAPI API (`herald_server.api.main:app`) and the arq worker (`herald_server.worker.main.WorkerSettings`). They share the tables, event bus and pipeline. | uv, FastAPI CLI, arq |
+| `apps/server` | `herald_server`: the FastAPI API (`herald_server.api.main:app`) and the arq worker (`herald_server.worker.main.WorkerSettings`). They share the tables, event bus and pipeline code. For triage the worker reaches the database only through the API's internal routes. | uv, FastAPI CLI, arq |
 | `packages/evals` | `herald_evals`: test emails with known answers, run through the real graph, and the score report. See [evals.md](evals.md). | uv, pytest |
 | `apps/web` | SvelteKit (Svelte 5, runes) built as a static single-page app. API types are generated from FastAPI's OpenAPI schema. | pnpm, Vite, svelte-check, Vitest |
 | `docs` | Scope, decisions and this file | — |
@@ -30,14 +30,34 @@ sequenceDiagram
     API->>Bus: publish email.received
     API->>Q: enqueue process_email
     Q->>W: process_email(email_id)
+    W->>API: GET /internal/v1/emails/{id}/triage-input
     W->>W: LangGraph: word check ∥ (history → notes) → rules → decide
-    W->>DB: save notes, decision, status, context + event email.noted
-    W->>Bus: publish email.noted
-    W->>DB: event alert.sent (only when the decision is "alert")
-    W->>Bus: publish alert.sent
+    W->>API: GET .../history/* (the agent's tools)
+    W->>API: POST .../triage-result
+    API->>DB: save notes, decision, status, context + email.noted (+ alert.sent) in one commit
+    API->>Bus: publish email.noted, then alert.sent
     Bus-->>API: events for workspace {id}
     API-->>Web: SSE /api/workspaces/{id}/events
 ```
+
+## Internal routes
+
+The worker's pipeline never opens the database. It loads the email, runs the agent's tools and saves the result through `AgentApi` (`herald_server/internal/client.py`), which calls the API's internal routes (`api/routes/internal.py`). The API is the one place that queries, commits and publishes.
+
+| Route | Used by | Does |
+| --- | --- | --- |
+| `GET /internal/v1/emails/{id}/triage-input` | The pipeline | The email, the business name and the workspace config |
+| `GET .../history/sender` | `sender_history` tool | Sender counts for 7 and 30 days, first seen, top topics, latest few |
+| `GET .../history/thread` | `thread` tool | Earlier messages in the thread, oldest first |
+| `GET .../history/corrections` | `recent_corrections` tool | The owner's recent overrides in this business |
+| `POST .../triage-result` | The pipeline | Saves notes, decision and context, sets status with `STATUS_FOR_ROUTE`, records `email.noted` and, for an alert, `alert.sent`. One commit, then publish. |
+
+- Every route is keyed by the email being judged. The API takes the workspace and the "received before" cut-off from that row, so no caller can name another tenant. Tool inputs forbid extra fields, so a `workspace_id` query param is a 422.
+- Every call needs the header `X-Herald-Internal-Token` with `HERALD_INTERNAL_TOKEN`, compared in constant time. With the arq queue the API and the worker refuse to start without it. The inline queue makes a random token per process, because its only caller is its own in-memory client.
+- The routes sit outside `/api`, so nginx and the Vite proxy never forward them, and they are left out of the OpenAPI schema (`schema.d.ts` does not change).
+- In lite mode and in tests the same routes are called in memory (`httpx.ASGITransport`), so every path runs the same code as the worker. The owner's trial read (`POST /api/workspaces/{id}/emails/{email_id}/try`) runs in the API process and uses that in-memory client too. It loads and runs the tools but never calls the save route.
+- Failures: a read that fails on the network or gets a 5xx raises `ApiUnavailable`. So does a save whose request never reached the API (connect error or connect timeout). The worker retries those (`Retry`, 5 tries, 5 s more each time), so an API that is still starting does not leave mail `new`. A save that may have reached the API is not retried, because a retry could publish its events twice. A tool's failure still only costs that tool's context (see History).
+- The model's tools are read-only. Saving the result is the pipeline's call, not a tool, so the AI still never sets status.
 
 ## The pipeline
 
@@ -62,10 +82,10 @@ flowchart LR
 
 ## History
 
-Before the model reads an email, `gather_context` runs three tools in code: `sender_history` (recent emails from the same sender), `thread` (earlier messages in the thread) and `recent_corrections` (emails the owner moved to the inbox from an alert or from closed). This is a pre-fetch, not a model loop. The tools read Herald's own database, never the mail provider.
+Before the model reads an email, `gather_context` runs three tools in code: `sender_history` (recent emails from the same sender), `thread` (earlier messages in the thread) and `recent_corrections` (emails the owner moved to the inbox from an alert or from closed). This is a pre-fetch, not a model loop. The tools read Herald's own data through the API's internal routes (see Internal routes), never the mail provider.
 
-- Each tool is one file in `herald_server/tools/`. They share the workspace scope in `tools/bound.py`.
-- The workspace is bound when the toolbox is built. No tool input has a workspace or email id.
+- Each tool is one file in `herald_server/tools/` and calls one internal route. They share the email they are bound to in `tools/bound.py`. The queries behind them are in `herald_server/internal/history.py`.
+- The email is bound when the toolbox is built, and the API derives the workspace from it. No tool input has a workspace or email id.
 - A tool sees only emails received before the current one.
 - A tool that fails or takes over 2 s gives nothing, and its name goes into `email.context.failed`. Triage goes on.
 - `word_check` never waits on the tools. A slow tool can delay the alert by at most the tool timeout (2 s).
@@ -243,7 +263,7 @@ Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscri
 | `MailConnector` | `herald_server.connectors` | `GmailConnector`; `FakeConnector` in tests. The test-email box still posts to the API. |
 | `EventBus` | `herald_server.bus` | `RedisEventBus`, `InMemoryEventBus` |
 | `JobQueue` | `herald_server.queue` | `ArqQueue`, `InlineQueue` |
-| `Tool` / `Toolbox` | `herald_core.tools` (types), `herald_server.tools` (database tools) | `SenderHistoryTool`, `ThreadTool`, `CorrectionsTool` |
+| `Tool` / `Toolbox` | `herald_core.tools` (types), `herald_server.tools` (tools that call the internal routes) | `SenderHistoryTool`, `ThreadTool`, `CorrectionsTool` |
 
 ## Configuration
 
@@ -259,6 +279,8 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 | `HERALD_TOKEN_KEY` | unset (Gmail off: it needs this, the Google client id and secret, and the topic) | unset |
 | `HERALD_PUBLIC_API_URL` | `http://localhost:8000` | same |
 | `HERALD_WEB_URL` | `http://localhost:5173` | same |
+| `HERALD_INTERNAL_TOKEN` | unset: the API and worker refuse to start with the arq queue. `make api`, `make worker` and `make docker-dev` set a dev value. At least 24 chars. | unset (a random one per process) |
+| `HERALD_INTERNAL_API_URL` | `http://localhost:8000` (the compose files set `http://api:8000`) | not used |
 | `HERALD_GOOGLE_CLIENT_ID`, `HERALD_GOOGLE_CLIENT_SECRET` | unset (Gmail off, as above) | unset |
 | `HERALD_GMAIL_TOPIC` | unset (Gmail off: no mailbox can be connected) | unset |
 | `HERALD_GMAIL_PUSH_AUDIENCE`, `HERALD_GMAIL_PUSH_SERVICE_ACCOUNT` | unset (every push is rejected) | unset |
