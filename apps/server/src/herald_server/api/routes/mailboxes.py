@@ -73,6 +73,18 @@ def _move(
         return mailbox, to_bus(event)
 
 
+async def _act(
+    services: Services,
+    workspace_id: str,
+    mailbox_id: str,
+    to: MailboxStatus,
+    only_from: MailboxStatus,
+) -> Mailbox:
+    mailbox, event = await asyncify(_move)(services, workspace_id, mailbox_id, to, only_from)
+    await services.bus.publish(event)
+    return mailbox
+
+
 @router.get("")
 def list_mailboxes(workspace: WorkspaceDep, session: SessionDep) -> list[MailboxOut]:
     rows = session.exec(
@@ -109,10 +121,9 @@ async def sync_now(
 async def pause(
     workspace: WorkspaceDep, services: ServicesDep, mailbox_id: MailboxId
 ) -> MailboxOut:
-    mailbox, event = await asyncify(_move)(
+    mailbox = await _act(
         services, workspace.id, mailbox_id, MailboxStatus.PAUSED, MailboxStatus.ACTIVE
     )
-    await services.bus.publish(event)
     await unsubscribe_mailbox(services, mailbox)
     return _out(mailbox)
 
@@ -121,10 +132,9 @@ async def pause(
 async def resume(
     workspace: WorkspaceDep, services: ServicesDep, queue: QueueDep, mailbox_id: MailboxId
 ) -> MailboxOut:
-    mailbox, event = await asyncify(_move)(
+    mailbox = await _act(
         services, workspace.id, mailbox_id, MailboxStatus.ACTIVE, MailboxStatus.PAUSED
     )
-    await services.bus.publish(event)
     await subscribe_mailbox(services, mailbox)
     # Catch up on mail that arrived while paused; the cursor was kept.
     await queue.enqueue_sync(mailbox.id)

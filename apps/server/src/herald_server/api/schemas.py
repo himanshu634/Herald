@@ -8,6 +8,8 @@ from herald_server.models import EmailStatus, MailboxStatus
 
 
 class WorkspaceIn(BaseModel):
+    """A workspace's name and config: creating one, or saving the owner's reviewed setup."""
+
     name: str = Field(min_length=1, max_length=100)
     config: WorkspaceConfig
 
@@ -37,11 +39,6 @@ class SuggestIn(BaseModel):
 class DraftOut(BaseModel):
     config: WorkspaceConfig
     drafted: bool = Field(description="False when the AI failed and a plain fallback was used.")
-
-
-class ConfigIn(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    config: WorkspaceConfig
 
 
 class EmailIn(BaseModel):

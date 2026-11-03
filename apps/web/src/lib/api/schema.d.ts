@@ -376,12 +376,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** ConfigIn */
-        ConfigIn: {
-            /** Name */
-            name: string;
-            config: components["schemas"]["WorkspaceConfig"];
-        };
         /** ConnectOut */
         ConnectOut: {
             /** Authorization Url */
@@ -646,7 +640,10 @@ export interface components {
             /** Rules */
             rules?: components["schemas"]["Rule"][];
         };
-        /** WorkspaceIn */
+        /**
+         * WorkspaceIn
+         * @description A workspace's name and config: creating one, or saving the owner's reviewed setup.
+         */
         WorkspaceIn: {
             /** Name */
             name: string;
@@ -881,7 +878,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ConfigIn"];
+                "application/json": components["schemas"]["WorkspaceIn"];
             };
         };
         responses: {

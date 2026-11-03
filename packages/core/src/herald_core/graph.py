@@ -11,6 +11,7 @@ most the tool timeout (2 s). Parallel nodes write different state keys.
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -36,6 +37,8 @@ from herald_core.safety import word_check
 from herald_core.schema import Decision, Email, Notes, RiskFlag, RuleVerdict, WorkspaceConfig
 from herald_core.tools import Toolbox
 
+log = logging.getLogger(__name__)
+
 
 @dataclass
 class TriageContext:
@@ -51,7 +54,6 @@ class TriageState(TypedDict, total=False):
     word_flags: set[RiskFlag]
     history: History
     notes: Notes | None
-    notes_error: str | None
     verdicts: list[RuleVerdict]
     decision: Decision
 
@@ -89,7 +91,8 @@ def build_graph(model: TriageModel) -> CompiledStateGraph:
                 )
             }
         except ModelError as exc:
-            return {"notes": None, "notes_error": str(exc)}
+            log.warning("write_notes failed for email %s: %s", state["email"].id, exc)
+            return {"notes": None}
 
     async def judge_rules(state: TriageState) -> TriageState:
         config = state["config"]

@@ -113,7 +113,7 @@ class FakeModel:
         lower = f"{email.subject}\n{email.body}".lower()
         verdicts = []
         for rule in config.rules:
-            keywords = [w for w in re.findall(r"[a-z]{6,}", rule.when.lower())]
+            keywords = re.findall(r"[a-z]{6,}", rule.when.lower())
             hit = next((w for w in keywords if w in lower), None)
             verdicts.append(RuleVerdict(rule_id=rule.id, matched=hit is not None, quote=hit))
         return verdicts
