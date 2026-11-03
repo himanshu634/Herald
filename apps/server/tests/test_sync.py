@@ -179,24 +179,14 @@ async def test_paused_mailbox_is_not_fetched(app, client, fake_connector):
     assert emails_of(app, mailbox_id) == []
 
 
-async def test_same_address_in_two_workspaces_each_get_a_copy(app, client, fake_connector):
+async def test_address_lookup_finds_only_the_live_mailbox(app, client, fake_connector):
+    # One business per mailbox: an address disconnected in one workspace may be live in
+    # another, and a push for it must reach only the live one.
     ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
-    mailbox_a, mailbox_b = add_mailbox(app, ws_a), add_mailbox(app, ws_b)
-    assert sorted(
-        active_mailbox_ids_for_address(app.state.services, "fake", "OWNER@Shop.in")
-    ) == sorted([mailbox_a, mailbox_b])
+    add_mailbox(app, ws_a, status=MailboxStatus.DISCONNECTED, credentials_enc=None)
+    live = add_mailbox(app, ws_b)
 
-    # The fake's queue empties on each fetch, so sync one mailbox at a time.
-    fake_connector.queue = [message("m1")]
-    await sync(app, mailbox_a)
-    fake_connector.queue = [message("m1")]
-    await sync(app, mailbox_b)
-
-    for workspace_id, mailbox_id in ((ws_a, mailbox_a), (ws_b, mailbox_b)):
-        listed = (await client.get(f"/api/workspaces/{workspace_id}/emails")).json()
-        assert len(listed) == 1
-        assert listed[0]["workspace_id"] == workspace_id
-        assert [e.id for e in emails_of(app, mailbox_id)] == [listed[0]["id"]]
+    assert active_mailbox_ids_for_address(app.state.services, "fake", "OWNER@Shop.in") == [live]
 
 
 async def test_repeat_inside_one_batch_is_stored_once(app, client, fake_connector):

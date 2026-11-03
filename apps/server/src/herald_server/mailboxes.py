@@ -1,10 +1,9 @@
 """Connected mailboxes: connect, disconnect, lookups and status changes, for every provider."""
 
 import logging
-from collections.abc import Collection
 
 from asyncer import asyncify
-from sqlmodel import Session, col, select
+from sqlmodel import Session, select
 
 from herald_server.bus import BusEvent
 from herald_server.connectors.base import (
@@ -91,8 +90,9 @@ async def mark_needs_reauth(services: Services, mailbox_id: str) -> None:
 def active_mailbox_ids_for_address(
     services: Services, provider: str, email_address: str
 ) -> list[str]:
-    # Cross-tenant by design: a push names only the address, and the same address may be
-    # connected in several workspaces. Each of those mailboxes syncs into its own workspace.
+    # Cross-tenant by design: a push names only the address, not the workspace. At most one
+    # mailbox per address is live (one business per mailbox), so this is at most one id; a
+    # list keeps the caller simple.
     with Session(services.engine) as session:
         return list(
             session.exec(
@@ -103,32 +103,6 @@ def active_mailbox_ids_for_address(
                 )
             ).all()
         )
-
-
-def address_in_other_workspace(
-    services: Services, mailbox: Mailbox, statuses: Collection[MailboxStatus]
-) -> bool:
-    """True when another workspace has this provider and address in one of `statuses`."""
-    # Cross-tenant by design: the same account connected in two workspaces shares one provider
-    # grant and one push watch (Gmail's stop and revoke act on the whole account and client).
-    # Before stopping or revoking for one workspace, check that no other one still needs it.
-    # Only a yes/no leaves this function, never the other workspace's data.
-    with Session(services.engine) as session:
-        other = session.exec(
-            select(Mailbox.id).where(
-                Mailbox.provider == mailbox.provider,
-                Mailbox.email_address == mailbox.email_address,
-                Mailbox.workspace_id != mailbox.workspace_id,
-                col(Mailbox.status).in_(list(statuses)),
-            )
-        ).first()
-        return other is not None
-
-
-# Who still needs the push watch, and who still needs the grant: only an active mailbox
-# receives push, but every mailbox that is not disconnected keeps credentials to use again.
-NEEDS_WATCH = (MailboxStatus.ACTIVE,)
-NEEDS_GRANT = tuple(s for s in MailboxStatus if s != MailboxStatus.DISCONNECTED)
 
 
 def active_mailbox_ids(services: Services) -> list[str]:
@@ -257,13 +231,8 @@ async def renew_subscriptions(services: Services) -> int:
 
 
 async def _unsubscribe(
-    services: Services, connector: MailConnector, mailbox: Mailbox, credentials: dict[str, str]
+    connector: MailConnector, mailbox: Mailbox, credentials: dict[str, str]
 ) -> None:
-    # The watch is shared with any other workspace that connected this account: stopping it
-    # would cut off that workspace's push too.
-    if await asyncify(address_in_other_workspace)(services, mailbox, NEEDS_WATCH):
-        log.info("watch of mailbox %s kept: shared with another workspace", mailbox.id)
-        return
     # Best effort: the mailbox is already paused or disconnected here. A watch left running
     # expires by itself, and its pushes start no sync because the mailbox is not ACTIVE.
     try:
@@ -277,7 +246,7 @@ async def unsubscribe_mailbox(services: Services, mailbox: Mailbox) -> None:
     connector = services.connectors.get(mailbox.provider)
     credentials = open_credentials(services, mailbox)
     if connector is not None and credentials is not None:
-        await _unsubscribe(services, connector, mailbox, credentials)
+        await _unsubscribe(connector, mailbox, credentials)
 
 
 async def connect_mailbox(
@@ -347,12 +316,7 @@ async def disconnect_mailbox(services: Services, mailbox: Mailbox) -> Mailbox:
     await services.bus.publish(event)
     connector = services.connectors.get(mailbox.provider)
     if connector is not None and credentials is not None:
-        await _unsubscribe(services, connector, mailbox, credentials)
-        # Revoking ends the account's grant to Herald as a whole, which would break another
-        # workspace that still holds credentials for this account. Leave it to the last one.
-        if await asyncify(address_in_other_workspace)(services, mailbox, NEEDS_GRANT):
-            log.info("grant of mailbox %s kept: shared with another workspace", mailbox.id)
-            return mailbox
+        await _unsubscribe(connector, mailbox, credentials)
         try:
             await connector.revoke(credentials)
         except Exception as exc:

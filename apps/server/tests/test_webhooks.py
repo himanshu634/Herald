@@ -4,8 +4,6 @@ import json
 
 from test_mailboxes_api import connect, demo_workspace, emails_of, message
 
-from herald_server.connectors.base import FetchResult
-
 OK = {"x-fake-auth": "ok"}
 
 
@@ -70,23 +68,19 @@ async def test_push_for_paused_mailbox_is_acked_without_sync(app, client, fake_c
     assert emails_of(app, ws) == []
 
 
-async def test_push_syncs_every_workspace_with_that_address(app, client, fake_connector):
+async def test_push_syncs_only_the_workspace_where_the_address_is_live(app, client, fake_connector):
     ws_a = await demo_workspace(client)
     ws_b = await demo_workspace(client)
-    await connect(app, client, ws_a)
+    mailbox_a = await connect(app, client, ws_a)
+    await client.delete(f"/api/workspaces/{ws_a}/mailboxes/{mailbox_a}")
     await connect(app, client, ws_b)
-
-    async def fetch_changes(credentials, cursor) -> FetchResult:
-        # Every mailbox gets its own copy of the new message, as a real provider would give.
-        return FetchResult(messages=[message("m1")], cursor="1")
-
-    fake_connector.fetch_changes = fetch_changes
+    fake_connector.queue = [message("m1")]
 
     response = await push(client)
     await app.state.queue.drain()
 
     assert response.status_code == 204
-    assert len(emails_of(app, ws_a)) == 1
+    assert emails_of(app, ws_a) == []
     assert len(emails_of(app, ws_b)) == 1
 
 
