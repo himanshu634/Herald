@@ -2,6 +2,7 @@
 export { default as AngerMeter } from './AngerMeter.svelte';
 export { default as Button } from './Button.svelte';
 export { default as FilterChip } from './FilterChip.svelte';
+export { default as HoverCard } from './HoverCard.svelte';
 export { default as Icon, type IconName } from './Icon.svelte';
 export { default as Kbd } from './Kbd.svelte';
 export { default as Logo } from './Logo.svelte';

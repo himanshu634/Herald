@@ -1,14 +1,18 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import HoverCard from './HoverCard.svelte';
 
 	let {
 		title,
+		info,
 		actions,
 		padded = true,
 		class: className,
 		children
 	}: {
 		title?: string;
+		/** What this panel is for, shown in a hover card on the title. Needs a title. */
+		info?: Snippet;
 		actions?: Snippet;
 		/** Turn off for edge-to-edge content such as a table. */
 		padded?: boolean;
@@ -22,7 +26,11 @@
 		<header
 			class="flex items-center justify-between gap-3 border-b border-dashed border-line-dashed px-4 py-3"
 		>
-			{#if title}<h2 class="text-md font-bold">{title}</h2>{/if}
+			{#if title}
+				<h2 class="text-md font-bold">
+					{#if info}<HoverCard label={title}>{@render info()}</HoverCard>{:else}{title}{/if}
+				</h2>
+			{/if}
 			{#if actions}<div class="flex gap-2">{@render actions()}</div>{/if}
 		</header>
 	{/if}

@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import type { WorkspaceConfig } from '#lib/api/client.js';
-	import { Button, Icon, Panel, URGENCY, type Urgency } from '#lib/ui/index.js';
+	import { Button, Icon, Panel, TONE_CLASSES, URGENCY, type Tone } from '#lib/ui/index.js';
 	import {
-		ACTIONS,
 		MAX_FACT_LENGTH,
 		MAX_FACTS,
 		MAX_GUIDANCE,
@@ -13,13 +12,17 @@
 		MAX_TOPIC_LENGTH,
 		MAX_TOPICS,
 		SPAM_TOPIC,
+		actionChoice,
 		addTopic,
+		nearCap,
 		newRule,
-		withAction
+		withChoice
 	} from './setup';
 
 	// Edits a WorkspaceConfig in place. Used by onboarding; a settings page can reuse it.
 	let { config = $bindable() }: { config: WorkspaceConfig } = $props();
+
+	type LineList = 'facts' | 'guidance';
 
 	let topicText = $state('');
 	let editor = $state<HTMLElement>();
@@ -27,6 +30,67 @@
 	const facts = $derived(config.facts ?? []);
 	const guidance = $derived(config.guidance ?? []);
 	const rules = $derived(config.rules ?? []);
+
+	// The action select is tinted like the status it leads to, so "Alert me" reads red at a glance.
+	const ACTION_TONE: Record<string, Tone> = {
+		alert: 'danger',
+		set_urgency: 'warning',
+		close: 'neutral'
+	};
+
+	// What each panel is for and what it needs, shown in the hover card on its title.
+	// Limits come from setup.ts so the card never disagrees with what the server accepts.
+	type Info = { about: string; required: boolean; points: string[] };
+	const INFO: Record<'topics' | 'facts' | 'guidance' | 'rules', Info> = {
+		topics: {
+			about: 'Herald files every email under one topic.',
+			required: true,
+			points: [
+				`Needs at least one. Up to ${MAX_TOPICS} topics, ${MAX_TOPIC_LENGTH} characters each.`,
+				'A one-line meaning tells Herald what belongs. It is optional.',
+				`"${SPAM_TOPIC}" is always there and can't be removed.`
+			]
+		},
+		facts: {
+			about: 'What is true about your business, like your return window, delivery area or prices.',
+			required: false,
+			points: [
+				`Up to ${MAX_FACTS} facts, ${MAX_FACT_LENGTH} characters each.`,
+				'Herald checks each email against these, for example a return asked for after the window.',
+				'Write only what is true. A wrong fact misleads Herald.'
+			]
+		},
+		guidance: {
+			about: 'How your business judges urgency, in your own words.',
+			required: false,
+			points: [
+				`Up to ${MAX_GUIDANCE} lines, ${MAX_GUIDANCE_LENGTH} characters each.`,
+				"Shapes each email's topic, urgency and anger.",
+				"It can't decide what alerts you or switch off the safety floor. Use a rule for that."
+			]
+		},
+		rules: {
+			about: 'What Herald does when an email matches.',
+			required: false,
+			points: [
+				'Each rule needs a name and a When. Herald answers yes or no, with a quote from the email.',
+				'Then it alerts you, sets the urgency, or closes the email quietly.',
+				'If two rules match, Alert me wins over Close quietly.',
+				'With no rules, urgent emails and very angry customers still alert you.',
+				`Up to ${MAX_RULES} rules.`
+			]
+		}
+	};
+
+	// A blank field shows its border, so a new, empty line is never invisible.
+	const lineField =
+		'min-w-0 flex-1 resize-none rounded-sm border px-2 py-1.5 text-md leading-snug field-sizing-content focus:border-control';
+	const blankOr = (value: string) =>
+		value.trim() ? 'border-transparent hover:border-line' : 'border-control';
+	const addButton =
+		'inline-flex h-control-md cursor-pointer items-center gap-1.5 self-start px-2 text-sm font-bold text-neutral-fg hover:text-ink';
+	const removeButton =
+		'flex size-control-md flex-none cursor-pointer items-center justify-center rounded-sm text-muted hover:bg-subtle';
 
 	function onTopicKey(event: KeyboardEvent) {
 		if (event.key !== 'Enter') return;
@@ -46,29 +110,94 @@
 		fields?.[fields.length - 1]?.focus();
 	}
 
-	function addLine() {
-		config.guidance = [...guidance, ''];
-		focusLast('[data-guidance]');
+	function addLine(list: LineList) {
+		config[list] = [...(config[list] ?? []), ''];
+		focusLast(`[data-line="${list}"]`);
 	}
 
-	function addFact() {
-		config.facts = [...facts, ''];
-		focusLast('[data-fact]');
+	function setLine(list: LineList, i: number, value: string) {
+		config[list] = (config[list] ?? []).map((line, j) => (j === i ? value : line));
+	}
+
+	function removeLine(list: LineList, i: number) {
+		config[list] = (config[list] ?? []).filter((_, j) => j !== i);
 	}
 
 	function addRule() {
 		config.rules = [...rules, newRule(rules)];
-		focusLast('[data-rule-name]');
+		focusLast('[data-rule-when]');
 	}
 </script>
 
-{#snippet count(n: number, max: number)}
-	<span class="rounded-xs bg-subtle px-1.5 text-xs font-bold text-muted">{n} of {max}</span>
+{#snippet cap(n: number, max: number)}
+	{#if nearCap(n, max)}
+		<span class="rounded-xs bg-warning-bg px-1.5 text-xs font-bold text-warning-fg"
+			>{n} of {max}</span
+		>
+	{/if}
+{/snippet}
+
+{#snippet help(text: string)}
+	<span class="hidden text-right text-sm text-muted sm:inline">{text}</span>
+{/snippet}
+
+{#snippet guide({ about, required, points }: Info)}
+	<p class="font-bold text-ink">{about}</p>
+	<span
+		class={[
+			'mt-1.5 inline-block rounded-xs px-1.5 text-xs font-bold',
+			TONE_CLASSES[required ? 'warning' : 'neutral']
+		]}>{required ? 'Required' : 'Optional'}</span
+	>
+	<ul class="mt-2 flex list-disc flex-col gap-1 pl-4">
+		{#each points as point (point)}<li>{point}</li>{/each}
+	</ul>
+{/snippet}
+
+{#snippet lines(
+	list: LineList,
+	items: string[],
+	opts: { noun: string; max: number; maxLength: number; example: string; add: string }
+)}
+	{#if !items.length}
+		<p class="px-2 pb-1 text-sm text-muted">None yet. For example: {opts.example}</p>
+	{/if}
+	<ul>
+		<!-- Lines can be empty or repeat while the owner types, so the index is the key. -->
+		{#each items as line, i (i)}
+			<li
+				class="flex items-start gap-2 border-t border-dashed border-line-dashed py-1.5 first:border-t-0"
+			>
+				<label class="sr-only" for={`${list}-${i}`}>{opts.noun} {i + 1}</label>
+				<textarea
+					id={`${list}-${i}`}
+					data-line={list}
+					rows="1"
+					value={line}
+					oninput={(e) => setLine(list, i, e.currentTarget.value)}
+					maxlength={opts.maxLength}
+					placeholder={opts.example}
+					class={[lineField, blankOr(line)]}></textarea>
+				<button
+					type="button"
+					aria-label={`Remove ${opts.noun.toLowerCase()} ${i + 1}${line ? `, ${line}` : ''}`}
+					class={removeButton}
+					onclick={() => removeLine(list, i)}><Icon name="close" size={16} /></button
+				>
+			</li>
+		{/each}
+	</ul>
+	{#if items.length < opts.max}
+		<button type="button" class={addButton} onclick={() => addLine(list)}>
+			<Icon name="plus" size={14} />{opts.add}
+		</button>
+	{/if}
 {/snippet}
 
 <div bind:this={editor} class="flex flex-col gap-4">
 	<Panel title="Topics">
-		{#snippet actions()}{@render count(config.topics.length, MAX_TOPICS)}{/snippet}
+		{#snippet info()}{@render guide(INFO.topics)}{/snippet}
+		{#snippet actions()}{@render cap(config.topics.length, MAX_TOPICS)}{/snippet}
 		<p class="mb-3 text-sm text-muted">Herald files every email under one of these.</p>
 		<ul aria-label="Topics">
 			{#each config.topics as topic, i (topic.name)}
@@ -87,7 +216,7 @@
 					<button
 						type="button"
 						aria-label={`Remove ${topic.name}`}
-						class="flex size-control-md flex-none cursor-pointer items-center justify-center rounded-sm text-muted hover:bg-subtle"
+						class={removeButton}
 						onclick={() => (config.topics = config.topics.filter((_, j) => j !== i))}
 						><Icon name="close" size={16} /></button
 					>
@@ -109,7 +238,7 @@
 					onkeydown={onTopicKey}
 					maxlength={MAX_TOPIC_LENGTH}
 					placeholder="Add a topic, like Custom designs"
-					class="h-control-md w-72 rounded-sm border border-control bg-surface px-2.5 text-sm"
+					class="h-control-md min-w-0 flex-1 rounded-sm border border-control bg-surface px-2.5 text-sm sm:w-72 sm:flex-none"
 				/>
 				<Button size="sm" onclick={submitTopic} disabled={!topicText.trim()}>
 					<Icon name="plus" size={14} />Add topic
@@ -121,181 +250,119 @@
 		{/if}
 	</Panel>
 
-	<Panel title="Facts">
-		{#snippet actions()}{@render count(facts.length, MAX_FACTS)}{/snippet}
-		<p class="mb-1 text-sm text-muted">
-			What is true about your business, like your return window or delivery times. Herald checks
-			emails against these.
-		</p>
-		{#if !facts.length}
-			<p
-				class="my-2 rounded-md border border-dashed border-line-strong bg-sunken p-3 text-sm text-muted"
-			>
-				No facts yet. Add one such as "Returns are accepted within 7 days of delivery."
-			</p>
-		{/if}
-		<ul>
-			<!-- Facts can be empty or repeat while the owner types, so the index is the key. -->
-			{#each facts as fact, i (i)}
-				<li
-					class="flex items-center gap-2 border-t border-dashed border-line-dashed py-2 first:border-t-0"
-				>
-					<label class="sr-only" for={`fact-${i}`}>Fact {i + 1}</label>
-					<input
-						id={`fact-${i}`}
-						data-fact
-						bind:value={config.facts![i]}
-						maxlength={MAX_FACT_LENGTH}
-						class="h-control-md min-w-0 flex-1 rounded-sm border border-transparent px-2 text-md hover:border-line focus:border-control"
-					/>
-					<button
-						type="button"
-						aria-label={`Remove fact ${i + 1}${fact ? `, ${fact}` : ''}`}
-						class="flex size-control-md flex-none cursor-pointer items-center justify-center rounded-sm text-muted hover:bg-subtle"
-						onclick={() => (config.facts = facts.filter((_, j) => j !== i))}
-						><Icon name="close" size={16} /></button
-					>
-				</li>
-			{/each}
-		</ul>
-		{#if facts.length < MAX_FACTS}
-			<Button variant="quiet" size="sm" onclick={addFact}
-				><Icon name="plus" size={14} />Add a fact</Button
-			>
-		{/if}
+	<Panel title="What's true">
+		{#snippet info()}{@render guide(INFO.facts)}{/snippet}
+		{#snippet actions()}
+			{@render cap(facts.length, MAX_FACTS)}{@render help('Herald checks emails against these.')}
+		{/snippet}
+		{@render lines('facts', facts, {
+			noun: 'Fact',
+			max: MAX_FACTS,
+			maxLength: MAX_FACT_LENGTH,
+			example: 'Returns are accepted within 7 days of delivery.',
+			add: 'Add a fact'
+		})}
 	</Panel>
 
-	<Panel title="Guidance">
-		{#snippet actions()}{@render count(guidance.length, MAX_GUIDANCE)}{/snippet}
-		<p class="mb-1 text-sm text-muted">
-			How your business judges urgency. Facts go above; these lines say what matters most.
-		</p>
-		{#if !guidance.length}
-			<p
-				class="my-2 rounded-md border border-dashed border-line-strong bg-sunken p-3 text-sm text-muted"
-			>
-				No guidance yet. Add a line such as "Wedding planners are always important."
-			</p>
-		{/if}
-		<ul>
-			<!-- Lines can be empty or repeat while the owner types, so the index is the key. -->
-			{#each guidance as line, i (i)}
-				<li
-					class="flex items-center gap-2 border-t border-dashed border-line-dashed py-2 first:border-t-0"
-				>
-					<label class="sr-only" for={`guidance-${i}`}>Guidance line {i + 1}</label>
-					<input
-						id={`guidance-${i}`}
-						data-guidance
-						bind:value={config.guidance![i]}
-						maxlength={MAX_GUIDANCE_LENGTH}
-						class="h-control-md min-w-0 flex-1 rounded-sm border border-transparent px-2 text-md hover:border-line focus:border-control"
-					/>
-					<button
-						type="button"
-						aria-label={`Remove guidance line ${i + 1}${line ? `, ${line}` : ''}`}
-						class="flex size-control-md flex-none cursor-pointer items-center justify-center rounded-sm text-muted hover:bg-subtle"
-						onclick={() => (config.guidance = guidance.filter((_, j) => j !== i))}
-						><Icon name="close" size={16} /></button
-					>
-				</li>
-			{/each}
-		</ul>
-		{#if guidance.length < MAX_GUIDANCE}
-			<Button variant="quiet" size="sm" onclick={addLine}
-				><Icon name="plus" size={14} />Add a line</Button
-			>
-		{/if}
+	<Panel title="What matters most">
+		{#snippet info()}{@render guide(INFO.guidance)}{/snippet}
+		{#snippet actions()}
+			{@render cap(guidance.length, MAX_GUIDANCE)}{@render help('How Herald judges urgency.')}
+		{/snippet}
+		{@render lines('guidance', guidance, {
+			noun: 'Guidance line',
+			max: MAX_GUIDANCE,
+			maxLength: MAX_GUIDANCE_LENGTH,
+			example: 'Wedding planners are always important.',
+			add: 'Add a line'
+		})}
 	</Panel>
 
-	<Panel title="Rules">
-		{#snippet actions()}{@render count(rules.length, MAX_RULES)}{/snippet}
-		<p class="mb-3 text-sm text-muted">
-			What happens when an email matches. Safety, hacked accounts and legal threats always alert
-			you, whatever your rules say.
-		</p>
+	<Panel title="What happens">
+		{#snippet info()}{@render guide(INFO.rules)}{/snippet}
+		{#snippet actions()}
+			{@render cap(rules.length, MAX_RULES)}
+			<!-- decide.py checks alert rules before close rules, so this holds whatever the order. -->
+			{@render help('If two rules match, Alert me wins over Close quietly.')}
+		{/snippet}
+		<div
+			class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-floor-bg px-3.5 py-3 text-floor-fg"
+		>
+			<Icon name="shield" size={18} />
+			<p class="min-w-0 grow basis-60 text-md">
+				<b>Always</b>, when an email is about safety, a hacked account or a legal threat,
+				<b>alert me</b>.
+			</p>
+			<span class="rounded-xs border border-current px-1.5 text-xs font-bold"
+				>Can't be switched off</span
+			>
+		</div>
 		{#if !rules.length}
-			<p
-				class="mb-3 rounded-md border border-dashed border-line-strong bg-sunken p-3 text-sm text-muted"
-			>
+			<p class="px-2 py-2 text-sm text-muted">
 				No rules yet. Herald still alerts you for urgent emails and very angry customers.
 			</p>
 		{/if}
-		<ul class="flex flex-col gap-2.5">
+		<ul>
 			{#each rules as rule, i (rule.id)}
-				<li class="flex flex-col gap-2.5 rounded-md border border-line p-3">
-					<div class="flex items-center gap-2">
+				{@const choice = actionChoice(rule)}
+				<li
+					class="flex items-start gap-2 border-t border-dashed border-line-dashed py-3 first:border-t-0"
+				>
+					<div class="flex min-w-0 flex-1 flex-col gap-1">
 						<label class="sr-only" for={`rule-name-${rule.id}`}>Rule name</label>
 						<input
 							id={`rule-name-${rule.id}`}
-							data-rule-name
 							bind:value={config.rules![i].name}
 							placeholder="Name this rule"
-							class="h-control-md min-w-0 flex-1 rounded-sm border border-transparent px-2 text-md font-bold hover:border-line focus:border-control"
+							class={[
+								'h-7 w-72 max-w-full rounded-sm border px-2 text-sm font-bold text-muted focus:border-control focus:text-ink',
+								blankOr(rule.name)
+							]}
 						/>
-						<button
-							type="button"
-							aria-label={`Remove ${rule.name || 'this rule'}`}
-							class="flex size-control-md flex-none cursor-pointer items-center justify-center rounded-sm text-muted hover:bg-subtle"
-							onclick={() => (config.rules = rules.filter((r) => r.id !== rule.id))}
-							><Icon name="close" size={16} /></button
-						>
-					</div>
-					<div class="flex flex-col gap-1 px-2">
-						<label class="text-xs font-bold text-muted" for={`rule-when-${rule.id}`}>When</label>
-						<textarea
-							id={`rule-when-${rule.id}`}
-							bind:value={config.rules![i].when}
-							rows="2"
-							placeholder="The customer says the cake arrived damaged"
-							class="resize-y rounded-sm border border-control bg-surface px-2.5 py-1.5 text-md"
-						></textarea>
-					</div>
-					<div class="flex flex-wrap items-center gap-2 px-2">
-						<span class="w-10 text-xs font-bold text-muted" id={`rule-then-${rule.id}`}>Then</span>
-						<div
-							role="group"
-							aria-labelledby={`rule-then-${rule.id}`}
-							class="inline-flex overflow-hidden rounded-sm border border-control"
-						>
-							{#each ACTIONS as action (action.id)}
-								{@const on = rule.action === action.id}
-								<button
-									type="button"
-									aria-pressed={on}
-									class={[
-										'inline-flex h-control-md cursor-pointer items-center gap-1 border-l border-line-dashed px-2.5 text-sm first:border-l-0',
-										on
-											? 'bg-accent-tint font-bold text-ink ring-2 ring-ink ring-inset'
-											: 'bg-surface font-semibold text-neutral-fg'
-									]}
-									onclick={() => (config.rules![i] = withAction(rule, action.id))}
-								>
-									{#if on}<Icon name="check" size={14} />{/if}{action.label}
-								</button>
-							{/each}
-						</div>
-						{#if rule.action === 'set_urgency'}
-							<label class="flex items-center gap-1.5 text-sm">
-								<span class="text-xs font-bold text-muted">to</span>
-								<select
-									bind:value={config.rules![i].urgency}
-									class="h-control-md rounded-sm border border-control bg-surface px-2 text-sm"
-								>
+						<div class="flex flex-wrap items-center gap-2 px-2">
+							<label class="font-bold" for={`rule-when-${rule.id}`}>When</label>
+							<textarea
+								id={`rule-when-${rule.id}`}
+								data-rule-when
+								rows="1"
+								bind:value={config.rules![i].when}
+								placeholder="the customer says the cake arrived damaged"
+								class="field-sizing-content min-w-0 grow basis-80 resize-none rounded-sm border border-dashed border-control bg-surface px-2.5 py-1.5 text-md leading-snug font-semibold focus:border-solid"
+							></textarea>
+							<label class="font-bold" for={`rule-then-${rule.id}`}>then</label>
+							<select
+								id={`rule-then-${rule.id}`}
+								value={choice}
+								onchange={(e) => (config.rules![i] = withChoice(rule, e.currentTarget.value))}
+								class={[
+									'h-control-md cursor-pointer rounded-sm border-[1.5px] border-current px-2 text-sm font-bold',
+									TONE_CLASSES[ACTION_TONE[rule.action]]
+								]}
+							>
+								<option value="alert">Alert me</option>
+								<optgroup label="Set urgency">
 									{#each Object.entries(URGENCY) as [value, { label }] (value)}
-										<option value={value as Urgency}>{label}</option>
+										<option value={`set_urgency:${value}`}>Set urgency: {label}</option>
 									{/each}
-								</select>
-							</label>
-						{/if}
+								</optgroup>
+								<option value="close">Close quietly</option>
+							</select>
+						</div>
 					</div>
+					<button
+						type="button"
+						aria-label={`Remove ${rule.name || 'this rule'}`}
+						class={removeButton}
+						onclick={() => (config.rules = rules.filter((r) => r.id !== rule.id))}
+						><Icon name="close" size={16} /></button
+					>
 				</li>
 			{/each}
 		</ul>
 		{#if rules.length < MAX_RULES}
-			<Button variant="quiet" size="sm" class="mt-2" onclick={addRule}>
+			<button type="button" class={addButton} onclick={addRule}>
 				<Icon name="plus" size={14} />Add a rule
-			</Button>
+			</button>
 		{/if}
 	</Panel>
 </div>

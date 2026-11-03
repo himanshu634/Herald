@@ -4,11 +4,14 @@ import {
 	MAX_FACTS,
 	MAX_MEANING_LENGTH,
 	MAX_TOPICS,
+	actionChoice,
 	addTopic,
 	isEdited,
+	nearCap,
 	newRule,
 	problems,
-	withAction
+	withAction,
+	withChoice
 } from './setup';
 
 function rule(over: Partial<Rule> = {}): Rule {
@@ -63,6 +66,26 @@ describe('newRule', () => {
 		const rules = [rule({ id: 'rule-2' }), rule({ id: 'rule-3' })];
 		expect(newRule(rules).id).toBe('rule-4');
 		expect(newRule([rule({ id: 'rule-1' })]).id).toBe('rule-2');
+	});
+});
+
+describe('actionChoice and withChoice', () => {
+	it('folds the urgency into a set_urgency choice', () => {
+		expect(actionChoice(rule())).toBe('alert');
+		expect(actionChoice(rule({ action: 'set_urgency', urgency: 'low' }))).toBe('set_urgency:low');
+	});
+
+	it('sets the action and urgency from one choice', () => {
+		const set = withChoice(rule(), 'set_urgency:urgent');
+		expect(set).toMatchObject({ action: 'set_urgency', urgency: 'urgent' });
+		expect(withChoice(set, 'close')).toMatchObject({ action: 'close', urgency: null });
+	});
+});
+
+describe('nearCap', () => {
+	it('shows the limit only in the last two places', () => {
+		expect(nearCap(7, MAX_FACTS)).toBe(false);
+		expect(nearCap(8, MAX_FACTS)).toBe(true);
 	});
 });
 
