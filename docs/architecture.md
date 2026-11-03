@@ -114,8 +114,8 @@ sequenceDiagram
     Note over W: process_email runs the pipeline shown above
 ```
 
-- The first sync (no cursor) reads the last 2 days of inbox mail, at most 50 messages. Gmail's history cursor is the `historyId` of the first page, so a re-read is possible but a loss is not. Stored mail is deduped on `(mailbox_id, provider_message_id)`.
-- If Gmail no longer has the cursor's history (about a week), the connector backfills by itself.
+- The first sync (no cursor) reads the last 2 days of inbox mail, at most 50 messages. The cursor is the profile `historyId`, read before the list, so mail that lands during the sync is read by the next one. The same path runs when Gmail no longer has the cursor's history (about a week).
+- Later syncs read the history since the cursor. The new cursor is the `historyId` of the first page, so a re-read is possible but a loss is not. Stored mail is deduped on `(mailbox_id, provider_message_id)`.
 - A mail that cannot be parsed is skipped, so one bad email cannot block the mailbox.
 - Only inbox mail is read. Sent mail and drafts are skipped. The scope is `gmail.readonly`.
 - Credentials are encrypted with `HERALD_TOKEN_KEY` and never leave the server. The OAuth `state` is signed with the same key and expires after 10 minutes.
@@ -197,11 +197,11 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 | `HERALD_QUEUE` | `arq` | `inline` |
 | `HERALD_MODEL_PROVIDER` | `fake` | `fake` |
 | `HERALD_NTFY_TOPIC` | unset (alerts are logged) | unset |
-| `HERALD_TOKEN_KEY` | unset (mail connectors off) | unset |
+| `HERALD_TOKEN_KEY` | unset (Gmail off: it needs this, the Google client id and secret, and the topic) | unset |
 | `HERALD_PUBLIC_API_URL` | `http://localhost:8000` | same |
 | `HERALD_WEB_URL` | `http://localhost:5173` | same |
-| `HERALD_GOOGLE_CLIENT_ID`, `HERALD_GOOGLE_CLIENT_SECRET` | unset | unset |
-| `HERALD_GMAIL_TOPIC` | unset (no push; the catch-up sync still runs) | unset |
+| `HERALD_GOOGLE_CLIENT_ID`, `HERALD_GOOGLE_CLIENT_SECRET` | unset (Gmail off, as above) | unset |
+| `HERALD_GMAIL_TOPIC` | unset (Gmail off: no mailbox can be connected) | unset |
 | `HERALD_GMAIL_PUSH_AUDIENCE`, `HERALD_GMAIL_PUSH_SERVICE_ACCOUNT` | unset (every push is rejected) | unset |
 
 ## Not built yet
