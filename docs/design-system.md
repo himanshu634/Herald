@@ -151,6 +151,8 @@ Help that would clutter the screen, opened from a dotted-underlined label with a
 
 For a task that needs room and the owner's full attention, such as answering Herald's question. A native modal `<dialog>`: 80% of the window, full screen below 768 px, `rounded-xl`, `shadow-popover`, a dim backdrop. Esc, the close button and a click on the backdrop close it. It takes a `header`, a body (laid out as columns from `md`) and an optional `footer` for the actions. The page's shortcuts pause while it is open. Keep one primary button in the footer.
 
+An optional `aside` docks a side panel to the right edge for editing one item while the body stays readable: the dialog widens to make room, and on a phone the panel covers the dialog. Give the panel its own header, close button and footer. Pass `onescape` so Esc closes the panel first and the dialog only on a second press.
+
 ### Toast
 
 A short message after an owner action, bottom centre, ink on canvas. It uses the action's own words ("Moved to In progress.") and clears itself after 5 seconds. It sits in a `role="status"` region so screen readers hear it. Errors are not toasts: they stay on screen as a `role="alert"` banner until dismissed.

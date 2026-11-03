@@ -2,7 +2,13 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { api, type Email, type Mailbox, type Workspace } from '#lib/api/client.js';
+	import {
+		api,
+		type Email,
+		type Mailbox,
+		type Workspace,
+		type WorkspaceConfig
+	} from '#lib/api/client.js';
 	import { WorkspaceEvents } from '#lib/events.svelte.js';
 	import BusinessMenu from '#lib/inbox/BusinessMenu.svelte';
 	import EmailPanel from '#lib/inbox/EmailPanel.svelte';
@@ -242,30 +248,30 @@
 		params.view = id;
 	}
 
-	// Save the owner's facts, then have Herald read the email again with them. The answer
-	// arrives later as email.noted; until then the question stays up with its old notes.
-	async function answer(email: Email, facts: string[]) {
+	// Save the owner's fact and rule changes (none when they only asked for a rerun), then have
+	// Herald read the email again. The answer arrives later as email.noted; until then the
+	// question stays up with its old notes.
+	async function keep(email: Email, config: WorkspaceConfig | null) {
 		if (!workspace || busy) return;
 		busy = true;
+		const what = config ? 'Changes saved. ' : '';
 		try {
-			const saved = await api.saveConfig(workspace.id, workspace.name, {
-				...workspace.config,
-				facts
-			});
-			workspaces = workspaces.map((w) => (w.id === saved.id ? saved : w));
+			if (config) {
+				const saved = await api.saveConfig(workspace.id, workspace.name, config);
+				workspaces = workspaces.map((w) => (w.id === saved.id ? saved : w));
+			}
 			askingId = null;
 			// Set before the request: in lite mode the re-read can finish before it returns.
 			rereading = { id: email.id, sender: senderName(email.sender) };
-			toast = `Facts saved. Herald is re-reading ${rereading.sender}’s email.`;
+			toast = `${what}Herald is re-reading ${rereading.sender}’s email.`;
 			await api.reread(email.workspace_id, email.id);
 		} catch (e) {
-			const moved = rereading && e instanceof Error && e.message.startsWith('409');
+			const refused = rereading && e instanceof Error && e.message.startsWith('409');
 			rereading = null;
-			// The facts are saved; only the re-read was refused, because the owner already
+			// The changes are saved; only the re-read was refused, because the owner already
 			// moved this email by hand. Say so instead of showing an error.
-			if (moved)
-				toast =
-					'Facts saved. You moved this email yourself, so Herald leaves it there. Mark it Done or On it to clear the question.';
+			if (refused)
+				toast = `${what}You moved this email yourself, so Herald leaves it there. Mark it Done or On it to clear the question.`;
 			else fail(e);
 		} finally {
 			busy = false;
@@ -543,11 +549,13 @@
 
 {#if asking && workspace}
 	{#key asking.id}
+		{@const question = asking}
 		<QuestionDialog
 			email={asking}
-			facts={workspace.config.facts ?? []}
+			config={workspace.config}
 			{busy}
-			onsave={(facts) => asking && answer(asking, facts)}
+			ontry={(config) => api.tryConfig(workspace.id, question.id, config)}
+			onkeep={(config) => asking && keep(asking, config)}
 			onact={(action) => act(action, asking, questionActionsFor)}
 			onclose={() => (askingId = null)}
 		/>

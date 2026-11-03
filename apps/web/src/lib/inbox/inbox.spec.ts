@@ -5,7 +5,6 @@ import {
 	countByView,
 	floorLabel,
 	highlight,
-	nextFacts,
 	questionActionsFor,
 	questionsFor,
 	senderName,
@@ -89,30 +88,6 @@ describe('questionsFor', () => {
 			email('failed', { status: 'needs_a_look' })
 		];
 		expect(questionsFor(list).map((e) => e.id)).toEqual(['look', 'closed']);
-	});
-});
-
-describe('nextFacts', () => {
-	const ten = Array.from({ length: 10 }, (_, i) => `Fact ${i + 1}`);
-
-	it('adds a new fact below the limit', () => {
-		expect(nextFacts(['A'], ' B ', null)).toEqual({ facts: ['A', 'B'], error: null });
-	});
-
-	it('needs a fact to replace at the limit', () => {
-		expect(nextFacts(ten, 'New', null).error).toMatch(/Pick one to replace/);
-		expect(nextFacts(ten, 'New', 2).facts[2]).toBe('New');
-	});
-
-	it('keeps edits and drops a fact emptied by one', () => {
-		const edits = [...ten];
-		edits[0] = 'Fact 1, changed';
-		edits[9] = '  ';
-		const { facts, error } = nextFacts(edits, 'New', null);
-		expect(error).toBeNull();
-		expect(facts).toHaveLength(10);
-		expect(facts[0]).toBe('Fact 1, changed');
-		expect(facts.at(-1)).toBe('New');
 	});
 });
 

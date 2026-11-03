@@ -110,30 +110,6 @@ export function visibleEmails(emails: Email[], view: ViewId, filters: Filters): 
 export const MAX_FACTS = 10;
 export const MAX_FACT_LENGTH = 200;
 
-/**
- * The facts the owner would save from the question dialog: their edits to existing facts,
- * plus the new fact, added or put in place of the one they picked. A fact emptied by an edit
- * is dropped. At the limit a new fact needs a fact to replace, or the save would be refused.
- */
-export function nextFacts(
-	edits: string[],
-	draft: string,
-	replace: number | null
-): { facts: string[]; error: string | null } {
-	const facts = edits.map((fact) => fact.trim());
-	const text = draft.trim();
-	if (text) {
-		if (replace !== null) facts[replace] = text;
-		else if (facts.filter(Boolean).length >= MAX_FACTS)
-			return {
-				facts: facts.filter(Boolean),
-				error: `You have ${MAX_FACTS} facts, the most Herald keeps. Pick one to replace, or change one instead.`
-			};
-		else facts.push(text);
-	}
-	return { facts: facts.filter(Boolean), error: null };
-}
-
 export function countByView(emails: Email[]): Record<ViewId, number> {
 	const counts = Object.fromEntries(VIEWS.map((v) => [v.id, 0])) as Record<ViewId, number>;
 	for (const email of emails)
