@@ -1,7 +1,10 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { api, type Email, type EmailIn, type Workspace } from '#lib/api/client.js';
 	import { WorkspaceEvents } from '#lib/events.svelte.js';
+	import BusinessMenu from '#lib/inbox/BusinessMenu.svelte';
 	import EmailPanel from '#lib/inbox/EmailPanel.svelte';
 	import EmailTable from '#lib/inbox/EmailTable.svelte';
 	import SendTestEmail from '#lib/inbox/SendTestEmail.svelte';
@@ -34,7 +37,10 @@
 	let sender = $state<SendTestEmail>();
 
 	const live = new WorkspaceEvents();
-	const workspace = $derived(workspaces.find((w) => w.id === workspaceId));
+	// Only a saved setup takes email; drafts wait in the business menu.
+	const ready = $derived(workspaces.filter((w) => w.setup_done));
+	const firstDraft = $derived(workspaces.find((w) => !w.setup_done));
+	const workspace = $derived(ready.find((w) => w.id === workspaceId));
 	const counts = $derived(countByView(emails));
 	const visible = $derived(visibleEmails(emails, view, filters));
 	// Keep the owner's choice while it is in view; otherwise open the top email.
@@ -47,7 +53,10 @@
 		.listWorkspaces()
 		.then((list) => {
 			workspaces = list;
-			workspaceId = list[0]?.id ?? null;
+			// Setup sends the owner here with the saved workspace in the page state.
+			const asked = page.state.workspace;
+			const usable = list.filter((w) => w.setup_done);
+			workspaceId = (usable.find((w) => w.id === asked) ?? usable[0])?.id ?? null;
 			loaded = true;
 		})
 		.catch(fail);
@@ -187,21 +196,17 @@
 				<h1 class="pb-2 text-2xl font-extrabold">Herald</h1>
 			{/if}
 			<div class="flex flex-wrap items-center gap-3 pb-1.5">
-				{#if workspaces.length > 1}
-					<select
-						bind:value={workspaceId}
-						aria-label="Workspace"
-						class="h-control-md rounded-sm border border-control bg-surface px-2 text-sm"
-					>
-						{#each workspaces as w (w.id)}<option value={w.id}>{w.name}</option>{/each}
-					</select>
-				{/if}
 				{#if workspace}
 					<span class="inline-flex items-center gap-1.5 text-sm text-neutral-fg">
 						<span class={['size-2 rounded-full', live.connected ? 'bg-live' : 'bg-line-strong']}
 						></span>
-						{workspace.name}, {live.connected ? 'live' : 'connecting'}
+						{live.connected ? 'Live' : 'Connecting'}
 					</span>
+				{/if}
+				{#if workspaces.length}
+					<BusinessMenu {workspaces} bind:selected={workspaceId} />
+				{/if}
+				{#if workspace}
 					<Button onclick={() => sender?.open()}>Send test email</Button>
 				{/if}
 			</div>
@@ -274,15 +279,55 @@
 			</div>
 		{:else if loaded}
 			<main class="flex flex-1 items-center justify-center p-6">
-				<div
-					class="flex max-w-md flex-col items-start gap-4 rounded-lg border border-line bg-surface p-6"
-				>
-					<h2 class="text-2xl font-extrabold">Start with a demo business</h2>
-					<p class="text-body">
-						Herald needs a workspace to sort mail into. The demo is Tripfold, an online luggage
-						shop, with its topics and rules already set up.
-					</p>
-					<Button variant="primary" onclick={createDemo}>Create the Tripfold workspace</Button>
+				<div class="flex w-full max-w-190 flex-col gap-5">
+					<div>
+						<h2 class="text-2xl font-extrabold tracking-title">Who does Herald read mail for?</h2>
+						<p class="mt-1.5 text-muted">
+							Each business gets its own topics and rules. You can add more businesses later.
+						</p>
+					</div>
+					<div class="flex flex-wrap gap-4">
+						<div
+							class="flex min-w-64 flex-1 flex-col gap-3 rounded-lg border-[1.5px] border-ink bg-surface p-5"
+						>
+							{#if firstDraft}
+								<h3 class="text-lg font-extrabold">Finish setting up {firstDraft.name}</h3>
+								<p class="text-sm text-body">
+									Herald has drafted its topics and rules. Check them and save to start sorting
+									mail.
+								</p>
+								<Button
+									variant="primary"
+									class="mt-auto self-start"
+									onclick={() =>
+										goto(resolve('/setup/[[workspace]]', { workspace: firstDraft.id }))}
+									>Finish setup</Button
+								>
+							{:else}
+								<h3 class="text-lg font-extrabold">Set up your business</h3>
+								<p class="text-sm text-body">
+									Tell Herald what you sell and what a bad day looks like. It drafts your topics and
+									rules, and you check them. About two minutes.
+								</p>
+								<Button
+									variant="primary"
+									class="mt-auto self-start"
+									onclick={() => goto(resolve('/setup/[[workspace]]', {}))}
+									>Set up your business</Button
+								>
+							{/if}
+						</div>
+						<div
+							class="flex min-w-64 flex-1 flex-col gap-3 rounded-lg border border-line bg-surface p-5"
+						>
+							<h3 class="text-lg font-extrabold">Try the demo</h3>
+							<p class="text-sm text-body">
+								Tripfold, an online luggage shop, with its topics and rules already set up.
+							</p>
+							<Button class="mt-auto self-start" onclick={createDemo}>Open the Tripfold demo</Button
+							>
+						</div>
+					</div>
 				</div>
 			</main>
 		{/if}

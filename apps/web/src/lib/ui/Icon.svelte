@@ -10,7 +10,11 @@
 		bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>',
 		search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/>',
 		close: '<path d="M6 6l12 12M18 6L6 18"/>',
-		check: '<path d="M5 12l5 5 9-10"/>'
+		check: '<path d="M5 12l5 5 9-10"/>',
+		plus: '<path d="M12 5v14M5 12h14"/>',
+		redo: '<path d="M19 8a8 8 0 1 0 1 6"/><path d="M19 3v5h-5"/>',
+		alert: '<path d="M12 4L3 20h18z"/><path d="M12 10v4M12 17v.5"/>',
+		down: '<path d="M7 10l5 5 5-5"/>'
 	} as const;
 
 	export type IconName = keyof typeof PATHS;

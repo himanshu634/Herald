@@ -5,7 +5,10 @@ declare global {
 		// interface Error {}
 		// interface Locals {}
 		// interface PageData {}
-		// interface PageState {}
+		interface PageState {
+			/** Set by setup after saving, so the inbox opens on that business. */
+			workspace?: string;
+		}
 		// interface Platform {}
 	}
 }
