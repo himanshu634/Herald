@@ -93,9 +93,12 @@ ALERT_ON_CUSTOMERS = CONFIG.model_copy(
 @pytest.mark.parametrize(
     ("subject", "body"),
     [
-        ("SALE IS LIVE: Creative Cloud Pro now Rs 999/mo", "Ends today! 40% off. Unsubscribe."),
+        (
+            "SALE IS LIVE: Creative Cloud Pro now Rs 999/mo",
+            "Ends today! 40 percent off. Unsubscribe.",
+        ),
         ("Why isn't AI showing up in productivity?", "Customer review roundup. Unsubscribe."),
-        ("unreal.julie and more in your feed", "Manage your email preferences."),
+        ("sam.lee and 3 others are new in your feed", "Manage your email preferences."),
     ],
 )
 async def test_promotions_close_without_judging_rules(subject, body):
@@ -118,6 +121,17 @@ async def test_customer_email_still_judges_rules():
     )
     assert model.rule_calls == 1
     assert state["decision"].route is Route.ALERT
+
+
+async def test_customer_discount_complaint_still_judges_rules():
+    model = CountingModel()
+    await triage(
+        build_graph(model),
+        email("Code not working", "My 20% off code fails at checkout."),
+        ALERT_ON_CUSTOMERS,
+        business_name="Tripfold",
+    )
+    assert model.rule_calls == 1
 
 
 async def test_floor_word_in_a_newsletter_still_alerts():

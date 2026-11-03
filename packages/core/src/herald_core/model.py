@@ -55,7 +55,7 @@ class TriageModel(Protocol):
 
 
 # Lines found in promotions and newsletters, never in a customer's own email.
-_FAKE_BULK_MARKERS = ("unsubscribe", "view in browser", "email preferences", "% off")
+_FAKE_BULK_MARKERS = ("unsubscribe", "view in browser", "email preferences")
 
 # FakeModel's topic guesses: a word in the description gives a topic.
 _FAKE_TOPICS = [
