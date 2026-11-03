@@ -1,0 +1,84 @@
+# Full Herald stack for development, with hot reload. Postgres and Redis come from
+# docker-compose.yml, and both files use the project name herald, so `make infra` and this
+# file share one database. Paths are relative to this folder; the build context is the
+# repo root.
+#
+#   make docker-dev
+#
+# Web on http://localhost:5173, API on http://localhost:8000.
+name: herald
+
+include:
+  - docker-compose.yml
+
+x-server: &server
+  build:
+    context: ..
+    dockerfile: infra/Dockerfile
+    target: server-dev
+  # The checkout is mounted over /app; the venv stays at /opt/venv in the image.
+  volumes:
+    - ..:/app
+  working_dir: /app
+  env_file:
+    - path: ../.env
+      required: false
+  # Set here, not in .env: .env.example points these at localhost, and OS env beats the
+  # .env file that Settings also reads from the mounted checkout.
+  environment:
+    HERALD_DATABASE_URL: postgresql+psycopg://herald:herald@postgres:5432/herald
+    HERALD_REDIS_URL: redis://redis:6379/0
+    HERALD_BUS: redis
+    HERALD_QUEUE: arq
+
+services:
+  api:
+    <<: *server
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')
+      interval: 5s
+      retries: 20
+
+  worker:
+    <<: *server
+    command:
+      - watchfiles
+      - arq herald_server.worker.main.WorkerSettings
+      - apps/server/src
+      - packages/core/src
+    # Both processes run create_all on startup. Waiting for a healthy API means the
+    # tables exist before the worker starts, so the two never race to create them.
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: web-dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ..:/app
+      # Keep the image's node_modules: the host's hold macOS builds of esbuild, rollup
+      # and Tailwind's oxide, which do not run in Linux. After a dependency change, run
+      # `up --build --renew-anon-volumes`.
+      - /app/node_modules
+      - /app/apps/web/node_modules
+    environment:
+      HERALD_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
