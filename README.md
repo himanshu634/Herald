@@ -51,6 +51,8 @@ make worker
 make web
 ```
 
+Upgrading from an older checkout: there are no migrations yet, so startup does not add new columns to existing tables. Delete `apps/server/herald-dev.db` (lite mode) or run `docker compose down -v` (Postgres) and start again. See "Upgrading an existing dev database" in `docs/architecture.md`.
+
 To use Claude instead of the fake model, copy `.env.example` to `.env` and set `HERALD_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`. To get phone alerts, set `HERALD_NTFY_TOPIC`.
 
 ## Checks

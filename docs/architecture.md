@@ -116,7 +116,8 @@ sequenceDiagram
 
 - The first sync (no cursor) reads the last 2 days of inbox mail, at most 50 messages. The cursor is the profile `historyId`, read before the list, so mail that lands during the sync is read by the next one. The same path runs when Gmail no longer has the cursor's history (about a week).
 - Later syncs read the history since the cursor. The new cursor is the `historyId` of the first page, so a re-read is possible but a loss is not. Stored mail is deduped on `(mailbox_id, provider_message_id)`.
-- A mail that cannot be parsed is skipped, so one bad email cannot block the mailbox.
+- One fetch downloads at most 100 messages. A long gap (a reconnect or a resume keeps the cursor) is read in batches: the fetch stops before the history record that would pass the cap, its cursor is the last record it took, and it reports `has_more`. Each batch is stored with its cursor, and the caller fetches again (see Sync job). A single record with more than 100 messages is taken whole.
+- A mail that cannot be parsed is skipped, so one bad email cannot block the mailbox. A message that Gmail refuses with a lasting 4xx (not 401, 404 or a rate limit) is skipped and logged the same way. A 5xx fails the fetch, and the retry reads it again.
 - Only inbox mail is read. Sent mail and drafts are skipped. The scope is `gmail.readonly`.
 - Credentials are encrypted with `HERALD_TOKEN_KEY` and never leave the server. The OAuth `state` is signed with the same key and expires after 10 minutes.
 - Push is verified: the Pub/Sub JWT must match the audience and service account in the settings. A bad signature gets 401. A good push for an unknown or inactive address gets 204, so Pub/Sub does not retry it.
@@ -128,9 +129,10 @@ sequenceDiagram
 - Every job first sets the flag `herald:sync-pending:{mailbox_id}`.
 - One job at a time per mailbox holds the Redis lock `herald:sync:{mailbox_id}`. Any other job sees the lock busy and returns, because the flag is already set.
 - The lock holder loops while the flag is set: clear the flag, sync, enqueue `process_email` for each new email. A push that arrives during a sync sets the flag again.
+- When a fetch reports `has_more`, the job sets the flag again, so the loop reads the next batch. The inline queue (lite mode) loops on `has_more` the same way.
 - The loop stops after 120 s. After the lock is released, a leftover flag starts a fresh job.
 - A rate limit from the provider retries the job (at least 5 s later, up to 5 tries). The cursor does not move, so the retry reads the same changes.
-- A pause or disconnect that races a sync wins: a mailbox that is not `active` is not synced, and the sync never overwrites that status.
+- A pause or disconnect that races a sync stops later syncs: a mailbox that is not `active` is not synced, and the sync never overwrites that status. A fetch already in flight can still store its mail and move the cursor.
 
 ### Mailbox status
 
@@ -138,10 +140,14 @@ sequenceDiagram
 | --- | --- | --- |
 | `active` | Syncing and receiving push | Owner pauses, access is revoked, or owner disconnects |
 | `paused` | Owner stopped it. Push is off, the cursor is kept. | Owner resumes (a catch-up sync runs) |
-| `needs_reauth` | The owner revoked access, or the stored credentials no longer decrypt (for example the key changed). Only an `active` mailbox moves here. | Owner connects again; the same row is reused |
-| `disconnected` | Credentials are deleted and the grant is revoked. Stored emails are kept. | Owner connects again |
+| `needs_reauth` | The owner revoked access, or the stored credentials no longer decrypt. Only an `active` mailbox moves here. | Owner connects again; the same row is reused |
+| `disconnected` | Credentials are deleted. Push is stopped and the grant is revoked, both best effort (see below). Stored emails are kept. | Owner connects again; the same row and cursor are reused |
 
-Every change saves a `mailbox.status` event in the same transaction, then publishes it to the live events stream.
+The owner can disconnect from `active`, `paused` and `needs_reauth`. Every change saves a `mailbox.status` event in the same transaction, then publishes it to the live events stream.
+
+The same account can be connected in more than one workspace. Each workspace has its own row and gets its own copy of the mail, but Gmail has one watch and one grant per account. So pause and disconnect stop the watch only when no other workspace has that address `active`, and disconnect revokes the grant only when no other workspace has it in any status but `disconnected`.
+
+The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt the stored mailbox credentials (they open one to check). This catches a worker whose key differs from the API's, which would otherwise move every mailbox to `needs_reauth`. To change the key, disconnect every mailbox first, then reconnect them after the change.
 
 ### Routes
 
@@ -164,6 +170,7 @@ The OAuth callback always redirects to `HERALD_WEB_URL` with one query value:
 | `mailbox_error=invalid_state` | The state is bad, expired, for another provider, or names a missing workspace |
 | `mailbox_error=authorization_failed` | No code came back, or the provider refused the code |
 | `mailbox_error=no_refresh_token` | The provider gave no long-lived credential |
+| `mailbox_error=provider_error` | Any other provider failure: for example the account has no Gmail, the owner deselected the scope, a rate limit, or a network error |
 
 ### Cron jobs
 
@@ -172,7 +179,7 @@ The OAuth callback always redirects to `HERALD_WEB_URL` with one query value:
 | `renew_subscriptions_job` | Daily at 03:00 | Renews push for every active mailbox. A Gmail watch lasts 7 days. A revoked grant moves the mailbox to `needs_reauth`. |
 | `catch_up_syncs_job` | Every 15 minutes | Queues a sync for every active mailbox, to pick up mail whose push was lost |
 
-Both jobs run across all workspaces on purpose.
+Both jobs run across all workspaces on purpose. The times are the worker's local time (arq cron).
 
 Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscription) is a manual step. It is described in the mail connectors plan.
 
@@ -204,9 +211,16 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 | `HERALD_GMAIL_TOPIC` | unset (Gmail off: no mailbox can be connected) | unset |
 | `HERALD_GMAIL_PUSH_AUDIENCE`, `HERALD_GMAIL_PUSH_SERVICE_ACCOUNT` | unset (every push is rejected) | unset |
 
+### Upgrading an existing dev database
+
+There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. Start from an empty database:
+
+- Lite mode: delete `apps/server/herald-dev.db`.
+- Postgres: run `docker compose down -v`, then `make infra`.
+
 ## Not built yet
 
-- Alembic migrations (tables are created on startup for now)
+- Alembic migrations (tables are created on startup for now; see "Upgrading an existing dev database")
 - Auth and per-workspace limits
 - The rule test, the score report and the test-email set
 - An Outlook connector, and IMAP
