@@ -133,7 +133,7 @@ sequenceDiagram
     API-->>Owner: 303 to web app (mailbox_connected=id)
 
     G->>API: POST /api/webhooks/gmail (signed push)
-    API->>Q: enqueue sync_mailbox for each active mailbox at that address
+    API->>Q: enqueue sync_mailbox for the active mailbox at that address
     Q->>W: sync_mailbox(mailbox_id)
     W->>G: fetch changes since the cursor
     W->>DB: save new emails + new cursor in one transaction, events email.received
@@ -167,12 +167,12 @@ sequenceDiagram
 | --- | --- | --- |
 | `active` | Syncing and receiving push | Owner pauses, access is revoked, or owner disconnects |
 | `paused` | Owner stopped it. Push is off, the cursor is kept. | Owner resumes (a catch-up sync runs) |
-| `needs_reauth` | The owner revoked access, or the stored credentials no longer decrypt. Only an `active` mailbox moves here. | Owner connects again; the same row is reused |
-| `disconnected` | Credentials are deleted. Push is stopped and the grant is revoked, both best effort (see below). Stored emails are kept. | Owner connects again; the same row and cursor are reused |
+| `needs_reauth` | The owner revoked access, or the stored credentials no longer decrypt. Only an `active` mailbox moves here. | Owner connects again; the same row is reused. Another workspace cannot connect the address meanwhile. |
+| `disconnected` | Credentials are deleted. Push is stopped and the grant is revoked, both best effort. Stored emails are kept. | Owner connects again; the same row and cursor are reused, unless another workspace has connected the address since |
 
 The owner can disconnect from `active`, `paused` and `needs_reauth`. Every change saves a `mailbox.status` event in the same transaction, then publishes it to the live events stream.
 
-The same account can be connected in more than one workspace. Each workspace has its own row and gets its own copy of the mail, but Gmail has one watch and one grant per account. So pause and disconnect stop the watch only when no other workspace has that address `active`, and disconnect revokes the grant only when no other workspace has it in any status but `disconnected`.
+One business per mailbox: an address is connected in at most one workspace at a time. Every status but `disconnected` holds the address. The connect checks this before it saves and answers `mailbox_in_use`. The partial unique index `uq_mailbox_live_address` on `(provider, email_address)`, over rows that are not `disconnected`, refuses a second connect that races past the check. A `disconnected` row does not hold the address, so another workspace can connect it; the old row and its emails stay with their workspace. A refused connect does not revoke the grant it just got: that grant is the same account's as the other workspace's, and a revoke would end both.
 
 The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt the stored mailbox credentials (they open one to check, an `active` mailbox's when there is one). This catches a worker whose key differs from the API's, which would otherwise move every mailbox to `needs_reauth`. To change the key, disconnect every mailbox first, then reconnect them after the change.
 
@@ -197,6 +197,7 @@ The OAuth callback always redirects to `HERALD_WEB_URL` with one query value:
 | `mailbox_error=invalid_state` | The state is bad, expired, for another provider, or names a missing workspace |
 | `mailbox_error=authorization_failed` | No code came back, or the provider refused the code |
 | `mailbox_error=no_refresh_token` | The provider gave no long-lived credential |
+| `mailbox_error=mailbox_in_use` | Another workspace has this address connected (in any status but `disconnected`). Nothing is saved. |
 | `mailbox_error=provider_error` | Any other failure before the mailbox is saved: for example the account has no Gmail, the owner deselected the scope, a rate limit, or a network error |
 
 ### Cron jobs
@@ -240,7 +241,7 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 
 ### Upgrading an existing dev database
 
-There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. Start from an empty database:
+There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. A `mailbox` table made before the one-business-per-mailbox rule also lacks the index `uq_mailbox_live_address` (startup does not add indexes to a table that exists); the connect check still applies, but a racing connect is not caught. Start from an empty database:
 
 - Lite mode: delete `apps/server/herald-dev.db`.
 - Postgres: run `docker compose down -v`, then `make infra`.
