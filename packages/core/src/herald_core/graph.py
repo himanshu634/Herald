@@ -12,6 +12,8 @@ most the tool timeout (2 s). Parallel nodes write different state keys.
 Each node lives in its own file in `nodes/`; this file only wires them together.
 """
 
+from typing import Any
+
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -49,8 +51,12 @@ async def triage(
     *,
     business_name: str,
     tools: Toolbox | None = None,
+    callbacks: list[Any] | None = None,
 ) -> TriageState:
+    # Callbacks go per run, not at compile time: one graph serves every tenant.
+    run_config = {"callbacks": callbacks} if callbacks else None
     return await graph.ainvoke(
         {"email": email, "config": config, "business_name": business_name},
+        config=run_config,
         context=TriageContext(tools=tools or Toolbox([])),
     )
