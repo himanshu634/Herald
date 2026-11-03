@@ -38,6 +38,17 @@
 		if (open && !dialog.open) dialog.showModal();
 		if (!open && dialog.open) dialog.close();
 	});
+
+	// The browser can close the dialog itself: Chrome skips "cancel" on a repeated Esc with no
+	// click in between, so onescape never gets the chance to keep it. The parent may still want
+	// it open (say, to ask about unsaved changes); then the effect above won't rerun, as `open`
+	// never changed, so reopen it here once the parent has had its say.
+	function closed() {
+		onclose();
+		queueMicrotask(() => {
+			if (open && dialog && !dialog.open) dialog.showModal();
+		});
+	}
 </script>
 
 <!-- 80% of the window, full screen on a phone. A press lands on the dialog element itself
@@ -45,7 +56,7 @@
 <dialog
 	bind:this={dialog}
 	aria-label={label}
-	{onclose}
+	onclose={closed}
 	oncancel={(event) => onescape?.() && event.preventDefault()}
 	onpointerdown={(event) => (pressedOn = event.target)}
 	onclick={(event) => event.target === dialog && pressedOn === dialog && onclose()}

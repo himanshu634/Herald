@@ -138,6 +138,25 @@
 		closePanel();
 	}
 
+	// What the owner asked for while the draft had unsaved changes: closing, or an action that
+	// ends the question. It waits for them to say Discard, so a stray click loses nothing.
+	let leaving = $state<(() => void) | null>(null);
+
+	function guard(then: () => void) {
+		if (changes) leaving = then;
+		else then();
+	}
+
+	function discard() {
+		const then = leaving;
+		leaving = null;
+		then?.();
+	}
+
+	function stay() {
+		leaving = null;
+	}
+
 	function undoAll() {
 		draft = draftOf(config);
 		tried = null;
@@ -351,10 +370,13 @@
 <Dialog
 	open
 	label="Herald is unsure about this email"
-	{onclose}
+	onclose={() => guard(onclose)}
 	onescape={() => {
-		if (!edit) return false;
-		closePanel();
+		// Esc steps back one layer at a time: the panel, then the discard question.
+		if (edit) closePanel();
+		else if (leaving) leaving = null;
+		else if (changes) leaving = onclose;
+		else return false;
 		return true;
 	}}
 	aside={edit ? panel : undefined}
@@ -541,7 +563,23 @@
 
 	{#snippet footer()}
 		<div class="flex flex-wrap items-center gap-3">
-			{#if !changes}
+			{#if leaving}
+				<div
+					role="alertdialog"
+					aria-label="Discard unsaved changes"
+					class="flex flex-wrap items-center gap-3 rounded-md bg-warning-bg px-3 py-2 text-sm font-semibold text-warning-fg"
+				>
+					<Icon name="alert" size={16} />
+					<span>
+						Discard your {changes}
+						{changes === 1 ? 'change' : 'changes'}? Nothing was saved.
+					</span>
+					<Button size="sm" onclick={discard}>Discard</Button>
+					<Button variant="quiet" size="sm" {@attach (node) => node.focus()} onclick={stay}
+						>Keep editing</Button
+					>
+				</div>
+			{:else if !changes}
 				<Button disabled={busy} onclick={() => onkeep(null)}>
 					<Icon name="redo" size={15} />Rerun Herald
 				</Button>
@@ -567,7 +605,9 @@
 		</div>
 		<div class="flex flex-wrap gap-2">
 			{#each actions as action (action)}
-				<Button disabled={busy} onclick={() => onact(action)}>{ACTIONS[action].label}</Button>
+				<Button disabled={busy} onclick={() => guard(() => onact(action))}
+					>{ACTIONS[action].label}</Button
+				>
 			{/each}
 		</div>
 	{/snippet}
