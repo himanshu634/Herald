@@ -6,6 +6,7 @@
 		FilterChip,
 		Icon,
 		Logo,
+		HoverCard,
 		Panel,
 		StatusTag,
 		Tabs,
@@ -225,6 +226,17 @@
 					>Saved in this browser. Labelled here, icons in the open rail, stacked in the closed one.</span
 				>
 			</div>
+		</Panel>
+
+		<Panel title="Hover card on a panel title">
+			{#snippet info()}
+				<p class="font-bold text-ink">What this panel is for, in one sentence.</p>
+				<p class="mt-1">Then what it needs: required or optional, and its limits.</p>
+			{/snippet}
+			<p class="text-sm text-muted">
+				Hover, focus or tap the title. Escape closes it. Inline, the same card reads
+				<HoverCard label="like this">Short help that would clutter the screen.</HoverCard>.
+			</p>
 		</Panel>
 
 		<Panel title="The safety floor callout">

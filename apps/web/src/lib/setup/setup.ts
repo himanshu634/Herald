@@ -1,6 +1,7 @@
 // Pure helpers for the setup editor. Limits match WorkspaceConfig on the server, so the editor
 // blocks what the server would reject with a 422.
 import type { Rule, RuleAction, Topic, WorkspaceConfig } from '#lib/api/client.js';
+import type { Urgency } from '#lib/ui/tones.js';
 
 export const SPAM_TOPIC = 'Spam or not for me';
 export const MAX_TOPICS = 12;
@@ -12,12 +13,6 @@ export const MAX_GUIDANCE = 8;
 export const MAX_GUIDANCE_LENGTH = 300;
 export const MAX_RULES = 20;
 export const MAX_DESCRIPTION = 2000;
-
-export const ACTIONS: { id: RuleAction; label: string }[] = [
-	{ id: 'alert', label: 'Alert me' },
-	{ id: 'set_urgency', label: 'Set urgency' },
-	{ id: 'close', label: 'Close quietly' }
-];
 
 /** Topics with one more, or the same list when it is empty, a repeat, spam or over the cap. */
 export function addTopic(topics: Topic[], text: string): Topic[] {
@@ -39,6 +34,26 @@ export function newRule(rules: Rule[]): Rule {
 export function withAction(rule: Rule, action: RuleAction): Rule {
 	if (action === 'set_urgency') return { ...rule, action, urgency: rule.urgency ?? 'high' };
 	return { ...rule, action, urgency: null };
+}
+
+/**
+ * A rule's "then" as one value for a single select: the action, or `set_urgency:<level>`.
+ * Folding the urgency in means a set-urgency rule can never be saved without one.
+ */
+export function actionChoice(rule: Rule): string {
+	return rule.action === 'set_urgency' ? `set_urgency:${rule.urgency ?? 'high'}` : rule.action;
+}
+
+/** The rule with the action (and urgency) picked in the select. */
+export function withChoice(rule: Rule, choice: string): Rule {
+	const [action, urgency] = choice.split(':') as [RuleAction, Urgency | undefined];
+	const next = withAction(rule, action);
+	return urgency ? { ...next, urgency } : next;
+}
+
+/** True when a list is close enough to its cap that the limit is worth showing. */
+export function nearCap(count: number, max: number): boolean {
+	return count >= max - 2;
 }
 
 /** Why the setup can't be saved yet, in the owner's words. Empty means it can. */
