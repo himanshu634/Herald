@@ -4,6 +4,17 @@ import type { EmailStatus } from '#lib/api/client.js';
 
 export type Tone = 'danger' | 'warning' | 'success' | 'neutral' | 'muted' | 'floor' | 'accent';
 
+/** Tailwind classes per tone. Full strings, so Tailwind finds them when scanning. */
+export const TONE_CLASSES: Record<Tone, string> = {
+	danger: 'bg-danger-bg text-danger-fg',
+	warning: 'bg-warning-bg text-warning-fg',
+	success: 'bg-success-bg text-success-fg',
+	neutral: 'bg-neutral-bg text-neutral-fg',
+	muted: 'bg-muted-bg text-muted-fg',
+	floor: 'bg-floor-bg text-floor-fg',
+	accent: 'bg-accent-tint text-ink'
+};
+
 export type Urgency = 'urgent' | 'high' | 'normal' | 'low';
 
 export const STATUS: Record<EmailStatus, { label: string; tone: Tone }> = {

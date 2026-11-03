@@ -8,6 +8,7 @@
 		size = 'md',
 		kbd,
 		type = 'button',
+		class: className,
 		children,
 		...rest
 	}: HTMLButtonAttributes & {
@@ -18,93 +19,41 @@
 		kbd?: string;
 		children: Snippet;
 	} = $props();
+
+	// The base sits under the face; the face is raised by --press-depth and drops on click.
+	const BASE = {
+		primary: 'border-accent-edge bg-accent-base',
+		secondary: 'border-press-edge bg-press-base',
+		quiet: 'border-transparent bg-transparent'
+	};
+	const FACE = {
+		primary: 'border-accent-edge bg-accent text-on-accent',
+		secondary: 'border-press-edge bg-press-face text-ink',
+		quiet: 'translate-y-0! border-transparent bg-transparent text-ink group-hover:bg-subtle'
+	};
+	const SIZE = { sm: 'px-3 py-1.25 text-sm', md: 'px-4 py-1.75 text-md' };
 </script>
 
-<button {type} class={['press', variant, size]} aria-keyshortcuts={kbd} {...rest}>
-	<span class="face">
+<button
+	{type}
+	class={[
+		'group inline-block cursor-pointer rounded-md border-[1.5px] p-0 focus-visible:outline-offset-3 disabled:cursor-not-allowed disabled:opacity-50',
+		BASE[variant],
+		className
+	]}
+	aria-keyshortcuts={kbd}
+	{...rest}
+>
+	<span
+		class={[
+			'-m-[1.5px] flex -translate-y-(--press-depth) items-center justify-center gap-2 rounded-md border-[1.5px] leading-tight font-bold whitespace-nowrap',
+			// Snappy in, eased out: nothing moves on hover, the face eases back after a click.
+			'transition-transform duration-160 ease-out group-active:-translate-y-(--press-depth-active) group-active:transition-none group-disabled:translate-y-0',
+			FACE[variant],
+			SIZE[size]
+		]}
+	>
 		{@render children()}
 		{#if kbd}<Kbd>{kbd}</Kbd>{/if}
 	</span>
 </button>
-
-<style>
-	.press {
-		display: inline-block;
-		padding: 0;
-		border: var(--border-press) solid var(--color-press-edge);
-		border-radius: var(--radius-md);
-		background: var(--color-press-base);
-		cursor: pointer;
-	}
-
-	.face {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: var(--space-2);
-		/* The border sits outside the base; pull the face up so the edges line up. */
-		margin: calc(var(--border-press) * -1);
-		padding: 0.4375rem var(--space-4);
-		border: var(--border-press) solid var(--color-press-edge);
-		border-radius: var(--radius-md);
-		background: var(--color-press-face);
-		color: var(--color-text);
-		font-size: var(--text-md);
-		font-weight: var(--weight-bold);
-		line-height: var(--leading-tight);
-		white-space: nowrap;
-		transform: translateY(calc(var(--press-depth) * -1));
-		/* Snappy in, eased out: no transition on hover, only on release. */
-		transition: transform var(--duration-base) var(--ease-out);
-	}
-
-	.press:active .face {
-		transform: translateY(calc(var(--press-depth-active) * -1));
-		transition: none;
-	}
-
-	.primary {
-		border-color: var(--color-accent-edge);
-		background: var(--color-accent-base);
-	}
-
-	.primary .face {
-		border-color: var(--color-accent-edge);
-		background: var(--color-accent);
-		color: var(--color-on-accent);
-	}
-
-	.quiet {
-		border-color: transparent;
-		background: transparent;
-	}
-
-	.quiet .face {
-		border-color: transparent;
-		background: transparent;
-		transform: none;
-	}
-
-	.quiet:hover .face {
-		background: var(--color-surface-muted);
-	}
-
-	.sm .face {
-		padding: 0.3125rem var(--space-3);
-		font-size: var(--text-sm);
-	}
-
-	.press:focus-visible {
-		outline: 2px solid var(--color-focus);
-		outline-offset: 3px;
-	}
-
-	.press:disabled {
-		cursor: not-allowed;
-		opacity: 0.5;
-	}
-
-	.press:disabled .face {
-		transform: none;
-	}
-</style>

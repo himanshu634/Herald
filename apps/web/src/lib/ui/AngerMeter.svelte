@@ -7,33 +7,12 @@
 	const filled = $derived(Math.min(5, Math.max(1, Math.round(level))));
 </script>
 
-<span class="anger" role="img" aria-label={label}>
+<span class="inline-flex items-center gap-0.5" role="img" aria-label={label}>
 	{#each [1, 2, 3, 4, 5] as step (step)}
-		<span class={['bar', step <= filled && 'on']}></span>
+		<span class={['h-3 w-1.25 rounded-[2px]', step <= filled ? 'bg-anger-on' : 'bg-anger-off']}
+		></span>
 	{/each}
-	{#if showLabel}<span class="text" aria-hidden="true">{label.replace(' of 5,', ',')}</span>{/if}
+	{#if showLabel}
+		<span class="ml-2 text-sm" aria-hidden="true">{label.replace(' of 5,', ',')}</span>
+	{/if}
 </span>
-
-<style>
-	.anger {
-		display: inline-flex;
-		align-items: center;
-		gap: 2px;
-	}
-
-	.bar {
-		width: 5px;
-		height: 12px;
-		border-radius: 2px;
-		background: var(--anger-off);
-	}
-
-	.bar.on {
-		background: var(--anger-on);
-	}
-
-	.text {
-		margin-left: var(--space-2);
-		font-size: var(--text-sm);
-	}
-</style>
