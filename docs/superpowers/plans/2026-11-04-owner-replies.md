@@ -93,7 +93,7 @@
 
 **Interfaces:**
 - Produces: `client.READ_SCOPE`, `client.SEND_SCOPE`, `client.SCOPES = (READ_SCOPE, SEND_SCOPE)`. `SCOPE` goes away.
-- Produces: `TokenSet(access_token, refresh_token, scope: str)`, where `scope` is Google's space-separated granted list (`""` when missing).
+- Produces: `TokenSet(access_token, refresh_token, scope: str = "")`, where `scope` is Google's space-separated granted list. The default keeps two-argument callers working.
 - Produces: `ConnectedAccount.can_send: bool = False`, `Mailbox.can_send: bool = False`, `MailboxOut.can_send: bool`.
 
 - [ ] **Step 1: Write the failing tests:**
@@ -183,7 +183,7 @@
 - Produces: `status.stage_move(session, workspace_id: str, email: Email, to: EmailStatus, only_from: EmailStatus | None = None) -> Event`. It raises `WrongStatus(previous)` and holds today's `_move` body (correction rows included) except the session and commit. `_move` calls it and maps `WrongStatus` to 409.
 - Produces: `events.REPLY_STATUS = "reply.status"`, with data `{"email_id", "reply_id", "status"}`.
 - Produces in `replies.py`:
-  - `STALE_SENDING = timedelta(minutes=2)`
+  - `STALE_SENDING = timedelta(minutes=2)`. It must be longer than the slowest send. The send is two requests (token refresh, `messages.send`), so `send_reply` wraps the connector call in `asyncio.timeout(60)`. A timeout there is `UNKNOWN`, like any other unexpected error. The comment on the constant gives these numbers.
   - `reply_subject(subject: str) -> str`: adds `"Re: "` unless the subject already starts with `re:` in any case. An empty subject gives `"Re: "`.
   - `class ReplyBlocked(Exception)` with `reason: Literal["no_mailbox", "mailbox_inactive", "send_not_allowed", "already_sending"]`
   - `async def send_reply(services, workspace_id: str, email_id: str, data: ReplyIn) -> Reply`
@@ -194,12 +194,16 @@
 - Produces in routes: `POST /api/workspaces/{workspace_id}/emails/{email_id}/replies` returns 200 `ReplyOut`. The outcome is in `status`, because the reply row is the resource. `ReplyBlocked` gives 409 with `detail` set to the reason. An unknown email or one in another workspace gives 404. `GET` on the same path returns `list[ReplyOut]`.
 
 **How `send_reply` runs** (the comment in the code says why each step is separate):
-1. `_begin`, sync, one transaction. Load the email filtered by workspace (404). Load its mailbox and decide:
+1. `_begin`, sync, one transaction. Load the email filtered by workspace (404). **First**, look up this `client_key` in the workspace:
+   - The key exists for this email → return that row whatever its status, and the caller returns without sending. This runs before the mailbox checks, so a resend after a definite failure that cleared `can_send` still gets its own `not_sent` row and not a 409.
+   - The key exists for another email → 409 `already_sending`. The key is the client's draft id and must never return another email's reply.
+
+   Then load the mailbox and decide:
    - `email.mailbox_id is None` → `no_mailbox`
    - mailbox not `ACTIVE` → `mailbox_inactive`
    - `not can_send` → `send_not_allowed`
-   
-   A row with this `client_key` already exists → return it, and the caller returns without sending. Otherwise turn any `SENDING` row for this email older than `STALE_SENDING` into `UNKNOWN`: its process died mid-send, and the customer may have it. Then insert a `SENDING` row and commit. `IntegrityError` on `uq_reply_one_sending` → `already_sending`. The row's fields:
+
+   Then turn any `SENDING` row for this email older than `STALE_SENDING` into `UNKNOWN`: its process died mid-send, and the customer may have it. Then insert a `SENDING` row and commit. `IntegrityError` on `uq_reply_one_sending` → `already_sending`. The row's fields:
    - `to_address`: `email.reply_to or email.sender`
    - `from_address`: the mailbox address
    - `subject`: `reply_subject(email.subject)`
@@ -223,13 +227,15 @@
   - `test_send_and_mark_done`: the status is `done` and an `email.status` event is stored.
   - `test_not_sent_does_not_mark_done`: with `raise_on_send = SendRejected()` and `mark_done`, the status is unchanged and the response is `not_sent` with `error == "rejected"`.
   - `test_same_client_key_sends_once`: two POSTs with one key give one `fake.sent` entry and the same reply id.
+  - `test_same_key_after_send_not_allowed_returns_the_row`: the first POST raises `SendNotAllowed` (now `can_send` is false). A second POST with the same key returns that `not_sent` row, not a 409.
+  - `test_key_from_another_email_is_409`
   - `test_second_reply_while_sending_is_409`: insert a fresh `SENDING` row directly → 409 `already_sending`.
   - `test_stale_sending_row_does_not_block`: a `SENDING` row with `created_at` 3 minutes ago becomes `unknown`, and the new reply sends.
   - `test_timeout_is_unknown_and_not_retried`: with `raise_on_send = httpx.ReadTimeout("t")`, the response is `unknown` and `fake.calls.count("send_reply") == 1`.
   - `test_rate_limit_is_not_sent`
   - `test_send_not_allowed_turns_off_can_send`
   - `test_auth_revoked_marks_needs_reauth`
-  - `test_email_without_mailbox_is_409`: a test-box email (`POST /emails`) → `no_mailbox`
+  - `test_email_without_mailbox_is_409`: insert an `Email` row with `mailbox_id=None` directly (the test-email route is gone on `main`) → `no_mailbox`
   - `test_paused_mailbox_is_409` and `test_mailbox_without_send_is_409`
   - `test_replies_are_isolated`: POST and GET through another workspace's id → 404.
   - `test_list_replies_oldest_first`
@@ -276,13 +282,16 @@ Last backend task, so it can be cut on its own.
 - Consumes: `ReplyIn`, `ReplyOut`, `EmailOut.mailbox_id`, `EmailOut.reply_to`, `MailboxOut.can_send` (generated types), and the `reply.status` event.
 - Produces in `client.ts`: `type Reply = components['schemas']['ReplyOut']`, `api.reply(workspaceId, emailId, { body, client_key, mark_done }): Promise<Reply>` and `api.replies(workspaceId, emailId): Promise<Reply[]>`.
 - Produces in `reply.ts`:
-  - `replyState(email: Email, mailboxes: Mailbox[]): 'ok' | 'no_mailbox' | 'inactive' | 'reconnect'`
+  - `replyState(email: Email, mailboxes: Mailbox[]): 'ok' | 'no_mailbox' | 'paused' | 'disconnected' | 'reconnect'`. `GET /mailboxes` lists disconnected rows too. A `mailbox_id` with no matching row is `no_mailbox`, and `needs_reauth` is `reconnect`.
   - `replyNotice(reply: Reply): string`
   - `REPLY_COPY`, the exact strings below
 
 **Copy (exact):**
 - `no_mailbox`: "Replies need a connected Gmail. This email came in without one."
-- `inactive`: "This mailbox is paused or disconnected. Resume it to reply."
+- `paused`: "This mailbox is paused. Resume it to reply."
+- `disconnected`: "This mailbox is disconnected. Connect Gmail again to reply."
+- To line, always shown above the text area: "To: {to}". When `reply_to` differs from `sender`: "To: {reply_to} (the email asked for replies here; it came from {sender})". `Reply-To` is set by whoever sent the mail, so the owner sees where the reply is going before sending.
+- `sending`: "Sending…" The panel waits for the `reply.status` event, then fetches the replies again.
 - `reconnect`: "Herald can read this mailbox but can't send from it yet. Reconnect Gmail and allow sending." The panel offers a Reconnect button that starts the same connect flow as `MailboxMenu`.
 - `sent`: "Sent to {to_address}, {formatTime(sent_at)}."
 - `not_sent`: "Not sent. Nothing reached the customer." followed by one line per error:
@@ -300,7 +309,7 @@ Last backend task, so it can be cut on its own.
 - `MailboxMenu` shows **Allow replies** for an `active` mailbox with `can_send === false`. It calls `onreconnect`.
 
 - [ ] **Step 1: Write the failing tests** in `reply.spec.ts`:
-  - `replyState`: no `mailbox_id` gives `no_mailbox`. A paused mailbox gives `inactive`. An active mailbox without send gives `reconnect`. An active mailbox with send gives `ok`.
+  - `replyState`: no `mailbox_id`, or one not in the list, gives `no_mailbox`. Paused gives `paused`, disconnected gives `disconnected`, and `needs_reauth` or active without send gives `reconnect`. Active with send gives `ok`.
   - `replyNotice`: one case per status and error, equal to `REPLY_COPY`.
 - [ ] **Step 2: Run** `pnpm -C apps/web exec vitest run src/lib/inbox/reply.spec.ts`. Expected: FAIL.
 - [ ] **Step 3: Implement** `reply.ts`, the client calls and the event type, then `ReplyBox.svelte` and the panel and menu wiring with the `svelte-code-writer` skill. Use `Button` and the design tokens. The text area follows `SetupEditor.svelte`'s field style.
