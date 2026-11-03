@@ -30,6 +30,10 @@ x-server: &server
     HERALD_QUEUE: arq
     HERALD_MODEL_PROVIDER: ${HERALD_MODEL_PROVIDER:-anthropic}
     HERALD_WEB_URL: ${HERALD_WEB_URL:-http://localhost:8080}
+    # The worker calls the API's internal routes on the compose network. nginx proxies only
+    # /api, so /internal is never reachable from outside.
+    HERALD_INTERNAL_API_URL: http://api:8000
+    HERALD_INTERNAL_TOKEN: ${HERALD_INTERNAL_TOKEN:?set HERALD_INTERNAL_TOKEN in .env}
 
 services:
   postgres:

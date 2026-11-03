@@ -37,12 +37,12 @@ def _email(session, ws, *, at, sender=SENDER, thread_id=None, notes=None, body="
 
 
 def _before(engine, email_id) -> datetime:
-    # Read back from the DB so the value is naive, like pipeline._load gives it.
+    # Read back from the DB so the value is naive, like the API's scope uses it.
     with Session(engine) as session:
         return session.get(Email, email_id).received_at
 
 
-async def test_sender_history_sees_only_earlier_emails(app):
+async def test_sender_history_sees_only_earlier_emails(app, agent_api):
     engine = app.state.services.engine
     with Session(engine) as s:
         ws = _workspace(s)
@@ -51,7 +51,7 @@ async def test_sender_history_sees_only_earlier_emails(app):
         later = _email(s, ws, at=NOW + timedelta(days=1))
         cur = _email(s, ws, at=NOW)
         ids = (a.id, b.id, later.id, cur.id)
-    box = build_toolbox(engine, ws, ids[3], _before(engine, ids[3]))
+    box = build_toolbox(agent_api, ids[3])
     out = await box.call(SENDER_HISTORY, SenderHistoryIn(sender=SENDER))
     assert out.count_30d == 2 and out.count_7d == 2
     assert {e.id for e in out.recent} == {ids[0], ids[1]}
@@ -60,7 +60,7 @@ async def test_sender_history_sees_only_earlier_emails(app):
     assert out.as_of == _before(engine, ids[3])
 
 
-async def test_same_timestamp_excludes_itself(app):
+async def test_same_timestamp_excludes_itself(app, agent_api):
     engine = app.state.services.engine
     with Session(engine) as s:
         ws = _workspace(s)
@@ -68,24 +68,24 @@ async def test_same_timestamp_excludes_itself(app):
         y = _email(s, ws, at=NOW)
         x_id, y_id = x.id, y.id
     for me, other in ((x_id, y_id), (y_id, x_id)):
-        box = build_toolbox(engine, ws, me, _before(engine, me))
+        box = build_toolbox(agent_api, me)
         out = await box.call(SENDER_HISTORY, SenderHistoryIn(sender=SENDER))
         assert [e.id for e in out.recent] == [other]
 
 
-async def test_burst_counts_all_lists_five(app):
+async def test_burst_counts_all_lists_five(app, agent_api):
     engine = app.state.services.engine
     with Session(engine) as s:
         ws = _workspace(s)
         for i in range(8):
             _email(s, ws, at=NOW - timedelta(minutes=10 + i))
         cur = _email(s, ws, at=NOW).id
-    box = build_toolbox(engine, ws, cur, _before(engine, cur))
+    box = build_toolbox(agent_api, cur)
     out = await box.call(SENDER_HISTORY, SenderHistoryIn(sender="RIYA@customer.in"))
     assert out.count_7d == 8 and len(out.recent) == 5
 
 
-async def test_untriaged_email_has_no_topic(app):
+async def test_untriaged_email_has_no_topic(app, agent_api):
     engine = app.state.services.engine
     with Session(engine) as s:
         ws = _workspace(s)
@@ -93,7 +93,7 @@ async def test_untriaged_email_has_no_topic(app):
         _email(s, ws, at=NOW - timedelta(days=2), notes={"topic": "refund", "urgency": "high"})
         _email(s, ws, at=NOW - timedelta(days=3), notes={"topic": "refund", "summary": "x"})
         cur = _email(s, ws, at=NOW).id
-    box = build_toolbox(engine, ws, cur, _before(engine, cur))
+    box = build_toolbox(agent_api, cur)
     out = await box.call(SENDER_HISTORY, SenderHistoryIn(sender=SENDER))
     first = out.recent[0]
     assert first.topic is None and first.urgency is None and first.summary is None
@@ -101,7 +101,7 @@ async def test_untriaged_email_has_no_topic(app):
     assert out.top_topics == ["refund"]
 
 
-async def test_thread_is_oldest_first_and_capped(app):
+async def test_thread_is_oldest_first_and_capped(app, agent_api):
     engine = app.state.services.engine
     with Session(engine) as s:
         ws = _workspace(s)
@@ -110,13 +110,13 @@ async def test_thread_is_oldest_first_and_capped(app):
             for i in range(7)
         ]
         cur = _email(s, ws, at=NOW, thread_id="t1").id
-    box = build_toolbox(engine, ws, cur, _before(engine, cur))
+    box = build_toolbox(agent_api, cur)
     out = await box.call(THREAD, ThreadIn(thread_id="t1"))
     assert [m.id for m in out.messages] == ids[2:]
     assert all(len(m.body) <= 1500 for m in out.messages)
 
 
-async def test_corrections_newest_first(app):
+async def test_corrections_newest_first(app, agent_api):
     engine = app.state.services.engine
     with Session(engine) as s:
         ws = _workspace(s)
@@ -132,13 +132,13 @@ async def test_corrections_newest_first(app):
         s.add_all([old, new])
         s.commit()
         old_id, new_id, cur = old.id, new.id, _email(s, ws, at=NOW).id
-    box = build_toolbox(engine, ws, cur, _before(engine, cur))
+    box = build_toolbox(agent_api, cur)
     out = await box.call(RECENT_CORRECTIONS, CorrectionsIn())
     assert [c.id for c in out.items] == [new_id, old_id]
     assert out.items[0].summary == "sum"
 
 
-async def test_tools_are_isolated(app):
+async def test_tools_are_isolated(app, agent_api):
     engine = app.state.services.engine
     with Session(engine) as s:
         ws_a, ws_b = _workspace(s), _workspace(s)
@@ -166,7 +166,7 @@ async def test_tools_are_isolated(app):
         s.add_all([cross_1, cross_2])
         s.commit()
         b_ids |= {cross_1.id, cross_2.id}
-    box = build_toolbox(engine, ws_a, cur, _before(engine, cur))
+    box = build_toolbox(agent_api, cur)
     sender = await box.call(SENDER_HISTORY, SenderHistoryIn(sender=SENDER))
     thread = await box.call(THREAD, ThreadIn(thread_id="t1"))
     corrections = await box.call(RECENT_CORRECTIONS, CorrectionsIn())
@@ -178,7 +178,7 @@ async def test_tools_are_isolated(app):
     assert not (a_ids | {a_email}) & b_ids
 
 
-async def test_corrections_skip_the_current_and_later_emails(app):
+async def test_corrections_skip_the_current_and_later_emails(app, agent_api):
     engine = app.state.services.engine
     with Session(engine) as s:
         ws = _workspace(s)
@@ -192,6 +192,6 @@ async def test_corrections_skip_the_current_and_later_emails(app):
         s.add_all(rows)
         s.commit()
         keep, cur_id = rows[0].id, cur.id
-    box = build_toolbox(engine, ws, cur_id, _before(engine, cur_id))
+    box = build_toolbox(agent_api, cur_id)
     out = await box.call(RECENT_CORRECTIONS, CorrectionsIn())
     assert [c.id for c in out.items] == [keep]
