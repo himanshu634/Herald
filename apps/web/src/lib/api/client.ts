@@ -51,6 +51,9 @@ export const api = {
 		emailId: string,
 		action: 'on-it' | 'not-urgent' | 'to-inbox' | 'done'
 	) => request<Email>(`/workspaces/${workspaceId}/emails/${emailId}/${action}`, { method: 'POST' }),
+	/** Triage the email again with the current facts and rules. The result arrives as email.noted. */
+	reread: (workspaceId: string, emailId: string) =>
+		request<Email>(`/workspaces/${workspaceId}/emails/${emailId}/reread`, { method: 'POST' }),
 	/** Mail providers this server can connect, like ['gmail']. Empty when none is set up. */
 	listProviders: () => request<string[]>('/providers'),
 	listMailboxes: (workspaceId: string) =>

@@ -8,6 +8,7 @@ Herald is one monorepo with a SvelteKit front end, a FastAPI back end with a sep
 | --- | --- | --- |
 | `packages/core` | `herald_core`: shared types, safety-floor word check, decide step, LangGraph graph, AI model adapters, plug-in interfaces. No database and no Redis. | uv, pytest |
 | `apps/server` | `herald_server`: the FastAPI API (`herald_server.api.main:app`) and the arq worker (`herald_server.worker.main.WorkerSettings`). They share the tables, event bus and pipeline. | uv, FastAPI CLI, arq |
+| `packages/evals` | `herald_evals`: test emails with known answers, run through the real graph, and the score report. See [evals.md](evals.md). | uv, pytest |
 | `apps/web` | SvelteKit (Svelte 5, runes) built as a static single-page app. API types are generated from FastAPI's OpenAPI schema. | pnpm, Vite, svelte-check, Vitest |
 | `docs` | Scope, decisions and this file | — |
 
@@ -90,7 +91,7 @@ Building rules:
 - The "(important contact)" marker on the email comes from code, with `WorkspaceConfig.is_important`. The contact list never goes into the prompt.
 - The brand name comes from `Workspace.name`. The pipeline passes it with the config.
 - Facts say what is true. Guidance says how to judge. Setup drafts facts only from the owner's description.
-- The setup does not cover every case. For an email nothing covers, Claude judges it as the owner would from the facts, guidance and rules, and that goes into the notes (topic, urgency, summary). A rule verdict stays on what the rule's condition means: an email that is only like a rule's case is a no. When Claude cannot tell how the owner would want it, it sets `sure` to false and the email goes to "needs a look".
+- The setup does not cover every case. For an email nothing covers, Claude judges it as the owner would from the facts, guidance and rules, and that goes into the notes (topic, urgency, summary). A rule verdict stays on what the rule's condition means: an email that is only like a rule's case is a no. When Claude cannot tell how the owner would want it, it sets `sure` to false and the email goes to "needs a look". It also writes `question` (the one thing the owner could answer to settle it) and, when one plain fact would settle it, `fact_draft`. A sure note never carries either. The owner answers in the inbox by saving a fact, which re-reads the email (see Status).
 
 To change the general instructions, edit `packages/core/src/herald_core/prompts/triage.md`. It has no placeholders. It is read once at import, so a missing file stops the API and worker from starting. Tests check that it names every urgency, every risk flag and the spam topic.
 
@@ -105,8 +106,11 @@ The AI writes notes and never sets status. Status changes in two places only: th
 | Move to Inbox | `closed` only | `inbox` | A correction is saved |
 | Done | any | `done` | — |
 | Send and mark done | any but `done` | `done` | Only when the reply is `sent` |
+| Re-read | `alerted`, `needs_a_look`, `inbox` or `closed` | whatever decide says | The email goes through triage again with the current setup |
 
 Both the action routes and "Send and mark done" change status through `status.stage_move`.
+
+Re-read (`POST .../emails/{id}/reread`, 202) is how an answered question settles: the owner saves a fact, then asks Herald to read the email again. It is refused (409) once the owner has taken the email (in progress or done) or moved it by hand (a route correction exists), so decide never moves an email the owner has already placed.
 
 ## Live events (SSE)
 
@@ -229,7 +233,7 @@ The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt th
 | `POST .../pause`, `POST .../resume`, `DELETE .../{mailbox_id}` | Owner actions. 409 when the status does not allow it. |
 | `POST /api/webhooks/{provider}` | Provider push. Verified by the connector. |
 
-The OAuth callback always redirects to `HERALD_WEB_URL` with one outcome below. Once the state is checked, it also adds `workspace=<id>`, so the web opens the business the connect started from. `provider_unavailable` and `invalid_state` come before that check and name no workspace. A refusal at the provider (`access_denied`) is reported only with a valid state; with a bad one it is `invalid_state`.
+The OAuth callback always redirects to `HERALD_WEB_URL` with one outcome below. Once the state is checked, it also adds `workspace=<id>`, so the web opens the business the connect started from. The inbox keeps the same `workspace` param, with `view`, `q`, `urgent` and `email`, on its URL (`apps/web/src/lib/inbox/url.ts`); it drops `mailbox_connected` or `mailbox_error` once it has shown the notice. `provider_unavailable` and `invalid_state` come before that check and name no workspace. A refusal at the provider (`access_denied`) is reported only with a valid state; with a bad one it is `invalid_state`.
 
 | Query | Meaning |
 | --- | --- |
@@ -273,6 +277,7 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 | `HERALD_BUS` | `redis` | `memory` |
 | `HERALD_QUEUE` | `arq` | `inline` |
 | `HERALD_MODEL_PROVIDER` | `fake` | `fake` |
+| `HERALD_LOG_LEVEL` | `INFO` (one line per email arrival and pipeline step, in the API or worker terminal) | same |
 | `HERALD_TOKEN_KEY` | unset (Gmail off: it needs this, the Google client id and secret, and the topic) | unset |
 | `HERALD_PUBLIC_API_URL` | `http://localhost:8000` | same |
 | `HERALD_WEB_URL` | `http://localhost:5173` | same |
@@ -293,7 +298,7 @@ There are no migrations yet. Startup creates missing tables, but it does not add
 - Alembic migrations (tables are created on startup for now; see "Upgrading an existing dev database")
 - Auth and per-workspace limits
 - A settings page for editing a workspace after setup (`PUT /config` is ready for it)
-- The rule test, the score report and the test-email set
+- The rule test (the score report and the test-email set are in `packages/evals`)
 - An Outlook connector, and IMAP
 - Filter-based watch labels (Gmail watches the whole inbox)
 - Binding the OAuth `state` to the browser that started the connect. It needs auth or a state cookie.

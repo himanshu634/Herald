@@ -1,5 +1,6 @@
 """Emails in one workspace: the test-email box, the inbox list and the owner's actions."""
 
+import logging
 from typing import Annotated
 
 from asyncer import asyncify
@@ -10,13 +11,15 @@ from herald_server.api.deps import QueueDep, ServicesDep, SessionDep, WorkspaceD
 from herald_server.api.schemas import EmailIn, EmailOut
 from herald_server.bus import BusEvent
 from herald_server.events import EMAIL_RECEIVED, add_event, to_bus
-from herald_server.models import Email, EmailStatus
+from herald_server.models import Correction, Email, EmailStatus
 from herald_server.services import Services
 from herald_server.status import WrongStatus, stage_move
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/emails", tags=["emails"])
 
 EmailId = Annotated[str, Path()]
+
+log = logging.getLogger(__name__)
 
 
 def _out(email: Email) -> EmailOut:
@@ -106,6 +109,7 @@ async def receive_test_email(
     if not workspace.setup_done:
         raise HTTPException(status_code=409, detail="Finish setup before sending email")
     email, event = await asyncify(_store_received)(services, workspace.id, data)
+    log.info("email %s arrived as a test email in workspace %s", email.id, workspace.id)
     await services.bus.publish(event)
     await queue.enqueue_email(email.id)
     return email
@@ -114,6 +118,45 @@ async def receive_test_email(
 @router.get("/{email_id}")
 def get_email(workspace: WorkspaceDep, session: SessionDep, email_id: EmailId) -> EmailOut:
     return _out(_get_email(session, workspace.id, email_id))
+
+
+# Statuses the decide step set and the owner has not taken over. Re-reading runs decide again,
+# so an email the owner is working on (in progress) or finished (done) must not be moved by it.
+_REREADABLE = {
+    EmailStatus.ALERTED,
+    EmailStatus.NEEDS_A_LOOK,
+    EmailStatus.INBOX,
+    EmailStatus.CLOSED,
+}
+
+
+@router.post("/{email_id}/reread", status_code=status.HTTP_202_ACCEPTED)
+async def reread(
+    workspace: WorkspaceDep,
+    session: SessionDep,
+    queue: QueueDep,
+    email_id: EmailId,
+) -> EmailOut:
+    """Run the email through triage again, with the business's current facts and rules."""
+    email = _get_email(session, workspace.id, email_id)
+    if email.status not in _REREADABLE:
+        raise HTTPException(
+            status_code=409, detail=f"Email is {email.status}; Herald re-reads only new mail"
+        )
+    # The owner already moved this email by hand (Not urgent, Move to Inbox). Decide would
+    # run again and could put it straight back where they moved it from.
+    corrected = session.exec(
+        select(Correction.id).where(
+            Correction.workspace_id == workspace.id,
+            Correction.email_id == email.id,
+            Correction.field == "route",
+        )
+    ).first()
+    if corrected is not None:
+        raise HTTPException(status_code=409, detail="You moved this email yourself")
+    log.info("email %s queued for a re-read", email.id)
+    await queue.enqueue_email(email.id)
+    return _out(email)
 
 
 @router.post("/{email_id}/on-it")

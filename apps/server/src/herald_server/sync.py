@@ -134,6 +134,15 @@ async def sync_mailbox(services: Services, mailbox_id: str) -> SyncOutcome:
         return SyncOutcome([], has_more=False)
 
     ids, events = await asyncify(_store)(services, mailbox_id, result)
+    log.info(
+        "mailbox %s synced: %d fetched, %d new%s",
+        mailbox_id,
+        len(result.messages),
+        len(ids),
+        ", more to fetch" if result.has_more else "",
+    )
+    for email_id in ids:
+        log.info("email %s arrived in mailbox %s", email_id, mailbox_id)
     for event in events:
         await services.bus.publish(event)
     return SyncOutcome(ids, has_more=result.has_more)
