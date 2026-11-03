@@ -1,0 +1,73 @@
+/* Page-wide basics on top of tokens.css. Keep this file small: components style themselves. */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	font-family: var(--font-sans);
+	font-size: 100%;
+	line-height: var(--leading-normal);
+	color: var(--color-text);
+	background: var(--color-bg);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+
+body {
+	margin: 0;
+	min-height: 100vh;
+	font-size: var(--text-md);
+	background: var(--color-bg);
+	font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+p {
+	margin: 0;
+}
+
+h1,
+h2,
+h3 {
+	line-height: var(--leading-tight);
+	letter-spacing: var(--tracking-title);
+}
+
+a {
+	color: inherit;
+	font-weight: var(--weight-semibold);
+	text-underline-offset: 0.2em;
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+	color: inherit;
+}
+
+:focus-visible {
+	outline: 2px solid var(--color-focus);
+	outline-offset: 2px;
+}
+
+::selection {
+	background: var(--color-accent);
+	color: var(--color-on-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		transition-duration: 0ms !important;
+		animation-duration: 0ms !important;
+		animation-iteration-count: 1 !important;
+	}
+}
