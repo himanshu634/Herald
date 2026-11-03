@@ -60,7 +60,7 @@ flowchart LR
 
 ## History
 
-Before the model reads an email, `gather_context` runs three tools in code: `sender_history` (recent emails from the same sender), `thread` (earlier messages in the thread) and `recent_corrections` (emails the owner moved from alert to inbox). This is a pre-fetch, not a model loop. The tools read Herald's own database, never the mail provider.
+Before the model reads an email, `gather_context` runs three tools in code: `sender_history` (recent emails from the same sender), `thread` (earlier messages in the thread) and `recent_corrections` (emails the owner moved to the inbox from an alert or from closed). This is a pre-fetch, not a model loop. The tools read Herald's own database, never the mail provider.
 
 - The workspace is bound when the toolbox is built. No tool input has a workspace or email id.
 - A tool sees only emails received before the current one.
@@ -102,6 +102,7 @@ The AI writes notes and never sets status. Status changes in two places only: th
 | --- | --- | --- | --- |
 | On it | any | `in_progress` | — |
 | Not urgent | `alerted` only | `inbox` | A correction is saved |
+| Move to Inbox | `closed` only | `inbox` | A correction is saved |
 | Done | any | `done` | — |
 
 ## Live events (SSE)

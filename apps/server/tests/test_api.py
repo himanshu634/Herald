@@ -91,6 +91,47 @@ async def test_correction_shows_up_for_the_next_email(app, client):
     assert len(nxt["context"]["correction_ids"]) == 1
 
 
+async def test_owner_moves_a_closed_email_back_to_the_inbox(app, client):
+    from sqlmodel import Session, select
+
+    from herald_server.models import Correction
+
+    ws = await demo_workspace(client)
+    other = await demo_workspace(client)
+    closed = await send(app, client, ws, "Big sale", "50% off this week. Unsubscribe here.")
+    assert closed["status"] == "closed"
+    url = f"/api/workspaces/{ws}/emails/{closed['id']}/to-inbox"
+
+    assert (
+        await client.post(f"/api/workspaces/{other}/emails/{closed['id']}/to-inbox")
+    ).status_code == 404
+    moved = await client.post(url)
+    assert moved.status_code == 200
+    assert moved.json()["status"] == "inbox"
+    assert (await client.post(url)).status_code == 409
+
+    with Session(app.state.services.engine) as session:
+        rows = session.exec(select(Correction)).all()
+    assert [(r.workspace_id, r.email_id, r.field, r.from_value, r.to_value) for r in rows] == [
+        (ws, closed["id"], "route", "closed", "inbox")
+    ]
+
+    nxt = await send(app, client, ws, "Question", "Does the cabin bag fit?")
+    assert nxt["context"]["correction_ids"] == [rows[0].id]
+
+
+async def test_to_inbox_is_409_unless_closed(app, client):
+    ws = await demo_workspace(client)
+    inbox = await send(app, client, ws, "Product questions", "Does the cabin bag fit Indigo?")
+    alerted = await send(app, client, ws, "Hello", "Someone used my card.")
+    assert (inbox["status"], alerted["status"]) == ("inbox", "alerted")
+    done = await send(app, client, ws, "Thanks", "Got it, thanks.")
+    assert (await client.post(f"/api/workspaces/{ws}/emails/{done['id']}/done")).status_code == 200
+    for email in (inbox, alerted, done):
+        response = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/to-inbox")
+        assert response.status_code == 409
+
+
 async def test_failed_tool_is_recorded(app, client, monkeypatch):
     from herald_server.tools.history import SenderHistoryTool
 

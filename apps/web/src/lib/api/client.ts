@@ -46,8 +46,11 @@ export const api = {
 			body: JSON.stringify({ name, config })
 		}),
 	listEmails: (workspaceId: string) => request<Email[]>(`/workspaces/${workspaceId}/emails`),
-	act: (workspaceId: string, emailId: string, action: 'on-it' | 'not-urgent' | 'done') =>
-		request<Email>(`/workspaces/${workspaceId}/emails/${emailId}/${action}`, { method: 'POST' }),
+	act: (
+		workspaceId: string,
+		emailId: string,
+		action: 'on-it' | 'not-urgent' | 'to-inbox' | 'done'
+	) => request<Email>(`/workspaces/${workspaceId}/emails/${emailId}/${action}`, { method: 'POST' }),
 	/** Mail providers this server can connect, like ['gmail']. Empty when none is set up. */
 	listProviders: () => request<string[]>('/providers'),
 	listMailboxes: (workspaceId: string) =>
