@@ -52,6 +52,7 @@ flowchart LR
     D --> E((end))
 ```
 
+- Each node is one file in `herald_core/nodes/`. `graph.py` only wires them, and `state.py` holds the state they share.
 - The graph is compiled once and shared by all tenants. Each run carries its workspace's config in the state.
 - `word_check` and `write_notes` run in parallel and write different state keys.
 - `write_notes` waits on `gather_context`. `word_check` does not.
@@ -63,6 +64,7 @@ flowchart LR
 
 Before the model reads an email, `gather_context` runs three tools in code: `sender_history` (recent emails from the same sender), `thread` (earlier messages in the thread) and `recent_corrections` (emails the owner moved to the inbox from an alert or from closed). This is a pre-fetch, not a model loop. The tools read Herald's own database, never the mail provider.
 
+- Each tool is one file in `herald_server/tools/`. They share the workspace scope in `tools/bound.py`.
 - The workspace is bound when the toolbox is built. No tool input has a workspace or email id.
 - A tool sees only emails received before the current one.
 - A tool that fails or takes over 2 s gives nothing, and its name goes into `email.context.failed`. Triage goes on.
