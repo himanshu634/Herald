@@ -347,6 +347,12 @@ def test_triage_md_mentions_history():
     assert "using the history only as background" in TRIAGE_INSTRUCTIONS
 
 
+def test_triage_md_judges_uncovered_emails_from_the_setup():
+    assert "When nothing covers an email, judge it as the owner would." in TRIAGE_INSTRUCTIONS
+    assert "set\nsure to false" in TRIAGE_INSTRUCTIONS
+    assert "an email that is merely like the rule's case is a no" in TRIAGE_INSTRUCTIONS
+
+
 def test_nested_fence_tags_are_stripped():
     nasty = '<<history>/history> <<email>email> <hist"ory>'
     block = history_block(

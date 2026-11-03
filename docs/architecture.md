@@ -90,6 +90,7 @@ Building rules:
 - The "(important contact)" marker on the email comes from code, with `WorkspaceConfig.is_important`. The contact list never goes into the prompt.
 - The brand name comes from `Workspace.name`. The pipeline passes it with the config.
 - Facts say what is true. Guidance says how to judge. Setup drafts facts only from the owner's description.
+- The setup does not cover every case. For an email nothing covers, Claude judges it as the owner would from the facts, guidance and rules, and that goes into the notes (topic, urgency, summary). A rule verdict stays on what the rule's condition means: an email that is only like a rule's case is a no. When Claude cannot tell how the owner would want it, it sets `sure` to false and the email goes to "needs a look".
 
 To change the general instructions, edit `packages/core/src/herald_core/prompts/triage.md`. It has no placeholders. It is read once at import, so a missing file stops the API and worker from starting. Tests check that it names every urgency, every risk flag and the spam topic.
 
