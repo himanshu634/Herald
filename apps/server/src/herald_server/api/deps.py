@@ -6,6 +6,7 @@ from sqlmodel import Session
 
 from herald_server.connectors.base import MailConnector
 from herald_server.crypto import SecretBox
+from herald_server.internal.client import AgentApi
 from herald_server.models import Workspace
 from herald_server.queue import JobQueue
 from herald_server.services import Services
@@ -19,7 +20,12 @@ def get_queue(request: Request) -> JobQueue:
     return request.app.state.queue
 
 
+def get_agent_api(request: Request) -> AgentApi:
+    return request.app.state.agent_api
+
+
 ServicesDep = Annotated[Services, Depends(get_services)]
+AgentApiDep = Annotated[AgentApi, Depends(get_agent_api)]
 QueueDep = Annotated[JobQueue, Depends(get_queue)]
 
 

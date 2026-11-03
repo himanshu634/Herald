@@ -7,11 +7,12 @@ from asyncer import asyncify
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from sqlmodel import Session, col, select
 
-from herald_server.api.deps import QueueDep, ServicesDep, SessionDep, WorkspaceDep
-from herald_server.api.schemas import EmailIn, EmailOut
+from herald_server.api.deps import AgentApiDep, QueueDep, ServicesDep, SessionDep, WorkspaceDep
+from herald_server.api.schemas import EmailIn, EmailOut, TryIn, TryOut
 from herald_server.bus import BusEvent
 from herald_server.events import EMAIL_RECEIVED, EMAIL_STATUS, add_event, to_bus
-from herald_server.models import Correction, Email, EmailStatus
+from herald_server.models import STATUS_FOR_ROUTE, Correction, Email, EmailStatus
+from herald_server.pipeline import trial_read
 from herald_server.services import Services
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/emails", tags=["emails"])
@@ -30,6 +31,11 @@ def _get_email(session: Session, workspace_id: str, email_id: str) -> Email:
     if email is None or email.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Email not found")
     return email
+
+
+def _check_email(services: Services, workspace_id: str, email_id: str) -> None:
+    with Session(services.engine) as session:
+        _get_email(session, workspace_id, email_id)
 
 
 def _store_received(
@@ -174,6 +180,25 @@ async def reread(
     log.info("email %s queued for a re-read", email.id)
     await queue.enqueue_email(email.id)
     return _out(email)
+
+
+@router.post("/{email_id}/try")
+async def try_config(
+    data: TryIn,
+    workspace: WorkspaceDep,
+    services: ServicesDep,
+    agent_api: AgentApiDep,
+    email_id: EmailId,
+) -> TryOut:
+    """Read the email with a draft config and say what Herald would do. Saves nothing.
+
+    Runs in the request, not the queue: the owner is waiting on the answer in the dialog.
+    The tenant check uses its own short session, so no connection stays open while the
+    model thinks.
+    """
+    await asyncify(_check_email)(services, workspace.id, email_id)
+    notes, decision = await trial_read(agent_api, services.graph, email_id, data.config)
+    return TryOut(status=STATUS_FOR_ROUTE[decision.route], notes=notes, decision=decision)
 
 
 @router.post("/{email_id}/on-it")

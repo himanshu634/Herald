@@ -55,7 +55,7 @@ The worker's pipeline never opens the database. It loads the email, runs the age
 - Every route is keyed by the email being judged. The API takes the workspace and the "received before" cut-off from that row, so no caller can name another tenant. Tool inputs forbid extra fields, so a `workspace_id` query param is a 422.
 - Every call needs the header `X-Herald-Internal-Token` with `HERALD_INTERNAL_TOKEN`, compared in constant time. With the arq queue the API and the worker refuse to start without it. The inline queue makes a random token per process, because its only caller is its own in-memory client.
 - The routes sit outside `/api`, so nginx and the Vite proxy never forward them, and they are left out of the OpenAPI schema (`schema.d.ts` does not change).
-- In lite mode and in tests the same routes are called in memory (`httpx.ASGITransport`), so every path runs the same code as the worker.
+- In lite mode and in tests the same routes are called in memory (`httpx.ASGITransport`), so every path runs the same code as the worker. The owner's trial read (`POST /api/workspaces/{id}/emails/{email_id}/try`) runs in the API process and uses that in-memory client too. It loads and runs the tools but never calls the save route.
 - Failures: a read that fails on the network or gets a 5xx raises `ApiUnavailable`. So does a save whose request never reached the API (connect error or connect timeout). The worker retries those (`Retry`, 5 tries, 5 s more each time), so an API that is still starting does not leave mail `new`. A save that may have reached the API is not retried, because a retry could publish its events twice. A tool's failure still only costs that tool's context (see History).
 - The model's tools are read-only. Saving the result is the pipeline's call, not a tool, so the AI still never sets status.
 
@@ -130,7 +130,7 @@ The AI writes notes and never sets status. Status changes in two places only: th
 | Done | any | `done` | — |
 | Re-read | `alerted`, `needs_a_look`, `inbox` or `closed` | whatever decide says | The email goes through triage again with the current setup |
 
-Re-read (`POST .../emails/{id}/reread`, 202) is how an answered question settles: the owner saves a fact, then asks Herald to read the email again. It is refused (409) once the owner has taken the email (in progress or done) or moved it by hand (a route correction exists), so decide never moves an email the owner has already placed.
+Re-read (`POST .../emails/{id}/reread`, 202) is how an answered question settles: the owner saves a fact or rule change, then asks Herald to read the email again. Before saving, the question dialog can try the change: `POST .../emails/{id}/try` (200) runs triage in the request with the unsaved config the owner sends and returns the status, notes and decision Herald would give. It writes nothing and publishes no event, so the email, its status and the saved config stay as they were. Each try is one more AI call. It is refused (409) once the owner has taken the email (in progress or done) or moved it by hand (a route correction exists), so decide never moves an email the owner has already placed.
 
 ## Live events (SSE)
 

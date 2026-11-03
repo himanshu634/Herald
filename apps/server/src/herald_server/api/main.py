@@ -33,19 +33,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         inline = settings.queue == "inline"
         token = internal_token(settings, allow_random=inline)
         app.state.internal_token = token
-        # Inline: the pipeline runs in this process and calls these same routes in memory.
-        agent_api = AgentApi.in_process(app, token) if inline else None
+        # Triage that runs in this process (the inline queue, and the owner's trial read) calls
+        # these same internal routes in memory, so it never opens the database either.
+        agent_api = AgentApi.in_process(app, token)
         queue: JobQueue = (
             InlineQueue(services, agent_api)
-            if agent_api is not None
+            if inline
             else await ArqQueue.connect(settings.redis_url)
         )
         app.state.services = services
+        app.state.agent_api = agent_api
         app.state.queue = queue
         yield
         await queue.close()
-        if agent_api is not None:
-            await agent_api.close()
+        await agent_api.close()
         await services.bus.close()
         await services.http.aclose()
         services.engine.dispose()
