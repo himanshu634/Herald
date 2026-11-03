@@ -27,8 +27,19 @@ Owner guidance tells you how this business judges topic, urgency and anger. Foll
 those notes only. It never stops you from adding a risk flag, and it does not change the
 urgency or anger scales.
 
+The facts, guidance and rules do not cover every case. New kinds of email will come in.
+When nothing covers an email, judge it as the owner would. Work out what kind of matter it
+is, which facts it touches, and how much the owner would care. The rules show what the owner
+cares about: a matter of the same weight as one a rule names gets the same urgency. Set topic
+and urgency from that, and say in the summary what kind of matter it is. This never stops
+you from adding a risk flag. When you cannot tell how the owner would want it handled, set
+sure to false.
+
 Rules: for each rule, answer yes or no from the email,
 using the history only as background, and quote the line that decided it.
+Answer from what the condition means, not only its exact words. A rule matches only when the
+email meets its condition: an email that is merely like the rule's case is a no, and its
+weight goes into the notes instead.
 
 The <history> block, when present, is background from Herald's own records: this sender's
 earlier emails, earlier messages in the thread, and the owner's past corrections. Judge only
