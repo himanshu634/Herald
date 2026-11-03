@@ -11,6 +11,9 @@ export type Rule = components['schemas']['Rule'];
 export type RuleAction = components['schemas']['RuleAction'];
 export type SetupOut = components['schemas']['SetupOut'];
 export type DraftOut = components['schemas']['DraftOut'];
+export type Mailbox = components['schemas']['MailboxOut'];
+export type MailboxStatus = components['schemas']['MailboxStatus'];
+export type ConnectOut = components['schemas']['ConnectOut'];
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	const response = await fetch(`/api${path}`, {
@@ -50,5 +53,20 @@ export const api = {
 			body: JSON.stringify(email)
 		}),
 	act: (workspaceId: string, emailId: string, action: 'on-it' | 'not-urgent' | 'done') =>
-		request<Email>(`/workspaces/${workspaceId}/emails/${emailId}/${action}`, { method: 'POST' })
+		request<Email>(`/workspaces/${workspaceId}/emails/${emailId}/${action}`, { method: 'POST' }),
+	/** Mail providers this server can connect, like ['gmail']. Empty when none is set up. */
+	listProviders: () => request<string[]>('/providers'),
+	listMailboxes: (workspaceId: string) =>
+		request<Mailbox[]>(`/workspaces/${workspaceId}/mailboxes`),
+	/** Start a connect. Send the browser to the returned URL; the provider sends it back to /. */
+	startConnect: (workspaceId: string, provider: string) =>
+		request<ConnectOut>(`/workspaces/${workspaceId}/mailboxes/${provider}/connect`, {
+			method: 'POST'
+		}),
+	mailboxAction: (workspaceId: string, mailboxId: string, action: 'sync' | 'pause' | 'resume') =>
+		request<Mailbox>(`/workspaces/${workspaceId}/mailboxes/${mailboxId}/${action}`, {
+			method: 'POST'
+		}),
+	disconnectMailbox: (workspaceId: string, mailboxId: string) =>
+		request<Mailbox>(`/workspaces/${workspaceId}/mailboxes/${mailboxId}`, { method: 'DELETE' })
 };
