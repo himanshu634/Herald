@@ -7,6 +7,8 @@
 	import BusinessMenu from '#lib/inbox/BusinessMenu.svelte';
 	import EmailPanel from '#lib/inbox/EmailPanel.svelte';
 	import EmailTable from '#lib/inbox/EmailTable.svelte';
+	import QuestionDialog from '#lib/inbox/QuestionDialog.svelte';
+	import QuestionStrip from '#lib/inbox/QuestionStrip.svelte';
 	import ConnectGmail from '#lib/mailbox/ConnectGmail.svelte';
 	import MailboxMenu from '#lib/mailbox/MailboxMenu.svelte';
 	import { liveMailboxes, needsMailbox, readReturn, type Notice } from '#lib/mailbox/mailbox.js';
@@ -17,12 +19,15 @@
 		VIEWS,
 		actionsFor,
 		countByView,
+		questionActionsFor,
+		questionsFor,
+		senderName,
 		visibleEmails,
 		type Action,
 		type Filters,
 		type ViewId
 	} from '#lib/inbox/inbox.js';
-	import { Button, FilterChip, Tabs, Toast, type TabItem } from '#lib/ui/index.js';
+	import { Button, FilterChip, STATUS, Tabs, Toast, type TabItem } from '#lib/ui/index.js';
 
 	let workspaces = $state.raw<Workspace[]>([]);
 	let workspaceId = $state<string | null>(null);
@@ -41,10 +46,13 @@
 	let connecting = $state(false);
 
 	let view = $state<ViewId>('needs-you');
-	let filters = $state<Filters>({ query: '', urgentOnly: false, angry: false, unsure: false });
+	let filters = $state<Filters>({ query: '', urgentOnly: false });
 	let chosenId = $state<string | null>(null);
 	// The email the owner opened in full. Keyed by id, so picking another email folds it again.
 	let fullId = $state<string | null>(null);
+	// The question the owner opened, and the email Herald is re-reading after they answered it.
+	let askingId = $state<string | null>(null);
+	let rereading = $state<{ id: string; sender: string } | null>(null);
 
 	let search = $state<HTMLInputElement>();
 
@@ -60,6 +68,9 @@
 	const mailbox = $derived(liveMailboxes(mailboxes)[0]);
 	const counts = $derived(countByView(emails));
 	const visible = $derived(visibleEmails(emails, view, filters));
+	const questions = $derived(questionsFor(emails));
+	// Closes by itself once the email stops asking, say after On it from another tab.
+	const asking = $derived(questions.find((e) => e.id === askingId) ?? null);
 	// Keep the owner's choice while it is in view; otherwise open the top email.
 	const selected = $derived(visible.find((e) => e.id === chosenId) ?? visible[0] ?? null);
 	const tabs = $derived<TabItem[]>(
@@ -95,9 +106,15 @@
 		refresh(id);
 		refreshMailboxes(id);
 		live.connect(id);
-		const stop = live.onEvent((event) =>
-			event.type === 'mailbox.status' ? refreshMailboxes(id) : refresh(id)
-		);
+		const stop = live.onEvent((event) => {
+			if (event.type === 'mailbox.status') return refreshMailboxes(id);
+			const done = event.type === 'email.noted' ? rereading : null;
+			if (done && event.data.email_id === done.id) {
+				toast = rereadOutcome(done.sender, event.data);
+				rereading = null;
+			}
+			refresh(id);
+		});
 		return () => {
 			stop();
 			live.close();
@@ -181,11 +198,15 @@
 		}
 	}
 
-	async function act(action: Action) {
-		if (!selected || busy || !actionsFor(selected.status).includes(action)) return;
+	async function act(
+		action: Action,
+		email: Email | null = selected,
+		allowed: (status: Email['status']) => Action[] = actionsFor
+	) {
+		if (!email || busy || !allowed(email.status).includes(action)) return;
 		busy = true;
 		try {
-			const updated = await api.act(selected.workspace_id, selected.id, action);
+			const updated = await api.act(email.workspace_id, email.id, action);
 			emails = emails.map((e) => (e.id === updated.id ? updated : e));
 			toast = ACTIONS[action].done;
 		} catch (e) {
@@ -193,6 +214,44 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	// Save the owner's facts, then have Herald read the email again with them. The answer
+	// arrives later as email.noted; until then the question stays up with its old notes.
+	async function answer(email: Email, facts: string[]) {
+		if (!workspace || busy) return;
+		busy = true;
+		try {
+			const saved = await api.saveConfig(workspace.id, workspace.name, {
+				...workspace.config,
+				facts
+			});
+			workspaces = workspaces.map((w) => (w.id === saved.id ? saved : w));
+			askingId = null;
+			// Set before the request: in lite mode the re-read can finish before it returns.
+			rereading = { id: email.id, sender: senderName(email.sender) };
+			toast = `Facts saved. Herald is re-reading ${rereading.sender}’s email.`;
+			await api.reread(email.workspace_id, email.id);
+		} catch (e) {
+			const moved = rereading && e instanceof Error && e.message.startsWith('409');
+			rereading = null;
+			// The facts are saved; only the re-read was refused, because the owner already
+			// moved this email by hand. Say so instead of showing an error.
+			if (moved)
+				toast =
+					'Facts saved. You moved this email yourself, so Herald leaves it there. Mark it Done or On it to clear the question.';
+			else fail(e);
+		} finally {
+			busy = false;
+		}
+	}
+
+	function rereadOutcome(sender: string, data: Record<string, unknown>): string {
+		const status = STATUS[data.status as Email['status']]?.label ?? 'sorted';
+		const notes = data.notes as Email['notes'];
+		return notes?.sure === false
+			? `Herald re-read ${sender}’s email and is still unsure. It’s in ${status}.`
+			: `Herald re-read ${sender}’s email: ${status}.`;
 	}
 
 	function move(step: number) {
@@ -329,6 +388,10 @@
 				<main
 					class="flex min-w-0 flex-1 flex-col gap-3 p-4 lg:overflow-y-auto lg:border-t lg:border-line"
 				>
+					{#if questions.length}
+						<QuestionStrip {questions} onanswer={(id) => (askingId = id)} />
+					{/if}
+
 					<div class="flex flex-wrap items-center gap-2">
 						<label class="sr-only" for="search">Search mail</label>
 						<input
@@ -340,8 +403,6 @@
 							class="h-control-md w-56 rounded-sm border border-control bg-surface px-2.5 text-sm"
 						/>
 						<FilterChip bind:pressed={filters.urgentOnly}>Urgent</FilterChip>
-						<FilterChip bind:pressed={filters.angry}>Anger 4+</FilterChip>
-						<FilterChip bind:pressed={filters.unsure}>Herald unsure</FilterChip>
 					</div>
 
 					{#if visible.length}
@@ -355,7 +416,7 @@
 							class="rounded-lg border border-dashed border-line-strong bg-surface px-6 py-10 text-center"
 						>
 							<p class="text-lg font-bold">
-								{filters.query || filters.urgentOnly || filters.angry || filters.unsure
+								{filters.query || filters.urgentOnly
 									? 'No emails match these filters.'
 									: EMPTY[view]}
 							</p>
@@ -452,5 +513,18 @@
 		{/if}
 	</div>
 </div>
+
+{#if asking && workspace}
+	{#key asking.id}
+		<QuestionDialog
+			email={asking}
+			facts={workspace.config.facts ?? []}
+			{busy}
+			onsave={(facts) => asking && answer(asking, facts)}
+			onact={(action) => act(action, asking, questionActionsFor)}
+			onclose={() => (askingId = null)}
+		/>
+	{/key}
+{/if}
 
 <Toast message={toast} ondismiss={() => (toast = null)} />
