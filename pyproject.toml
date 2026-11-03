@@ -5,6 +5,8 @@ members = ["packages/core", "packages/evals", "apps/server"]
 [dependency-groups]
 dev = [
     "httpx>=0.28",
+    "langfuse>=5.1,<6",
+    "openinference-instrumentation-anthropic>=3.3.0",
     "pytest>=8.3",
     "pytest-asyncio>=1.0",
     "ruff>=0.12",

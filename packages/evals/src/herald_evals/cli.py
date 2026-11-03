@@ -24,7 +24,9 @@ from herald_core.prompt import TRIAGE_INSTRUCTIONS
 from herald_evals import dataset as ds
 from herald_evals.report import markdown, run_record, write
 from herald_evals.runner import Trial, run_all, stderr
-from herald_evals.score import score_trials
+from herald_evals.score import Scored, score_trials
+from herald_server.settings import get_settings
+from herald_server.tracing import build_tracing
 
 RESULTS = Path(__file__).resolve().parents[2] / "results"
 
@@ -118,10 +120,38 @@ def main(argv: list[str] | None = None) -> None:
         _report(args, datasets, work, trials, recorded["meta"] | {"rescored": _stamp(started)})
         return
     model = _model(args.model, args.model_name)
-    trials = asyncio.run(
-        run_all(model, work, repeats=args.repeats, concurrency=args.concurrency, progress=stderr)
+    # Tracing is on only when the Langfuse keys are set (dev). It is never built for --rescore.
+    # Tag traces with the model this run uses, not the one in settings or .env.
+    tracing = build_tracing(
+        get_settings().model_copy(
+            update={"model_provider": args.model, "model_name": args.model_name}
+        )
     )
-    meta = {
+    session = f"eval-{started.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        trials = asyncio.run(
+            run_all(
+                model,
+                work,
+                repeats=args.repeats,
+                concurrency=args.concurrency,
+                progress=stderr,
+                tracing=tracing,
+                session=session,
+            )
+        )
+        meta = _meta(args, started)
+        if tracing.enabled:
+            meta["langfuse_session"] = session
+        scored = _report(args, datasets, work, trials, meta)
+        for s in scored:
+            tracing.score(s.trial.trace_id, "passed", s.passed)
+    finally:
+        tracing.shutdown()
+
+
+def _meta(args: argparse.Namespace, started: datetime) -> dict:
+    return {
         "started": _stamp(started),
         "model": args.model,
         "model_name": args.model_name if args.model == "anthropic" else "fake",
@@ -131,7 +161,6 @@ def main(argv: list[str] | None = None) -> None:
         "prompt_hash": hashlib.sha256(TRIAGE_INSTRUCTIONS.encode()).hexdigest()[:12],
         "commit": _commit(),
     }
-    _report(args, datasets, work, trials, meta)
 
 
 def _stamp(when: datetime) -> str:
@@ -144,7 +173,7 @@ def _report(
     work: list[tuple[ds.Dataset, ds.Case]],
     trials: list[Trial],
     meta: dict,
-) -> None:
+) -> list[Scored]:
     cases = {(d.name, c.id): c for d, c in work}
     rule_ids = {d.name: {r.id for r in d.config.rules} for d in datasets}
     scored = score_trials(cases, trials, rule_ids)
@@ -160,6 +189,7 @@ def _report(
     json_path, md_path = write(args.out, stem, run_record(meta, info, scored), report)
     print(report)
     stderr(f"Report: {md_path}\nRun record: {json_path}")
+    return scored
 
 
 if __name__ == "__main__":

@@ -58,11 +58,16 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     await services.bus.close()
     await services.http.aclose()
     services.engine.dispose()
+    # Last: the SDK batches spans in a background thread, and a process that exits without
+    # this flush loses the final ones.
+    services.tracing.shutdown()
 
 
 async def process_email_job(ctx: dict[str, Any], email_id: str) -> str:
     try:
-        decision = await process_email(ctx["agent_api"], ctx["services"].graph, email_id)
+        decision = await process_email(
+            ctx["agent_api"], ctx["services"].graph, email_id, ctx["services"].tracing
+        )
     except ApiUnavailable as exc:
         # The API is down or still starting (make dev starts it beside the worker), and
         # nothing was saved. arq does not retry a plain error, so without this the email

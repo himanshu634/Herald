@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     # Level for Herald's own loggers. INFO prints one line per email arrival and pipeline step.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
+    # Dev-only tracing to a local Langfuse (see "Tracing (dev)" in docs/architecture.md).
+    # Tracing is on only when both keys are set and not empty.
+    # Production images have no Langfuse package, so it stays off there.
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_base_url: str = "http://localhost:3000"
+
     web_url: str = "http://localhost:5173"
 
     # The worker's triage pipeline and its tools reach the database only through the API's

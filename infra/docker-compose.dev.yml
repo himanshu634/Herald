@@ -34,6 +34,14 @@ x-server: &server
     # The worker reaches the database for triage only through the API's internal routes.
     HERALD_INTERNAL_API_URL: http://api:8000
     HERALD_INTERNAL_TOKEN: ${HERALD_INTERNAL_TOKEN:-herald-dev-internal-token-not-secret}
+    # Langfuse (dev tracing) is its own compose project. The containers reach it through the
+    # host's published port :3000. The keys still come from .env.
+    HERALD_LANGFUSE_BASE_URL: http://host.docker.internal:3000
+  # Docker Desktop (macOS) already resolves host.docker.internal. On Linux the name would
+  # resolve through host-gateway, but Langfuse publishes its web port on 127.0.0.1 only, so the
+  # Docker bridge cannot reach it. Linux is out of scope for dev tracing.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
 
 services:
   api:

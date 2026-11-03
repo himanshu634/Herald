@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+from langchain_core.callbacks import AsyncCallbackHandler
 from pydantic import BaseModel
 
 from herald_core.graph import build_graph, triage
@@ -293,3 +294,38 @@ async def test_no_toolbox_works_as_before():
         build_graph(FakeModel()), email("Order", "Where?"), CONFIG, business_name="Tripfold"
     )
     assert state["history"].is_empty()
+
+
+class NodeNames(AsyncCallbackHandler):
+    def __init__(self) -> None:
+        self.names: list[str] = []
+        self.subjects: set[str] = set()
+
+    async def on_chain_start(self, serialized, inputs, *, name=None, **kwargs):
+        self.names.append(name or "")
+        if isinstance(inputs, dict) and "email" in inputs:
+            self.subjects.add(inputs["email"].subject)
+
+
+async def test_triage_passes_callbacks_to_the_graph():
+    seen = NodeNames()
+    graph = build_graph(FakeModel())
+    await triage(
+        graph,
+        email("Hi", "Where is my bag?"),
+        CONFIG,
+        business_name="Tripfold",
+        callbacks=[seen],
+    )
+    assert {"word_check", "write_notes", "judge_rules", "decide"} <= set(seen.names)
+
+
+async def test_callbacks_stay_with_their_run():
+    # One compiled graph serves every tenant: a run's callbacks must not see another run.
+    graph = build_graph(FakeModel())
+    a, b = NodeNames(), NodeNames()
+    await asyncio.gather(
+        triage(graph, email("Tenant A", "Bag late"), CONFIG, business_name="A", callbacks=[a]),
+        triage(graph, email("Tenant B", "Bag lost"), CONFIG, business_name="B", callbacks=[b]),
+    )
+    assert a.subjects == {"Tenant A"} and b.subjects == {"Tenant B"}
