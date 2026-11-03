@@ -9,6 +9,7 @@
 		StatusTag,
 		Tabs,
 		Tag,
+		Toast,
 		URGENCY,
 		type TabItem,
 		type Urgency
@@ -56,6 +57,7 @@
 	];
 	let tab = $state('needs-you');
 	let anger4 = $state(true);
+	let toast = $state<string | null>(null);
 	let theme = $state<'light' | 'dark' | null>(null);
 
 	function setTheme(next: 'light' | 'dark') {
@@ -203,6 +205,15 @@
 			</div>
 		</Panel>
 
+		<Panel title="Toast">
+			<div class="flex flex-wrap items-center gap-3">
+				<Button onclick={() => (toast = 'Moved to Inbox. Herald saved this as a correction.')}
+					>Show a toast</Button
+				>
+				<span class="text-sm text-muted">Bottom centre, the action's own words.</span>
+			</div>
+		</Panel>
+
 		<Panel title="The safety floor callout">
 			<div class="flex items-start gap-3 rounded-lg bg-floor-bg px-4 py-3 text-floor-fg">
 				<Icon name="shield" size={18} />
@@ -213,3 +224,5 @@
 		</Panel>
 	</div>
 </main>
+
+<Toast message={toast} ondismiss={() => (toast = null)} />

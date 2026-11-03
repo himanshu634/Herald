@@ -10,7 +10,8 @@ The web app styles everything with **Tailwind CSS v4**, and the tokens below are
 | --- | --- |
 | `apps/web/src/lib/styles/tokens.css` | The Tailwind theme (`@theme`): every colour, type size, radius, size and shadow, plus the dark values |
 | `apps/web/src/app.css` | Imports Tailwind, the font and the tokens; page basics (font, background, focus ring, reduced motion) |
-| `apps/web/src/lib/ui/` | The components (`Button`, `Tag`, `StatusTag`, `AngerMeter`, `Tabs`, `FilterChip`, `Panel`, `Kbd`, `Icon`) and `tones.ts` |
+| `apps/web/src/lib/ui/` | The components (`Button`, `Tag`, `StatusTag`, `AngerMeter`, `Tabs`, `FilterChip`, `Panel`, `Kbd`, `Toast`, `Icon`) and `tones.ts` |
+| `apps/web/src/lib/inbox/` | The inbox built from them: `EmailTable`, `EmailPanel`, `SendTestEmail`, and `inbox.ts` (views, order, actions, proof highlighting) |
 | `/design-system` in the web app | The gallery: every token and component, with a light and dark switch |
 
 ## Principles
@@ -135,13 +136,17 @@ Dashed when off, solid ink when on (`aria-pressed`). Chips filter the current vi
 
 `bg-surface`, `border-line`, `rounded-lg`. An optional header with a title and actions sits above a dashed divider. `padded={false}` for edge-to-edge content such as a table. Don't nest panels.
 
+### Toast
+
+A short message after an owner action, bottom centre, ink on canvas. It uses the action's own words ("Moved to In progress.") and clears itself after 5 seconds. It sits in a `role="status"` region so screen readers hear it. Errors are not toasts: they stay on screen as a `role="alert"` banner until dismissed.
+
 ### Icon
 
 Line icons on a 24 px grid, 1.8 stroke, `currentColor`. Add new glyphs to `Icon.svelte`; don't paste SVG into screens. An icon next to a label is decoration (hidden from screen readers); an icon alone needs `label`. No emoji.
 
 ## Patterns
 
-- **The inbox** is a table: Status, From, Summary, Topic, Urgency, Anger, Why, Time. Sorted by status, then urgency, then anger, then newest, the way the decide step orders them. The selected row gets `bg-accent-soft` and a chartreuse edge.
+- **The inbox** has tabs per status (Needs you, Inbox, In progress, Done, Closed quietly, All mail) and a table: Status, From, Summary, Topic (wide screens only), Urgency, Anger, Why, Time. Sorted by status, then urgency, then anger, then newest, the way the decide step orders them. The selected row gets `bg-accent-soft` and a chartreuse edge.
 - **The side panel** explains the open email: the safety floor callout first if there is one, then why Herald put it there, then the email with the proof highlighted (`bg-accent-tint` with an olive underline), then the notes, then the actions at the bottom.
 - **The safety floor callout** is a `bg-floor-bg text-floor-fg` block with the `shield` icon and one sentence: "Safety floor: legal threat. This always alerts you, whatever your rules say."
 - **What Herald handled** is always one line, never hidden: "Also today: 18 in the inbox, 2 in progress, 40 closed quietly." with a way to see them.
