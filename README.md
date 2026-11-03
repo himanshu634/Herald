@@ -82,7 +82,13 @@ packages/core   LangGraph pipeline, decide step, safety floor (herald_core)
 docs            scope, decisions, architecture
 ```
 
-Full stack, with Postgres, Redis and a separate worker, each in its own terminal (needs Docker):
+Full stack, with Postgres and Redis in Docker and the API, worker and web app on your machine, in one terminal (Ctrl-C stops them; `make infra-down` stops the containers):
+
+```bash
+make dev
+```
+
+Or run each piece in its own terminal:
 
 ```bash
 make infra

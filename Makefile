@@ -2,7 +2,7 @@
 SERVER := cd apps/server &&
 LITE := HERALD_DATABASE_URL=sqlite:///./herald-dev.db HERALD_BUS=memory HERALD_QUEUE=inline
 
-.PHONY: help install infra infra-down api worker web lite docker-dev docker-prod docker-prod-down \
+.PHONY: help install infra infra-down dev api worker web lite docker-dev docker-prod docker-prod-down \
 	test lint format gen-api
 
 help: ## List tasks
@@ -17,6 +17,18 @@ infra: ## Start Postgres and Redis (Docker)
 
 infra-down: ## Stop Postgres and Redis
 	docker compose -f infra/docker-compose.yml down
+
+# --wait holds until the healthchecks pass, so the API and worker never start before
+# Postgres accepts connections. The API and worker each run create_all on startup; on an
+# empty database they race to create the same enum types and one crashes, so create the
+# tables once first and their create_all finds nothing to do. Ctrl-C reaches all three
+# processes (same process group); the containers keep running, stop them with make infra-down.
+dev: ## Start Postgres and Redis (Docker), then the API, worker and web app together
+	docker compose -f infra/docker-compose.yml up -d --wait
+	$(SERVER) uv run python -c "from sqlmodel import SQLModel, create_engine; \
+		import herald_server.models; from herald_server.settings import get_settings; \
+		SQLModel.metadata.create_all(create_engine(get_settings().database_url))"
+	$(MAKE) -j3 api worker web
 
 api: ## Run the API on :8000 (needs make infra)
 	$(SERVER) uv run fastapi dev --port 8000
