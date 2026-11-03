@@ -523,6 +523,8 @@ export interface components {
             /** Email Address */
             email_address: string;
             status: components["schemas"]["MailboxStatus"];
+            /** Can Send */
+            can_send: boolean;
             /** Subscription Expires At */
             subscription_expires_at: string | null;
             /** Last Synced At */

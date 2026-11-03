@@ -71,6 +71,7 @@ class MailboxOut(BaseModel):
     provider: str
     email_address: str
     status: MailboxStatus
+    can_send: bool
     subscription_expires_at: datetime | None
     last_synced_at: datetime | None
     created_at: datetime

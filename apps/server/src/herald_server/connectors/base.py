@@ -31,6 +31,7 @@ class FetchResult(BaseModel):
 class ConnectedAccount(BaseModel):
     email_address: str  # lower-case
     credentials: dict[str, str]
+    can_send: bool = False  # the owner granted permission to send mail
 
 
 class Subscription(BaseModel):

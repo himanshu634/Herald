@@ -11,7 +11,9 @@ import httpx
 
 from herald_server.connectors.base import AuthRevoked, RateLimited
 
-SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+SCOPES = (READ_SCOPE, SEND_SCOPE)
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
@@ -43,6 +45,7 @@ class MessageUnavailable(Exception):
 class TokenSet(NamedTuple):
     access_token: str
     refresh_token: str | None
+    scope: str = ""  # Google's space-separated list of the scopes actually granted
 
 
 class Profile(NamedTuple):
@@ -169,7 +172,7 @@ class GmailClient:
                 "grant_type": "authorization_code",
             }
         )
-        return TokenSet(data["access_token"], data.get("refresh_token"))
+        return TokenSet(data["access_token"], data.get("refresh_token"), data.get("scope", ""))
 
     async def refresh(self, refresh_token: str) -> str:
         data = await self._token(

@@ -74,6 +74,7 @@ class Mailbox(SQLModel, table=True):
     email_address: str = Field(index=True)  # Stored lower-case.
     status: MailboxStatus = Field(default=MailboxStatus.ACTIVE, index=True)
     credentials_enc: str | None = None  # SecretBox token; None once disconnected.
+    can_send: bool = False  # Set at every connect; false for mailboxes connected read-only.
     cursor: str | None = None  # Opaque to everything but the connector.
     provider_state: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON, nullable=False)

@@ -182,6 +182,9 @@ def upsert_connected(
             )
         mailbox.credentials_enc = services.secrets.seal(account.credentials)
         mailbox.status = MailboxStatus.ACTIVE
+        # Set on every connect, so a reconnect that grants send turns it on and one that drops
+        # it turns it off.
+        mailbox.can_send = account.can_send
         session.add(mailbox)
         event = stage_status_event(session, mailbox)
         try:

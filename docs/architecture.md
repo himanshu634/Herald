@@ -161,7 +161,7 @@ sequenceDiagram
 - Later syncs read the history since the cursor. The new cursor is the `historyId` of the first page, so a re-read is possible but a loss is not. Stored mail is deduped on `(mailbox_id, provider_message_id)`.
 - One fetch downloads at most 100 messages. A long gap (a reconnect or a resume keeps the cursor) is read in batches: the fetch stops before the history record that would pass the cap, its cursor is the last record it took, and it reports `has_more`. Each batch is stored with its cursor, and the caller fetches again (see Sync job). A single record with more than 100 messages is taken whole. Records at or before the start cursor are skipped, so the cursor always moves (Gmail documents only records after it, but a fetch that returned its own start cursor would loop on the mailbox forever).
 - A mail that cannot be parsed is skipped, so one bad email cannot block the mailbox. A message that Gmail refuses with 400 or 410 is skipped and logged the same way. Any other refusal of a message (another 403, a 408 or a 5xx) fails the fetch, so the cursor does not move and the next sync (a push or the 15-minute catch-up) reads it again. A 403 for a daily or project quota is a rate limit.
-- Only inbox mail is read. Sent mail and drafts are skipped. The scope is `gmail.readonly`.
+- Only inbox mail is read. Sent mail and drafts are skipped. Herald reads inbox mail and sends only replies the owner writes. The scopes are `gmail.readonly` and `gmail.send`. Google lets the owner untick a scope, so each mailbox records whether send was granted (`can_send`).
 - Credentials are encrypted with `HERALD_TOKEN_KEY` and never leave the server. The OAuth `state` is signed with the same key and expires after 10 minutes.
 - Push is verified: the Pub/Sub JWT must match the audience and service account in the settings. A bad signature gets 401. A good push for an unknown or inactive address gets 204, so Pub/Sub does not retry it.
 
@@ -226,7 +226,7 @@ The OAuth callback always redirects to `HERALD_WEB_URL` with one outcome below. 
 
 Both jobs run across all workspaces on purpose. The times are the worker's local time (arq cron).
 
-Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscription) is a manual step. It is described in the mail connectors plan.
+Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscription) is a manual step. It is described in the mail connectors plan. In the OAuth consent screen, under Data access, add the scope `https://www.googleapis.com/auth/gmail.send` too. Without it Google never grants send.
 
 ## Plug-in points
 

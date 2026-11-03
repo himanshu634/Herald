@@ -19,7 +19,8 @@ from herald_server.connectors.base import (
 )
 from herald_server.connectors.gmail.client import (
     AUTH_URL,
-    SCOPE,
+    SCOPES,
+    SEND_SCOPE,
     GmailClient,
     HistoryExpired,
     MessageGone,
@@ -70,7 +71,7 @@ class GmailConnector(MailConnector):
             "client_id": self._client_id,
             "redirect_uri": self._client.redirect_uri,
             "response_type": "code",
-            "scope": SCOPE,
+            "scope": " ".join(SCOPES),
             # offline + consent: Google returns a refresh token on every connect,
             # including a reconnect of an account that granted access before.
             "access_type": "offline",
@@ -88,6 +89,10 @@ class GmailConnector(MailConnector):
         return ConnectedAccount(
             email_address=profile.email_address.lower(),
             credentials={"refresh_token": tokens.refresh_token},
+            # Granular consent lets the owner untick "send" and still connect, so the scopes
+            # we asked for are not the scopes we got. A response with no `scope` field proves
+            # nothing, so it counts as no send permission.
+            can_send=SEND_SCOPE in tokens.scope.split(),
         )
 
     async def subscribe(

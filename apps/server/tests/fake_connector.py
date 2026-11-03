@@ -27,7 +27,9 @@ class FakeConnector:
         self.raise_on_subscribe: Exception | None = None
         self.subscription = Subscription(expires_at=None, provider_state={})
         self.calls: list[str] = []
-        self.account = ConnectedAccount(email_address="owner@shop.in", credentials={"token": "t"})
+        self.account = ConnectedAccount(
+            email_address="owner@shop.in", credentials={"token": "t"}, can_send=True
+        )
 
     def authorization_url(self, state: str) -> str:
         self.calls.append("authorization_url")
