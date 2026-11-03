@@ -1,6 +1,8 @@
 from collections.abc import AsyncIterator
 
 import pytest
+from cryptography.fernet import Fernet
+from fake_connector import FakeConnector
 from httpx import ASGITransport, AsyncClient
 
 from herald_server.api.main import create_app
@@ -16,6 +18,7 @@ def settings(tmp_path) -> Settings:
         queue="inline",
         model_provider="fake",
         ntfy_topic=None,
+        token_key=Fernet.generate_key().decode(),
     )
 
 
@@ -30,3 +33,10 @@ async def app(settings):
 async def client(app) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture
+def fake_connector(app) -> FakeConnector:
+    connector = FakeConnector()
+    app.state.services.connectors["fake"] = connector
+    return connector

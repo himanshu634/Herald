@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from herald_core.schema import Decision, Notes, WorkspaceConfig
-from herald_server.models import EmailStatus
+from herald_server.models import EmailStatus, MailboxStatus
 
 
 class WorkspaceIn(BaseModel):
@@ -59,3 +59,20 @@ class EmailOut(BaseModel):
     notes: Notes | None
     decision: Decision | None
     received_at: datetime
+
+
+class MailboxOut(BaseModel):
+    """A connected mailbox. Never carries credentials, the cursor or provider state."""
+
+    id: str
+    workspace_id: str
+    provider: str
+    email_address: str
+    status: MailboxStatus
+    subscription_expires_at: datetime | None
+    last_synced_at: datetime | None
+    created_at: datetime
+
+
+class ConnectOut(BaseModel):
+    authorization_url: str

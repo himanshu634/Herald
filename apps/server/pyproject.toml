@@ -6,11 +6,13 @@ requires-python = ">=3.13"
 dependencies = [
     "arq>=0.26",
     "asyncer>=0.0.8",
+    "cryptography>=44",
     "fastapi[standard]>=0.135",
     "herald-core",
     "httpx>=0.28",
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.10",
+    "pyjwt[crypto]>=2.10",
     "redis>=5.2",
     "sqlmodel>=0.0.24",
 ]

@@ -91,7 +91,7 @@ The AI writes notes and never sets status. Status changes in two places only: th
 
 ## Live events (SSE)
 
-- `GET /api/workspaces/{id}/events` streams `email.received`, `email.noted`, `email.status` and `alert.sent`.
+- `GET /api/workspaces/{id}/events` streams `email.received`, `email.noted`, `email.status`, `mailbox.status` and `alert.sent`.
 - Each event is stored in the `event` table first, then published to Redis channel `herald:ws:{id}`. A tab only hears its own workspace.
 - The browser's `EventSource` reconnects on its own and sends `Last-Event-ID`. The server replays missed events from the database.
 - FastAPI sends a keep-alive comment every 15 s.
@@ -107,13 +107,117 @@ The AI writes notes and never sets status. Status changes in two places only: th
 - Owner guidance goes into the `<business>` block of the system prompt, after the facts (see "The prompt"). It shapes topic, urgency and anger only. The prompt says it cannot silence the safety floor, and the word check runs regardless. Routing stays with rules.
 - Planned: per-workspace caps on AI calls and emails per day.
 
+## Mail connectors
+
+A connector reads one kind of mailbox (Gmail first; Outlook and IMAP later). One `Mailbox` table, one sync job and one set of routes serve every provider. Only code in `herald_server/connectors/<provider>/` knows a provider. Everywhere else the cursor and `provider_state` are opaque, and code finds the connector with `services.connectors[mailbox.provider]`.
+
+### How synced mail flows
+
+```mermaid
+sequenceDiagram
+    participant Owner as Owner's browser
+    participant API as FastAPI
+    participant G as Gmail + Pub/Sub
+    participant Q as Redis (arq queue)
+    participant W as Worker
+    participant DB as Postgres
+
+    Owner->>API: POST /api/workspaces/{id}/mailboxes/gmail/connect
+    API-->>Owner: authorization_url (carries signed state)
+    Owner->>G: consent
+    G-->>Owner: redirect to /api/oauth/gmail/callback
+    Owner->>API: code + state
+    API->>DB: save mailbox (credentials encrypted) + event mailbox.status
+    API->>G: watch the inbox (push)
+    API->>Q: enqueue sync_mailbox
+    API-->>Owner: 303 to web app (mailbox_connected=id)
+
+    G->>API: POST /api/webhooks/gmail (signed push)
+    API->>Q: enqueue sync_mailbox for the active mailbox at that address
+    Q->>W: sync_mailbox(mailbox_id)
+    W->>G: fetch changes since the cursor
+    W->>DB: save new emails + new cursor in one transaction, events email.received
+    W->>Q: enqueue process_email for each new email
+    Note over W: process_email runs the pipeline shown above
+```
+
+- The first sync (no cursor) reads the last 2 days of inbox mail, at most 50 messages. The cursor is the profile `historyId`, read before the list, so mail that lands during the sync is read by the next one. The same path runs when Gmail no longer has the cursor's history (about a week).
+- Later syncs read the history since the cursor. The new cursor is the `historyId` of the first page, so a re-read is possible but a loss is not. Stored mail is deduped on `(mailbox_id, provider_message_id)`.
+- One fetch downloads at most 100 messages. A long gap (a reconnect or a resume keeps the cursor) is read in batches: the fetch stops before the history record that would pass the cap, its cursor is the last record it took, and it reports `has_more`. Each batch is stored with its cursor, and the caller fetches again (see Sync job). A single record with more than 100 messages is taken whole. Records at or before the start cursor are skipped, so the cursor always moves (Gmail documents only records after it, but a fetch that returned its own start cursor would loop on the mailbox forever).
+- A mail that cannot be parsed is skipped, so one bad email cannot block the mailbox. A message that Gmail refuses with 400 or 410 is skipped and logged the same way. Any other refusal of a message (another 403, a 408 or a 5xx) fails the fetch, so the cursor does not move and the next sync (a push or the 15-minute catch-up) reads it again. A 403 for a daily or project quota is a rate limit.
+- Only inbox mail is read. Sent mail and drafts are skipped. The scope is `gmail.readonly`.
+- Credentials are encrypted with `HERALD_TOKEN_KEY` and never leave the server. The OAuth `state` is signed with the same key and expires after 10 minutes.
+- Push is verified: the Pub/Sub JWT must match the audience and service account in the settings. A bad signature gets 401. A good push for an unknown or inactive address gets 204, so Pub/Sub does not retry it.
+
+### Sync job
+
+`sync_mailbox_job` uses a pending flag and a lock, not fixed job ids.
+
+- Every job first sets the flag `herald:sync-pending:{mailbox_id}`.
+- One job at a time per mailbox holds the Redis lock `herald:sync:{mailbox_id}`. Any other job sees the lock busy and returns, because the flag is already set.
+- The lock holder loops while the flag is set: clear the flag, sync, enqueue `process_email` for each new email. A push that arrives during a sync sets the flag again.
+- When a fetch reports `has_more`, the job sets the flag again, so the loop reads the next batch. The inline queue (lite mode) loops on `has_more` the same way.
+- The loop stops after 120 s. After the lock is released, a leftover flag starts a fresh job.
+- A rate limit from the provider retries the job (at least 5 s later, up to 5 tries). The cursor does not move, so the retry reads the same changes.
+- A pause or disconnect that races a sync stops later syncs: a mailbox that is not `active` is not synced, and the sync never overwrites that status. A fetch already in flight can still store its mail and move the cursor.
+
+### Mailbox status
+
+| Status | Meaning | Moves out by |
+| --- | --- | --- |
+| `active` | Syncing and receiving push | Owner pauses, access is revoked, or owner disconnects |
+| `paused` | Owner stopped it. Push is off, the cursor is kept. | Owner resumes (a catch-up sync runs) |
+| `needs_reauth` | The owner revoked access, or the stored credentials no longer decrypt. Only an `active` mailbox moves here. | Owner connects again; the same row is reused. Another workspace cannot connect the address meanwhile. |
+| `disconnected` | Credentials are deleted. Push is stopped and the grant is revoked, both best effort. Stored emails are kept. | Owner connects again; the same row and cursor are reused, unless another workspace has connected the address since |
+
+The owner can disconnect from `active`, `paused` and `needs_reauth`. Every change saves a `mailbox.status` event in the same transaction, then publishes it to the live events stream.
+
+One business per mailbox: an address is connected in at most one workspace at a time. Every status but `disconnected` holds the address. The connect checks this before it saves and answers `mailbox_in_use`. The partial unique index `uq_mailbox_live_address` on `(provider, email_address)`, over rows that are not `disconnected`, refuses a second connect that races past the check. A `disconnected` row does not hold the address, so another workspace can connect it; the old row and its emails stay with their workspace. A refused connect does not revoke the grant it just got: that grant is the same account's as the other workspace's, and a revoke would end both.
+
+The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt the stored mailbox credentials (they open one to check, an `active` mailbox's when there is one). This catches a worker whose key differs from the API's, which would otherwise move every mailbox to `needs_reauth`. To change the key, disconnect every mailbox first, then reconnect them after the change.
+
+### Routes
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/workspaces/{id}/mailboxes` | List mailboxes. No credential fields. |
+| `POST /api/workspaces/{id}/mailboxes/{provider}/connect` | Returns the provider's `authorization_url` |
+| `GET /api/oauth/{provider}/callback` | Finishes the connect, then redirects to the web app |
+| `POST /api/workspaces/{id}/mailboxes/{mailbox_id}/sync` | Queue a sync now (202). 409 unless `active`. |
+| `POST .../pause`, `POST .../resume`, `DELETE .../{mailbox_id}` | Owner actions. 409 when the status does not allow it. |
+| `POST /api/webhooks/{provider}` | Provider push. Verified by the connector. |
+
+The OAuth callback always redirects to `HERALD_WEB_URL` with one query value:
+
+| Query | Meaning |
+| --- | --- |
+| `mailbox_connected=<id>` | The mailbox is saved and `active`. Its first sync is queued (if queueing fails, the catch-up sync runs it). A failure after the save is logged and does not change this answer. |
+| `mailbox_error=access_denied` | The owner refused at the provider |
+| `mailbox_error=provider_unavailable` | The provider is not set up, or `HERALD_TOKEN_KEY` is not set |
+| `mailbox_error=invalid_state` | The state is bad, expired, for another provider, or names a missing workspace |
+| `mailbox_error=authorization_failed` | No code came back, or the provider refused the code |
+| `mailbox_error=no_refresh_token` | The provider gave no long-lived credential |
+| `mailbox_error=mailbox_in_use` | Another workspace has this address connected (in any status but `disconnected`). Nothing is saved. |
+| `mailbox_error=provider_error` | Any other failure before the mailbox is saved: for example the account has no Gmail, the owner deselected the scope, a rate limit, or a network error |
+
+### Cron jobs
+
+| Job | When | What it does |
+| --- | --- | --- |
+| `renew_subscriptions_job` | Daily at 03:00 | Renews push for every active mailbox. A Gmail watch lasts 7 days. A revoked grant moves the mailbox to `needs_reauth`. |
+| `catch_up_syncs_job` | Every 15 minutes | Queues a sync for every active mailbox, to pick up mail whose push was lost |
+
+Both jobs run across all workspaces on purpose. The times are the worker's local time (arq cron).
+
+Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscription) is a manual step. It is described in the mail connectors plan.
+
 ## Plug-in points
 
 | Interface | Where | Built-in implementations |
 | --- | --- | --- |
 | `TriageModel` | `herald_core.model` | `AnthropicModel` (Claude, structured outputs), `FakeModel` (offline keyword heuristics) |
 | `Notifier` | `herald_core.adapters` | `NtfyNotifier`, `LogNotifier` |
-| `EmailSource` | `herald_core.adapters` | None yet. The test-email box posts to the API. |
+| `MailConnector` | `herald_server.connectors` | `GmailConnector`; `FakeConnector` in tests. The test-email box still posts to the API. |
 | `EventBus` | `herald_server.bus` | `RedisEventBus`, `InMemoryEventBus` |
 | `JobQueue` | `herald_server.queue` | `ArqQueue`, `InlineQueue` |
 
@@ -128,11 +232,28 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 | `HERALD_QUEUE` | `arq` | `inline` |
 | `HERALD_MODEL_PROVIDER` | `fake` | `fake` |
 | `HERALD_NTFY_TOPIC` | unset (alerts are logged) | unset |
+| `HERALD_TOKEN_KEY` | unset (Gmail off: it needs this, the Google client id and secret, and the topic) | unset |
+| `HERALD_PUBLIC_API_URL` | `http://localhost:8000` | same |
+| `HERALD_WEB_URL` | `http://localhost:5173` | same |
+| `HERALD_GOOGLE_CLIENT_ID`, `HERALD_GOOGLE_CLIENT_SECRET` | unset (Gmail off, as above) | unset |
+| `HERALD_GMAIL_TOPIC` | unset (Gmail off: no mailbox can be connected) | unset |
+| `HERALD_GMAIL_PUSH_AUDIENCE`, `HERALD_GMAIL_PUSH_SERVICE_ACCOUNT` | unset (every push is rejected) | unset |
+
+### Upgrading an existing dev database
+
+There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. A `mailbox` table made before the one-business-per-mailbox rule also lacks the index `uq_mailbox_live_address` (startup does not add indexes to a table that exists); the connect check still applies, but a racing connect is not caught. Start from an empty database:
+
+- Lite mode: delete `apps/server/herald-dev.db`.
+- Postgres: run `docker compose down -v`, then `make infra`.
 
 ## Not built yet
 
-- Alembic migrations (tables are created on startup for now)
+- Alembic migrations (tables are created on startup for now; see "Upgrading an existing dev database")
 - Auth and per-workspace limits
 - A settings page for editing a workspace after setup (`PUT /config` is ready for it)
 - The rule test, the score report and the test-email set
+- An Outlook connector, and IMAP
+- Filter-based watch labels (Gmail watches the whole inbox)
+- Binding the OAuth `state` to the browser that started the connect. It needs auth or a state cookie.
+- A sweeper for emails left `new` when a sync fails after its commit
 - Refusal fallbacks for the Claude model (a refusal currently routes the email to "Needs a look")
