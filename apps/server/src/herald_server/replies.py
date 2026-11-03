@@ -48,7 +48,9 @@ log = logging.getLogger(__name__)
 SEND_TIMEOUT = 60  # seconds
 STALE_SENDING = timedelta(minutes=2)
 
-BlockReason = Literal["no_mailbox", "mailbox_inactive", "send_not_allowed", "already_sending"]
+BlockReason = Literal[
+    "no_mailbox", "mailbox_inactive", "send_not_allowed", "already_sending", "no_recipient"
+]
 
 
 class ReplyBlocked(Exception):
@@ -70,7 +72,21 @@ def reply_subject(subject: str) -> str:
     return f"Re: {subject}"
 
 
-def _recipient(email: Email) -> str:
+def is_stale(reply: Reply) -> bool:
+    """A SENDING row older than STALE_SENDING: its process died mid-send (see above)."""
+    # SQLite returns naive datetimes (all written in UTC) and Postgres aware ones. Comparing a
+    # naive one with an aware now() raises TypeError, so a naive value is read as UTC.
+    created = reply.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return reply.status == ReplyStatus.SENDING and created < datetime.now(UTC) - STALE_SENDING
+
+
+def recipient(email: Email) -> str:
+    """Where a reply to this email goes. Empty when the sender could not be parsed.
+
+    The web app's To line shows this value (`EmailOut.reply_address`), so it is the one rule.
+    """
     # Reply-To is written by whoever sent the mail, so it is used only when it is one plain
     # address. A list would copy strangers in, and a CR or LF could add headers to the reply.
     # Anything else falls back to From, which the provider has already parsed.
@@ -188,6 +204,13 @@ def _begin(services: Services, workspace_id: str, email_id: str, data: ReplyIn) 
             raise ReplyBlocked("mailbox_inactive")
         if not mailbox.can_send:
             raise ReplyBlocked("send_not_allowed")
+        # An empty To is a From the provider could not parse, and the provider would refuse
+        # it. The shop's own address is a form sent from the shop with no usable Reply-To:
+        # sending would mail the owner, not the customer. Checked before _expire_stale, which
+        # writes, so a refusal saves nothing.
+        to_address = recipient(email)
+        if not to_address or to_address.lower() == mailbox.email_address.lower():
+            raise ReplyBlocked("no_recipient")
         stale_events = _expire_stale(session, workspace_id, email.id)
         reply = Reply(
             workspace_id=workspace_id,
@@ -195,7 +218,7 @@ def _begin(services: Services, workspace_id: str, email_id: str, data: ReplyIn) 
             mailbox_id=mailbox.id,
             client_key=data.client_key,
             from_address=mailbox.email_address,
-            to_address=_recipient(email),
+            to_address=to_address,
             subject=reply_subject(email.subject),
             body=data.body,
         )
@@ -224,7 +247,8 @@ class _Outcome:
     status: ReplyStatus
     error: ReplyError | None = None
     provider_message_id: str | None = None
-    revoked: bool = False  # the provider said the grant is gone: the mailbox needs a reconnect
+    # The grant is gone, or its stored credentials no longer open: the mailbox needs a reconnect.
+    revoked: bool = False
 
 
 async def _deliver(
@@ -237,7 +261,9 @@ async def _deliver(
     """Call the connector once. Never retried: an unknown outcome may have reached the customer."""
     credentials = open_credentials(services, mailbox)
     if credentials is None:
-        return _Outcome(ReplyStatus.NOT_SENT, "auth")
+        # Only a reconnect fixes credentials that no longer open, so the mailbox moves to
+        # needs_reauth like a revoked grant. Without it the panel offers no Reconnect.
+        return _Outcome(ReplyStatus.NOT_SENT, "auth", revoked=True)
     # The connector contract: these four mean the provider did not send. Anything else, a
     # timeout or a 5xx included, may have sent the mail, so the owner is told to check.
     try:

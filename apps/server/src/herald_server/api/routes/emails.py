@@ -12,6 +12,7 @@ from herald_server.api.schemas import EmailIn, EmailOut
 from herald_server.bus import BusEvent
 from herald_server.events import EMAIL_RECEIVED, add_event, to_bus
 from herald_server.models import Correction, Email, EmailStatus
+from herald_server.replies import recipient
 from herald_server.services import Services
 from herald_server.status import WrongStatus, stage_move
 
@@ -23,7 +24,8 @@ log = logging.getLogger(__name__)
 
 
 def _out(email: Email) -> EmailOut:
-    return EmailOut.model_validate(email, from_attributes=True)
+    # reply_address comes from the send's own rule, so the To line shows where the mail goes.
+    return EmailOut.model_validate({**email.model_dump(), "reply_address": recipient(email)})
 
 
 def _get_email(session: Session, workspace_id: str, email_id: str) -> Email:

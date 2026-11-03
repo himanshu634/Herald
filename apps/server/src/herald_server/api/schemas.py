@@ -55,6 +55,10 @@ class EmailOut(BaseModel):
     mailbox_id: str | None
     sender: str
     reply_to: str | None
+    reply_address: str = Field(
+        description="Where a reply goes: Reply-To when it is one plain address, else the "
+        "sender. Empty when there is no usable address."
+    )
     subject: str
     body: str
     thread_id: str | None

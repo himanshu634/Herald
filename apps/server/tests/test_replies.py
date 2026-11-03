@@ -374,6 +374,8 @@ async def test_unreadable_credentials_are_not_sent(app, client, fake_connector):
     assert response.json()["status"] == "not_sent"
     assert response.json()["error"] == "auth"
     assert "send_reply" not in fake_connector.calls
+    # Only a reconnect fixes it, so the panel must offer one, as for a revoked grant.
+    assert load_mailbox(app, mailbox_id).status == MailboxStatus.NEEDS_REAUTH
 
 
 async def test_email_without_mailbox_is_409(app, client, fake_connector):
@@ -475,6 +477,79 @@ async def test_email_out_carries_mailbox_and_reply_to(app, client, fake_connecto
 
     assert email["mailbox_id"] == mailbox_id
     assert email["reply_to"] == "riya.home@customer.in"
+    assert email["reply_address"] == "riya.home@customer.in"
+
+
+async def test_reply_address_is_where_the_reply_goes(app, client, fake_connector):
+    # The web app's To line shows reply_address, so it must be the address the send uses.
+    values = ['"a,b"@customer.in', "a@x.in, b@x.in", "Riya <riya.home@customer.in>"]
+    ws, mailbox_id, _ = await setup(app, client, reply_to="unused@customer.in")
+    fake_connector.queue = [message(f"to-{i}", reply_to=value) for i, value in enumerate(values)]
+    await sync(app, mailbox_id)
+    emails = {e.reply_to: e.id for e in emails_of(app, mailbox_id)}
+
+    for i, value in enumerate(values):
+        fake_connector.sent.clear()
+        url = f"/api/workspaces/{ws}/emails/{emails[value]}"
+        shown = (await client.get(url)).json()["reply_address"]
+        await post_reply(client, ws, emails[value], key=f"draft-to-{i}")
+
+        assert fake_connector.sent[0].to_address == shown, value
+    listed = (await client.get(f"/api/workspaces/{ws}/emails")).json()
+    assert {e["reply_address"] for e in listed} == {
+        "unused@customer.in",
+        '"a,b"@customer.in',
+        "riya@customer.in",
+    }
+
+
+def set_sender(app, email_id: str, sender: str, reply_to: str | None = None) -> None:
+    with Session(app.state.services.engine) as session:
+        email = session.get(Email, email_id)
+        assert email is not None
+        email.sender = sender
+        email.reply_to = reply_to
+        session.add(email)
+        session.commit()
+
+
+async def test_empty_recipient_is_409(app, client, fake_connector):
+    # A From the provider could not parse is stored empty, and the provider would refuse it.
+    ws, _, email_id = await setup(app, client)
+    set_sender(app, email_id, "")
+
+    response = await post_reply(client, ws, email_id)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "no_recipient"
+    email = (await client.get(f"/api/workspaces/{ws}/emails/{email_id}")).json()
+    assert email["reply_address"] == ""
+    with Session(app.state.services.engine) as session:
+        assert session.exec(select(Reply)).all() == []
+
+
+async def test_reply_to_the_shop_itself_is_409(app, client, fake_connector):
+    # A form sent from the shop's own address, with no usable Reply-To, would mail the owner.
+    ws, _, email_id = await setup(app, client)
+    set_sender(app, email_id, "Owner@Shop.in", reply_to="a@x.in, b@x.in")
+
+    response = await post_reply(client, ws, email_id)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "no_recipient"
+    assert fake_connector.sent == []
+    with Session(app.state.services.engine) as session:
+        assert session.exec(select(Reply)).all() == []
+
+
+async def test_form_from_the_shop_with_reply_to_sends(app, client, fake_connector):
+    ws, _, email_id = await setup(app, client)
+    set_sender(app, email_id, "owner@shop.in", reply_to="riya.home@customer.in")
+
+    response = await post_reply(client, ws, email_id)
+
+    assert response.json()["status"] == "sent"
+    assert fake_connector.sent[0].to_address == "riya.home@customer.in"
 
 
 def race(monkeypatch, app, ws: str, mailbox_id: str, email_id: str, client_key: str) -> None:
@@ -552,3 +627,34 @@ async def test_send_timeout_is_unknown(app, client, fake_connector, monkeypatch)
 
     assert response.json()["status"] == "unknown"
     assert fake_connector.calls.count("send_reply") == 1
+
+
+async def test_stale_sending_row_lists_as_unknown(app, client, fake_connector):
+    # A process that died mid-send leaves its row SENDING. Reads must not show "Sending…"
+    # forever, but only a POST writes the change, so the row itself stays SENDING here.
+    ws, mailbox_id, email_id = await setup(app, client)
+    stale_id = insert_reply(
+        app,
+        ws,
+        mailbox_id,
+        email_id,
+        status=ReplyStatus.SENDING,
+        created_at=datetime.now(UTC) - timedelta(minutes=3),
+    )
+
+    listed = (await client.get(f"/api/workspaces/{ws}/emails/{email_id}/replies")).json()
+
+    assert [(r["id"], r["status"], r["error"]) for r in listed] == [
+        (stale_id, "unknown", "unknown")
+    ]
+    assert load_reply(app, stale_id).status == ReplyStatus.SENDING
+    assert events_of(app, ws, REPLY_STATUS) == []
+
+
+async def test_fresh_sending_row_lists_as_sending(app, client, fake_connector):
+    ws, mailbox_id, email_id = await setup(app, client)
+    insert_reply(app, ws, mailbox_id, email_id, status=ReplyStatus.SENDING)
+
+    listed = (await client.get(f"/api/workspaces/{ws}/emails/{email_id}/replies")).json()
+
+    assert [(r["status"], r["error"]) for r in listed] == [("sending", None)]

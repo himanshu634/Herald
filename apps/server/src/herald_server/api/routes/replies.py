@@ -6,8 +6,14 @@ from fastapi import APIRouter, HTTPException, Path
 
 from herald_server.api.deps import ServicesDep, WorkspaceDep
 from herald_server.api.schemas import ReplyIn, ReplyOut
-from herald_server.models import Reply
-from herald_server.replies import EmailNotFound, ReplyBlocked, list_replies, send_reply
+from herald_server.models import Reply, ReplyStatus
+from herald_server.replies import (
+    EmailNotFound,
+    ReplyBlocked,
+    is_stale,
+    list_replies,
+    send_reply,
+)
 
 router = APIRouter(
     prefix="/api/workspaces/{workspace_id}/emails/{email_id}/replies", tags=["replies"]
@@ -17,7 +23,13 @@ EmailId = Annotated[str, Path()]
 
 
 def _out(reply: Reply) -> ReplyOut:
-    return ReplyOut.model_validate(reply, from_attributes=True)
+    out = ReplyOut.model_validate(reply, from_attributes=True)
+    # Every reply the API returns passes here. A stale SENDING row's process died, so it is
+    # reported as unknown, or the panel would say "Sending…" forever. Nothing is written: the
+    # next POST for this email makes it durable and stages its reply.status event.
+    if is_stale(reply):
+        out = out.model_copy(update={"status": ReplyStatus.UNKNOWN, "error": "unknown"})
+    return out
 
 
 @router.post("")
