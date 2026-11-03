@@ -4,6 +4,7 @@ Run: uv run arq herald_server.worker.main.WorkerSettings
 """
 
 import contextlib
+from time import monotonic
 from typing import Any
 
 from arq import ArqRedis, Retry
@@ -26,6 +27,10 @@ settings = get_settings()
 # Seconds. The sync lock's timeout and the worker's job timeout: a job that arq has cut off
 # no longer holds the lock, so the next sync of that mailbox is not blocked for long.
 SYNC_LOCK_TTL = 300
+# Seconds. How long one job keeps re-syncing a busy mailbox before it hands off. Well under
+# SYNC_LOCK_TTL: arq cancels a job at the job timeout, and a cancel that lands after a batch
+# is committed but before its triage jobs are queued leaves that mail untriaged for good.
+SYNC_LOOP_BUDGET = 120
 # Seconds. A pending flag nobody consumed (e.g. the job failed) expires; the catch-up sync
 # covers that mailbox meanwhile.
 SYNC_PENDING_TTL = 3600
@@ -64,7 +69,10 @@ async def sync_mailbox_job(ctx: dict[str, Any], mailbox_id: str) -> None:
     try:
         # GETDEL clears the flag before each sync, so a push that lands during the sync sets
         # it again and the loop reads the history once more from the new cursor.
-        while await redis.getdel(pending_key):
+        # The budget is checked before GETDEL, so a job out of time leaves the flag set, and
+        # the EXISTS check after the release queues a fresh job for it: no push is lost.
+        deadline = monotonic() + SYNC_LOOP_BUDGET
+        while monotonic() < deadline and await redis.getdel(pending_key):
             try:
                 email_ids = await sync_mailbox(ctx["services"], mailbox_id)
             except RateLimited as exc:
@@ -80,8 +88,9 @@ async def sync_mailbox_job(ctx: dict[str, Any], mailbox_id: str) -> None:
         # fail a job whose mail is already stored and queued for triage.
         with contextlib.suppress(LockNotOwnedError):
             await lock.release()
-    # A push between the last GETDEL and the release found the lock busy and returned, and
-    # nobody holds the lock to see its flag now. A fresh job picks it up.
+    # A push between the last GETDEL and the release found the lock busy and returned, or the
+    # loop ran out of budget with the flag still set. Nobody holds the lock to see that flag
+    # now, so a fresh job picks it up.
     if await redis.exists(pending_key):
         await redis.enqueue_job(SYNC_MAILBOX_JOB, mailbox_id)
 

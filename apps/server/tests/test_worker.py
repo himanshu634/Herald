@@ -1,5 +1,6 @@
 """The arq sync job: per-mailbox lock, pending flag, retry on rate limit."""
 
+import itertools
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -137,6 +138,29 @@ async def test_push_after_release_enqueues_fresh_sync(app, client, monkeypatch):
 
     await sync_mailbox_job(ctx, mailbox_id)
 
+    assert ctx["redis"].enqueued == [(SYNC_MAILBOX_JOB, (mailbox_id,), {})]
+    assert ctx["redis"].held == set()
+
+
+async def test_busy_mailbox_stops_after_budget_and_hands_off(app, client, monkeypatch):
+    mailbox_id = add_mailbox(app, await demo_workspace(client))
+    ctx = ctx_for(app)
+    calls: list[str] = []
+    clock = itertools.count(0, 50)
+
+    async def fake_sync(services, synced_id: str) -> list[str]:
+        # A push lands during every sync, so the flag is never clear.
+        calls.append(synced_id)
+        await ctx["redis"].set(pending_key(mailbox_id), 1, ex=3600)
+        return []
+
+    monkeypatch.setattr(worker_main, "sync_mailbox", fake_sync)
+    monkeypatch.setattr(worker_main, "monotonic", lambda: next(clock))
+
+    await sync_mailbox_job(ctx, mailbox_id)
+
+    # Budget 120 s, clock +50 s per read: syncs start at 50 s and 100 s, none at 150 s.
+    assert len(calls) == 2
     assert ctx["redis"].enqueued == [(SYNC_MAILBOX_JOB, (mailbox_id,), {})]
     assert ctx["redis"].held == set()
 
