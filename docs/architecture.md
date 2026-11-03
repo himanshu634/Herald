@@ -30,8 +30,8 @@ sequenceDiagram
     API->>Bus: publish email.received
     API->>Q: enqueue process_email
     Q->>W: process_email(email_id)
-    W->>W: LangGraph: word check ∥ notes → rules → decide
-    W->>DB: save notes, decision, status + event email.noted
+    W->>W: LangGraph: word check ∥ (history → notes) → rules → decide
+    W->>DB: save notes, decision, status, context + event email.noted
     W->>Bus: publish email.noted
     W-->>Phone: alert (only when the decision is "alert")
     Bus-->>API: events for workspace {id}
@@ -43,7 +43,8 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     S((start)) --> WC[word_check<br/>regex safety terms]
-    S --> N[write_notes<br/>AI: topic, urgency, anger, flags, quotes]
+    S --> G[gather_context<br/>history tools, no AI]
+    G --> N[write_notes<br/>AI: topic, urgency, anger, flags, quotes]
     WC --> R[judge_rules<br/>AI: yes or no per owner rule]
     N --> R
     R --> D[decide<br/>plain Python]
@@ -54,6 +55,16 @@ flowchart LR
 - `word_check` and `write_notes` run in parallel and write different state keys.
 - If the AI fails (outage, refusal, bad output), the notes are empty and the email goes to "Needs a look". A safety-floor match from the word check still alerts.
 - `decide` order, first match wins: safety floor → owner rules (alert beats close) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
+
+## History
+
+Before the model reads an email, `gather_context` runs three tools in code: `sender_history` (recent emails from the same sender), `thread` (earlier messages in the thread) and `recent_corrections` (emails the owner moved from alert to inbox). This is a pre-fetch, not a model loop. The tools read Herald's own database, never the mail provider.
+
+- The workspace is bound when the toolbox is built. No tool input has a workspace or email id.
+- A tool sees only emails received before the current one.
+- A tool that fails or takes over 2 s gives nothing, and its name goes into `email.context.failed`. Triage goes on.
+- History goes into the user message inside a fenced `<history>` block. Its text is untrusted, so Herald strips `<history>`, `<message>`, `<email>` and `<business>` tags from it.
+- `email.context` saves what the model saw: repeat counts, the ids it was shown, failed tools and timings.
 
 ## The prompt
 
@@ -116,6 +127,7 @@ The AI writes notes and never sets status. Status changes in two places only: th
 | `EmailSource` | `herald_core.adapters` | None yet. The test-email box posts to the API. |
 | `EventBus` | `herald_server.bus` | `RedisEventBus`, `InMemoryEventBus` |
 | `JobQueue` | `herald_server.queue` | `ArqQueue`, `InlineQueue` |
+| `Tool` / `Toolbox` | `herald_core.tools` (types), `herald_server.tools` (database tools) | `SenderHistoryTool`, `ThreadTool`, `CorrectionsTool` |
 
 ## Configuration
 
@@ -131,6 +143,7 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 
 ## Not built yet
 
+- Model-driven tool calls and business-system tools
 - Alembic migrations (tables are created on startup for now)
 - Auth and per-workspace limits
 - A settings page for editing a workspace after setup (`PUT /config` is ready for it)

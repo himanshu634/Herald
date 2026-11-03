@@ -70,3 +70,35 @@ async def test_thread_id_is_stored(app, client):
     ws = await demo_workspace(client)
     email = await send(app, client, ws, "Hi", "Question", thread_id="t-1")
     assert email["thread_id"] == "t-1"
+
+
+async def test_second_email_sees_the_first(app, client):
+    ws = await demo_workspace(client)
+    first = await send(app, client, ws, "Order", "Where is my order?")
+    second = await send(app, client, ws, "Order again", "Still nothing")
+    assert second["context"]["repeat_7d"] == 1
+    assert second["context"]["recent_ids"] == [first["id"]]
+    assert first["context"]["repeat_7d"] == 0
+
+
+async def test_correction_shows_up_for_the_next_email(app, client):
+    ws = await demo_workspace(client)
+    alerted = await send(app, client, ws, "Hello", "Someone used my card.")
+    assert alerted["status"] == "alerted"
+    moved = await client.post(f"/api/workspaces/{ws}/emails/{alerted['id']}/not-urgent")
+    assert moved.status_code == 200
+    nxt = await send(app, client, ws, "Question", "Does the cabin bag fit?")
+    assert len(nxt["context"]["correction_ids"]) == 1
+
+
+async def test_failed_tool_is_recorded(app, client, monkeypatch):
+    from herald_server.tools.history import SenderHistoryTool
+
+    async def boom(self, *args, **kwargs):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(SenderHistoryTool, "run", boom)
+    ws = await demo_workspace(client)
+    email = await send(app, client, ws, "Order", "Where is my order?")
+    assert email["context"]["failed"] == ["sender_history"]
+    assert email["status"] == "inbox"
