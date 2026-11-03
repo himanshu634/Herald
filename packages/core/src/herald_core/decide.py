@@ -4,7 +4,8 @@ The AI suggests (notes, rule verdicts); this function decides. Order, first matc
 
 1. Safety floor (from the AI or the word check) -> alert, always.
 2. Not for the business (see `not_for_business`) -> closed.
-3. The owner's rules; the most urgent result wins (alert > close).
+3. The owner's rules; the most urgent result wins (alert > close). A set-urgency rule never
+   lowers an urgent email.
 4. Urgent, or anger 5 -> alert.
 5. Anger 4 from an important contact, about to cancel, or the third email about the same
    thing this week (see `repeat_count`) -> alert.
@@ -28,6 +29,8 @@ from herald_core.schema import (
     Urgency,
     WorkspaceConfig,
 )
+
+_URGENCY_ORDER = [Urgency.LOW, Urgency.NORMAL, Urgency.HIGH, Urgency.URGENT]
 
 
 def is_spam(topic: str) -> bool:
@@ -114,9 +117,13 @@ def decide(
     fired = [rules_by_id[v.rule_id] for v in verdicts if v.matched and v.rule_id in rules_by_id]
     fired_ids = [r.id for r in fired]
 
-    for rule in fired:
-        if rule.action is RuleAction.SET_URGENCY and rule.urgency is not None:
-            urgency = rule.urgency
+    # Set-urgency rules: the most urgent one wins, as with every rule. A rule may lower the
+    # AI's urgency for sorting, but never below "urgent": that would turn an alert into an
+    # inbox email (a "damaged -> high" rule burying a bag that broke at the airport). To quiet
+    # an urgent email the owner writes a close rule, which says so.
+    levels = [r.urgency for r in fired if r.action is RuleAction.SET_URGENCY and r.urgency]
+    if levels and urgency is not Urgency.URGENT:
+        urgency = max(levels, key=_URGENCY_ORDER.index)
 
     def route(to: Route, reason: str) -> Decision:
         return Decision(route=to, urgency=urgency, reason=reason, fired_rule_ids=fired_ids)

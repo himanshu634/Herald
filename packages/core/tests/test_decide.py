@@ -20,11 +20,25 @@ CLOSE_ALL = Rule(id="r-close", name="Close everything", when="any email", action
 ALERT_TRAVEL = Rule(
     id="r-travel", name="Travelling soon", when="trip in 48 hours", action=RuleAction.ALERT
 )
+SET_HIGH = Rule(
+    id="r-damaged",
+    name="Damaged bag",
+    when="the bag arrived damaged",
+    action=RuleAction.SET_URGENCY,
+    urgency=Urgency.HIGH,
+)
+SET_LOW = Rule(
+    id="r-ideas",
+    name="Ideas",
+    when="a product idea",
+    action=RuleAction.SET_URGENCY,
+    urgency=Urgency.LOW,
+)
 CONFIG = WorkspaceConfig(
     business_profile="Online luggage brand.",
     topics=["Orders and delivery", "Damaged or defective"],
     important_contacts=["bigcorp.com"],
-    rules=[CLOSE_ALL, ALERT_TRAVEL],
+    rules=[CLOSE_ALL, ALERT_TRAVEL, SET_HIGH, SET_LOW],
 )
 
 
@@ -109,6 +123,31 @@ def test_close_rule_can_quiet_an_angry_email():
 
 def test_calm_but_urgent_alerts():
     assert run(notes(urgency=Urgency.URGENT)).route is Route.ALERT
+
+
+def test_set_urgency_rule_raises_urgency():
+    decision = run(notes(urgency=Urgency.NORMAL), matched=["r-damaged"])
+    assert (decision.route, decision.urgency) == (Route.INBOX, Urgency.HIGH)
+
+
+def test_set_urgency_rule_can_lower_urgency():
+    decision = run(notes(urgency=Urgency.HIGH), matched=["r-ideas"])
+    assert (decision.route, decision.urgency) == (Route.INBOX, Urgency.LOW)
+
+
+@pytest.mark.parametrize("rule_id", ["r-damaged", "r-ideas"])
+def test_set_urgency_rule_never_lowers_an_urgent_email(rule_id):
+    # A bag that breaks at the airport is "urgent" to the AI; the owner's "damaged -> high"
+    # rule must not turn that alert into an inbox email.
+    decision = run(notes(urgency=Urgency.URGENT), matched=[rule_id])
+    assert decision.route is Route.ALERT
+    assert decision.urgency is Urgency.URGENT
+    assert decision.fired_rule_ids == [rule_id]
+
+
+@pytest.mark.parametrize("matched", [["r-damaged", "r-ideas"], ["r-ideas", "r-damaged"]])
+def test_most_urgent_set_urgency_rule_wins(matched):
+    assert run(notes(), matched=matched).urgency is Urgency.HIGH
 
 
 def test_anger_five_alerts():

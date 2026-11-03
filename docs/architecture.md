@@ -57,7 +57,7 @@ flowchart LR
 - `word_check` and `write_notes` run in parallel and write different state keys.
 - `write_notes` waits on `gather_context`. `word_check` does not.
 - If the AI fails (outage, refusal, bad output), the notes are empty and the email goes to "Needs a look". A safety-floor match from the word check still alerts.
-- `decide` order, first match wins: safety floor → not for the business → owner rules (alert beats close) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
+- `decide` order, first match wins: safety floor → not for the business → owner rules (alert beats close; a set-urgency rule never lowers an urgent email) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
 - "Not for the business" means the AI filed the email under "Spam or not for me", is sure, and the sender is not an important contact. That mail closes before the rules and defaults, so a promotion that reads as urgent or names a rule's words stays quiet. `judge_rules` skips it, which saves one model call. Unsure spam and spam from an important contact take the normal path. The safety floor still comes first.
 
 ## History
