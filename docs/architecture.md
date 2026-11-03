@@ -55,6 +55,30 @@ flowchart LR
 - If the AI fails (outage, refusal, bad output), the notes are empty and the email goes to "Needs a look". A safety-floor match from the word check still alerts.
 - `decide` order, first match wins: safety floor → owner rules (alert beats close) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
 
+## The prompt
+
+Claude gets one system prompt for each business and one user message for each email. `herald_core/prompt.py` builds both. `write_notes` and `judge_rules` send the same system prompt, so they share one cache entry. Each call's output schema decides what Claude answers.
+
+| Layer | Changes when | Where it goes |
+| --- | --- | --- |
+| Herald: role, scales, flag definitions, fences | A Herald release | System prompt, first, from `triage.md` |
+| Brand: name, profile, topics, facts, guidance, rules | The owner edits setup | System prompt, in `<business>` |
+| Learned: past corrections | Later spec | — |
+| Email: sender, important marker, subject, body | Every email | User message, in `<email>` |
+
+Building rules:
+
+- The order is fixed: Name, Profile, Topics, Facts, Guidance, Rules. The order is part of the cache key, so it must not depend on the data.
+- An empty section is left out, heading and all. Claude never sees an empty list.
+- A topic is `- Name: meaning`. A topic without a meaning is a bare label.
+- List items stay on one line. Inner whitespace collapses, so an owner's line cannot start a fake section such as `Rules:`.
+- Rules are written as `- id=<id>: <when>`. The rule's name and action are not shown. Claude judges the condition only and does not know which rules alert.
+- The "(important contact)" marker on the email comes from code, with `WorkspaceConfig.is_important`. The contact list never goes into the prompt.
+- The brand name comes from `Workspace.name`. The pipeline passes it with the config.
+- Facts say what is true. Guidance says how to judge. Setup drafts facts only from the owner's description.
+
+To change the general instructions, edit `packages/core/src/herald_core/prompts/triage.md`. It has no placeholders. It is read once at import, so a missing file stops the API and worker from starting. Tests check that it names every urgency, every risk flag and the spam topic.
+
 ## Status
 
 The AI writes notes and never sets status. Status changes in two places only: the decide step (`new` → `alerted`, `needs_a_look`, `inbox` or `closed`) and the owner's actions:
@@ -77,10 +101,10 @@ The AI writes notes and never sets status. Status changes in two places only: th
 ## Multi-tenancy
 
 - Every tenant-owned row has `workspace_id`, and every query filters on it. A test checks that one workspace cannot read another's emails.
-- Each business is a `WorkspaceConfig`: profile, topics, important contacts, owner guidance and rules. Tripfold is seed data in `herald_server/seed.py`.
-- A business is added in one of two ways. One is the setup flow: `POST /api/workspaces/setup` takes a name and description, and the AI drafts topics, guidance and rules (`herald_server/setup.py`). The owner edits the draft and saves it with `PUT /api/workspaces/{id}/config`. The other is a full config posted to `POST /api/workspaces`.
+- Each business is a `WorkspaceConfig`: profile, topics (each with a short meaning), facts, important contacts, owner guidance and rules. Tripfold is seed data in `herald_server/seed.py`.
+- A business is added in one of two ways. One is the setup flow: `POST /api/workspaces/setup` takes a name and description, and the AI drafts topics with meanings, facts, guidance and rules (`herald_server/setup.py`). The owner edits the draft and saves it with `PUT /api/workspaces/{id}/config`. The other is a full config posted to `POST /api/workspaces`.
 - A workspace stays a draft (`setup_done = false`) until its setup is saved. A draft workspace refuses email with `409`, because its config is the AI's unchecked guess.
-- Owner guidance goes into the notes prompt, after the static instructions. It shapes topic, urgency and anger only. The prompt says it cannot silence the safety floor, and the word check runs regardless. Routing stays with rules.
+- Owner guidance goes into the `<business>` block of the system prompt, after the facts (see "The prompt"). It shapes topic, urgency and anger only. The prompt says it cannot silence the safety floor, and the word check runs regardless. Routing stays with rules.
 - Planned: per-workspace caps on AI calls and emails per day.
 
 ## Plug-in points
