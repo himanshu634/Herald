@@ -12,6 +12,7 @@ Needs uv, pnpm (11) and Node 22+. `make help` lists all tasks.
 make install        # uv sync + pnpm install
 make lite           # API on :8000 with no Docker: SQLite, in-memory bus, inline pipeline, fake model
 make web            # SvelteKit on :5173, proxies /api to :8000
+make dev            # full stack in one terminal: Postgres + Redis in Docker, then API, worker and web
 make infra && make api && make worker   # full stack: Postgres + Redis, separate arq worker (each in its own terminal)
 make test           # pytest (core + server) and vitest
 make lint           # ruff check, ruff format --check, prettier + eslint, svelte-check
