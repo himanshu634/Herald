@@ -2,12 +2,11 @@
 	import { goto, replaceState } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { api, type Email, type EmailIn, type Mailbox, type Workspace } from '#lib/api/client.js';
+	import { api, type Email, type Mailbox, type Workspace } from '#lib/api/client.js';
 	import { WorkspaceEvents } from '#lib/events.svelte.js';
 	import BusinessMenu from '#lib/inbox/BusinessMenu.svelte';
 	import EmailPanel from '#lib/inbox/EmailPanel.svelte';
 	import EmailTable from '#lib/inbox/EmailTable.svelte';
-	import SendTestEmail from '#lib/inbox/SendTestEmail.svelte';
 	import ConnectGmail from '#lib/mailbox/ConnectGmail.svelte';
 	import MailboxMenu from '#lib/mailbox/MailboxMenu.svelte';
 	import { liveMailboxes, needsMailbox, readReturn, type Notice } from '#lib/mailbox/mailbox.js';
@@ -44,9 +43,10 @@
 	let view = $state<ViewId>('needs-you');
 	let filters = $state<Filters>({ query: '', urgentOnly: false, angry: false, unsure: false });
 	let chosenId = $state<string | null>(null);
+	// The email the owner opened in full. Keyed by id, so picking another email folds it again.
+	let fullId = $state<string | null>(null);
 
 	let search = $state<HTMLInputElement>();
-	let sender = $state<SendTestEmail>();
 
 	const live = new WorkspaceEvents();
 	// Only a saved setup takes email; drafts wait in the business menu.
@@ -181,17 +181,6 @@
 		}
 	}
 
-	async function send(draft: EmailIn) {
-		if (!workspaceId) return;
-		try {
-			await api.sendTestEmail(workspaceId, draft);
-			toast = 'Sent. Herald is reading it now.';
-			view = 'all';
-		} catch (e) {
-			fail(e);
-		}
-	}
-
 	async function act(action: Action) {
 		if (!selected || busy || !actionsFor(selected.status).includes(action)) return;
 		busy = true;
@@ -212,6 +201,10 @@
 		chosenId = visible[Math.min(visible.length - 1, Math.max(0, index + step))].id;
 	}
 
+	function toggleFull() {
+		if (selected) fullId = fullId === selected.id ? null : selected.id;
+	}
+
 	// Owner shortcuts, from docs/design-system.md. Never while typing or in a dialog.
 	function onkeydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
@@ -226,6 +219,7 @@
 			n: () => act('not-urgent'),
 			i: () => act('to-inbox'),
 			d: () => act('done'),
+			e: toggleFull,
 			'/': () => search?.focus()
 		};
 		const run = keys[event.key];
@@ -282,9 +276,6 @@
 				{/if}
 				{#if workspaces.length}
 					<BusinessMenu {workspaces} bind:selected={workspaceId} />
-				{/if}
-				{#if open}
-					<Button onclick={() => sender?.open()}>Send test email</Button>
 				{/if}
 			</div>
 		</header>
@@ -385,8 +376,16 @@
 				</main>
 
 				{#if selected}
-					<div class="lg:flex lg:w-panel lg:flex-none">
-						<EmailPanel email={selected} {busy} onact={act} />
+					<div
+						class="px-4 pb-4 lg:flex lg:w-panel lg:flex-none lg:border-t lg:border-line lg:py-4 lg:pr-4 lg:pl-0"
+					>
+						<EmailPanel
+							email={selected}
+							{busy}
+							full={fullId === selected.id}
+							ontogglefull={toggleFull}
+							onact={act}
+						/>
 					</div>
 				{/if}
 			</div>
@@ -454,5 +453,4 @@
 	</div>
 </div>
 
-<SendTestEmail bind:this={sender} onsend={send} />
 <Toast message={toast} ondismiss={() => (toast = null)} />

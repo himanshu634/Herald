@@ -30,7 +30,7 @@ export const EMPTY: Record<ViewId, string> = {
 	'in-progress': 'Nothing in progress. Press On it on an email to start it.',
 	done: 'Nothing done yet today.',
 	closed: 'Nothing closed yet. Newsletters and spam land here without bothering you.',
-	all: 'No emails yet. Send a test email to see Herald sort it.'
+	all: 'No emails yet. New mail shows up here as Herald sorts it.'
 };
 
 const STATUS_RANK: Record<EmailStatus, number> = {
@@ -125,6 +125,24 @@ export function actionsFor(status: EmailStatus): Action[] {
 		default:
 			return [];
 	}
+}
+
+/**
+ * Normalise line endings, drop trailing spaces and cap blank lines at one.
+ * The server does this when it reads mail; this also tidies emails stored
+ * before it did, whose HTML was flattened with all its source whitespace.
+ */
+export function tidyBody(body: string): string {
+	return (
+		body
+			// Mail re-encoded more than once can end lines with "\r\r\n"; that is one break.
+			.replace(/\r*\n|\r/g, '\n')
+			.split('\n')
+			.map((line) => line.trimEnd())
+			.join('\n')
+			.replace(/\n{3,}/g, '\n\n')
+			.trim()
+	);
 }
 
 /** Split the body so the lines Herald quoted as proof can be highlighted. */
