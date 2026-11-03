@@ -172,7 +172,12 @@ def _begin(services: Services, workspace_id: str, email_id: str, data: ReplyIn) 
         # cleared can_send must get its own not_sent row back, not a 409.
         existing = _by_key(session, workspace_id, email.id, data.client_key)
         if existing is not None:
-            return _Begun(reply=existing, events=[])
+            # A resend of a draft whose process died mid-send must not show "sending" forever.
+            stale_events = []
+            if existing.status == ReplyStatus.SENDING:
+                stale_events = _expire_stale(session, workspace_id, email.id)
+                session.commit()
+            return _Begun(reply=existing, events=[to_bus(e) for e in stale_events])
         mailbox = session.get(Mailbox, email.mailbox_id) if email.mailbox_id else None
         if mailbox is None or mailbox.workspace_id != workspace_id:
             raise ReplyBlocked("no_mailbox")

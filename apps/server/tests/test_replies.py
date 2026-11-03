@@ -1,5 +1,6 @@
 """The owner's reply to a customer: one send per draft, outcomes, status, tenancy."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -514,3 +515,40 @@ async def test_other_draft_race_is_409(app, client, fake_connector, monkeypatch)
     assert response.status_code == 409
     assert response.json()["detail"] == "already_sending"
     assert fake_connector.calls.count("send_reply") == 0
+
+
+async def test_same_key_on_a_stale_row_turns_it_unknown(app, client, fake_connector):
+    ws, mailbox_id, email_id = await setup(app, client)
+    stale_id = insert_reply(
+        app,
+        ws,
+        mailbox_id,
+        email_id,
+        client_key="draft-0001",
+        status=ReplyStatus.SENDING,
+        created_at=datetime.now(UTC) - timedelta(minutes=3),
+    )
+
+    response = await post_reply(client, ws, email_id, key="draft-0001")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == stale_id
+    assert response.json()["status"] == "unknown"
+    assert [e.data["status"] for e in events_of(app, ws, REPLY_STATUS)] == ["unknown"]
+    assert "send_reply" not in fake_connector.calls
+
+
+async def test_send_timeout_is_unknown(app, client, fake_connector, monkeypatch):
+    ws, _, email_id = await setup(app, client)
+    monkeypatch.setattr(replies, "SEND_TIMEOUT", 0.01)
+
+    async def hang(credentials, reply):
+        fake_connector.calls.append("send_reply")
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(fake_connector, "send_reply", hang)
+
+    response = await post_reply(client, ws, email_id)
+
+    assert response.json()["status"] == "unknown"
+    assert fake_connector.calls.count("send_reply") == 1

@@ -144,7 +144,7 @@ The answer is 200 whatever the outcome; the reply's `status` says it:
 | `not_sent` | The provider refused; nothing went out | `rate_limited`, `auth` (the mailbox moves to `needs_reauth`), `send_not_allowed` (`can_send` turns off until a reconnect), `rejected` |
 | `unknown` | A timeout, a 5xx or any other error. The customer may have it, so the owner checks the mailbox's Sent folder | `unknown` |
 
-A `sending` row older than 2 minutes belongs to a process that died mid-send. The next reply to that email turns it `unknown` (and stages `reply.status`), so it never blocks the email. Two minutes is longer than the slowest send: two requests (a token refresh and the send) under the 60 s timeout.
+A `sending` row older than 2 minutes belongs to a process that died mid-send. The next reply to that email, or a resend of the same draft, turns it `unknown` (and stages `reply.status`), so it never blocks the email. Two minutes is longer than the slowest send: two requests (a token refresh and the send) under the 60 s timeout.
 
 The reply goes to the email's `Reply-To` when that is one plain address (a contact form sends from a no-reply address), and to `From` otherwise. It carries `In-Reply-To` and `References`, and the provider's thread id, so it lands in the customer's thread.
 
