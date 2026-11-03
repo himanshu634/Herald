@@ -33,7 +33,11 @@ def _store_received(
     services: Services, workspace_id: str, data: EmailIn
 ) -> tuple[EmailOut, BusEvent]:
     with Session(services.engine) as session:
-        email = Email(workspace_id=workspace_id, **data.model_dump())
+        # History matches senders by exact string, so store them in one canonical form.
+        email = Email(
+            workspace_id=workspace_id,
+            **{**data.model_dump(), "sender": data.sender.strip().lower()},
+        )
         session.add(email)
         event = add_event(
             session,
@@ -48,7 +52,11 @@ def _store_received(
 
 
 def _move(
-    services: Services, workspace_id: str, email_id: str, to: EmailStatus, *, only_from=None
+    services: Services,
+    workspace_id: str,
+    email_id: str,
+    to: EmailStatus,
+    only_from: EmailStatus | None,
 ) -> tuple[EmailOut, BusEvent]:
     """Owner action: the only way, besides the decide step, that an email's status changes."""
     with Session(services.engine) as session:
@@ -74,6 +82,18 @@ def _move(
         session.refresh(email)
         session.refresh(event)
         return _out(email), to_bus(event)
+
+
+async def _act(
+    services: Services,
+    workspace_id: str,
+    email_id: str,
+    to: EmailStatus,
+    only_from: EmailStatus | None = None,
+) -> EmailOut:
+    email, event = await asyncify(_move)(services, workspace_id, email_id, to, only_from)
+    await services.bus.publish(event)
+    return email
 
 
 @router.get("")
@@ -109,24 +129,18 @@ def get_email(workspace: WorkspaceDep, session: SessionDep, email_id: EmailId) -
 
 @router.post("/{email_id}/on-it")
 async def mark_on_it(workspace: WorkspaceDep, services: ServicesDep, email_id: EmailId) -> EmailOut:
-    email, event = await asyncify(_move)(services, workspace.id, email_id, EmailStatus.IN_PROGRESS)
-    await services.bus.publish(event)
-    return email
+    return await _act(services, workspace.id, email_id, EmailStatus.IN_PROGRESS)
 
 
 @router.post("/{email_id}/not-urgent")
 async def mark_not_urgent(
     workspace: WorkspaceDep, services: ServicesDep, email_id: EmailId
 ) -> EmailOut:
-    email, event = await asyncify(_move)(
+    return await _act(
         services, workspace.id, email_id, EmailStatus.INBOX, only_from=EmailStatus.ALERTED
     )
-    await services.bus.publish(event)
-    return email
 
 
 @router.post("/{email_id}/done")
 async def mark_done(workspace: WorkspaceDep, services: ServicesDep, email_id: EmailId) -> EmailOut:
-    email, event = await asyncify(_move)(services, workspace.id, email_id, EmailStatus.DONE)
-    await services.bus.publish(event)
-    return email
+    return await _act(services, workspace.id, email_id, EmailStatus.DONE)

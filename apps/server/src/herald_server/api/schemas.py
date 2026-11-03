@@ -2,11 +2,14 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from herald_core.history import EmailContext
 from herald_core.schema import Decision, Notes, WorkspaceConfig
 from herald_server.models import EmailStatus, MailboxStatus
 
 
 class WorkspaceIn(BaseModel):
+    """A workspace's name and config: creating one, or saving the owner's reviewed setup."""
+
     name: str = Field(min_length=1, max_length=100)
     config: WorkspaceConfig
 
@@ -39,15 +42,11 @@ class DraftOut(BaseModel):
     drafted: bool = Field(description="False when the AI failed and a plain fallback was used.")
 
 
-class ConfigIn(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    config: WorkspaceConfig
-
-
 class EmailIn(BaseModel):
     sender: str = Field(min_length=3, max_length=320)
     subject: str = Field(max_length=500)
     body: str = Field(max_length=50_000)
+    thread_id: str | None = Field(default=None, max_length=200)
 
 
 class EmailOut(BaseModel):
@@ -56,9 +55,11 @@ class EmailOut(BaseModel):
     sender: str
     subject: str
     body: str
+    thread_id: str | None
     status: EmailStatus
     notes: Notes | None
     decision: Decision | None
+    context: EmailContext | None
     received_at: datetime
 
 

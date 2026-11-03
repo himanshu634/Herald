@@ -76,6 +76,7 @@ class RawMessage(NamedTuple):
     raw: str
     label_ids: list[str]
     internal_date: datetime
+    thread_id: str | None = None
 
 
 def is_inbox_mail(label_ids: list[str]) -> bool:
@@ -260,4 +261,5 @@ class GmailClient:
             data["raw"],
             data.get("labelIds", []),
             _ms_to_datetime(data["internalDate"]),
+            data.get("threadId"),
         )

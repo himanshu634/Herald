@@ -10,7 +10,8 @@ from typing import Protocol
 from anthropic import APIError, AsyncAnthropic
 from pydantic import BaseModel, ValidationError
 
-from herald_core.prompt import email_block, system_prompt
+from herald_core.history import History
+from herald_core.prompt import system_prompt, user_message
 from herald_core.safety import word_check
 from herald_core.schema import (
     SPAM_TOPIC,
@@ -35,11 +36,19 @@ class ModelError(Exception):
 
 class TriageModel(Protocol):
     async def write_notes(
-        self, email: Email, business_name: str, config: WorkspaceConfig
+        self,
+        email: Email,
+        business_name: str,
+        config: WorkspaceConfig,
+        history: History | None = None,
     ) -> Notes: ...
 
     async def judge_rules(
-        self, email: Email, business_name: str, config: WorkspaceConfig
+        self,
+        email: Email,
+        business_name: str,
+        config: WorkspaceConfig,
+        history: History | None = None,
     ) -> list[RuleVerdict]: ...
 
     async def suggest_setup(self, name: str, description: str) -> SetupDraft: ...
@@ -66,7 +75,13 @@ _FAKE_TOPICS = [
 class FakeModel:
     """Deterministic keyword heuristics, so the graph runs without an API key."""
 
-    async def write_notes(self, email: Email, business_name: str, config: WorkspaceConfig) -> Notes:
+    async def write_notes(
+        self,
+        email: Email,
+        business_name: str,
+        config: WorkspaceConfig,
+        history: History | None = None,
+    ) -> Notes:
         text = f"{email.subject}\n{email.body}"
         lower = text.lower()
         topic = next((t.name for t in config.topics if t.name.lower() in lower), None)
@@ -89,12 +104,16 @@ class FakeModel:
         )
 
     async def judge_rules(
-        self, email: Email, business_name: str, config: WorkspaceConfig
+        self,
+        email: Email,
+        business_name: str,
+        config: WorkspaceConfig,
+        history: History | None = None,
     ) -> list[RuleVerdict]:
         lower = f"{email.subject}\n{email.body}".lower()
         verdicts = []
         for rule in config.rules:
-            keywords = [w for w in re.findall(r"[a-z]{6,}", rule.when.lower())]
+            keywords = re.findall(r"[a-z]{6,}", rule.when.lower())
             hit = next((w for w in keywords if w in lower), None)
             verdicts.append(RuleVerdict(rule_id=rule.id, matched=hit is not None, quote=hit))
         return verdicts
@@ -168,16 +187,26 @@ class AnthropicModel:
             raise ModelError(f"No structured output (stop_reason={response.stop_reason})")
         return response.parsed_output
 
-    async def write_notes(self, email: Email, business_name: str, config: WorkspaceConfig) -> Notes:
-        content = email_block(email, config.is_important(email.sender))
+    async def write_notes(
+        self,
+        email: Email,
+        business_name: str,
+        config: WorkspaceConfig,
+        history: History | None = None,
+    ) -> Notes:
+        content = user_message(email, config.is_important(email.sender), history or History())
         return await self._parse(system_prompt(business_name, config), content, Notes)
 
     async def judge_rules(
-        self, email: Email, business_name: str, config: WorkspaceConfig
+        self,
+        email: Email,
+        business_name: str,
+        config: WorkspaceConfig,
+        history: History | None = None,
     ) -> list[RuleVerdict]:
         if not config.rules:
             return []
-        block = email_block(email, config.is_important(email.sender))
+        block = user_message(email, config.is_important(email.sender), history or History())
         content = f"{block}\n\nAnswer each rule in the <business> block."
         system = system_prompt(business_name, config)
         return (await self._parse(system, content, _Verdicts)).verdicts

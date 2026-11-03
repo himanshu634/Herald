@@ -53,59 +53,29 @@ def decide(
         if rule.action is RuleAction.SET_URGENCY and rule.urgency is not None:
             urgency = rule.urgency
 
-    alerting = [r for r in fired if r.action is RuleAction.ALERT]
-    if alerting:
-        return Decision(
-            route=Route.ALERT,
-            urgency=urgency,
-            reason=f"Rule: {alerting[0].name}",
-            fired_rule_ids=fired_ids,
-        )
-    closing = [r for r in fired if r.action is RuleAction.CLOSE]
-    if closing:
-        return Decision(
-            route=Route.CLOSED,
-            urgency=urgency,
-            reason=f"Rule: {closing[0].name}",
-            fired_rule_ids=fired_ids,
-        )
+    def route(to: Route, reason: str) -> Decision:
+        return Decision(route=to, urgency=urgency, reason=reason, fired_rule_ids=fired_ids)
+
+    # Alert rules are checked before close rules, so the more urgent result wins.
+    for action, to in ((RuleAction.ALERT, Route.ALERT), (RuleAction.CLOSE, Route.CLOSED)):
+        rule = next((r for r in fired if r.action is action), None)
+        if rule is not None:
+            return route(to, f"Rule: {rule.name}")
 
     if notes is None:
-        return Decision(
-            route=Route.NEEDS_A_LOOK,
-            urgency=urgency,
-            reason="The AI could not read this email",
-            fired_rule_ids=fired_ids,
-        )
+        return route(Route.NEEDS_A_LOOK, "The AI could not read this email")
 
-    if urgency is Urgency.URGENT or notes.anger == 5:
-        reason = "Urgent" if urgency is Urgency.URGENT else "Extremely angry (anger 5)"
-        return Decision(route=Route.ALERT, urgency=urgency, reason=reason, fired_rule_ids=fired_ids)
-
+    if urgency is Urgency.URGENT:
+        return route(Route.ALERT, "Urgent")
+    if notes.anger == 5:
+        return route(Route.ALERT, "Extremely angry (anger 5)")
     if notes.anger == 4 and config.is_important(sender):
-        return Decision(
-            route=Route.ALERT,
-            urgency=urgency,
-            reason="Angry important contact",
-            fired_rule_ids=fired_ids,
-        )
+        return route(Route.ALERT, "Angry important contact")
     if RiskFlag.ABOUT_TO_CANCEL in ai_flags:
-        return Decision(
-            route=Route.ALERT,
-            urgency=urgency,
-            reason="Customer about to cancel",
-            fired_rule_ids=fired_ids,
-        )
+        return route(Route.ALERT, "Customer about to cancel")
 
     if not notes.sure:
-        return Decision(
-            route=Route.NEEDS_A_LOOK,
-            urgency=urgency,
-            reason="The AI is unsure",
-            fired_rule_ids=fired_ids,
-        )
+        return route(Route.NEEDS_A_LOOK, "The AI is unsure")
     if notes.topic == SPAM_TOPIC:
-        return Decision(
-            route=Route.CLOSED, urgency=urgency, reason=SPAM_TOPIC, fired_rule_ids=fired_ids
-        )
-    return Decision(route=Route.INBOX, urgency=urgency, reason="Routine", fired_rule_ids=fired_ids)
+        return route(Route.CLOSED, SPAM_TOPIC)
+    return route(Route.INBOX, "Routine")

@@ -20,9 +20,6 @@ class Urgency(StrEnum):
     LOW = "low"
 
 
-URGENCY_RANK = {Urgency.LOW: 0, Urgency.NORMAL: 1, Urgency.HIGH: 2, Urgency.URGENT: 3}
-
-
 class RiskFlag(StrEnum):
     SAFETY = "safety"
     ACCOUNT_OR_DATA = "account_or_data"
@@ -163,6 +160,7 @@ class Email(BaseModel):
     sender: str
     subject: str
     body: str
+    thread_id: str | None = None
 
 
 class Quote(BaseModel):
@@ -199,3 +197,15 @@ class Decision(BaseModel):
     reason: str
     fired_rule_ids: list[str] = Field(default_factory=list)
     floor_flags: list[RiskFlag] = Field(default_factory=list)
+
+
+class Alert(BaseModel):
+    """What an email raises when `decide` routes it to "alert". SSE sends it as `alert.sent`."""
+
+    workspace_id: str
+    email_id: str
+    title: str
+    summary: str
+    reason: str
+    quote: str | None = None
+    link: str | None = None
