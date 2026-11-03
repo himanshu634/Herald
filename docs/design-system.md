@@ -76,7 +76,13 @@ The status words are fixed: **Needs you now, Needs a look, Inbox, In progress, D
 
 ### Type
 
-One family: **Albert Sans** (variable, self-hosted through `@fontsource-variable/albert-sans`). All figures are tabular. Each size carries its own line height.
+One family: **Schibsted Grotesk** (variable, self-hosted through `@fontsource-variable/schibsted-grotesk`). It was drawn for news reading at small sizes, stays firm in dense tables and has a real 800 weight. Each size carries its own line height.
+
+One mono: **JetBrains Mono** (`@fontsource-variable/jetbrains-mono`), through `font-mono`. Use it only for things people copy or type: shortcut keys (`Kbd` uses it), order IDs and email addresses. Never for body text or for numbers in tables.
+
+Figures are proportional by default. Add `tabular-nums` only where a column holds nothing but digits, such as counts. Schibsted's tabular set also widens `, . : ; # %`, so on times ("9:47 am"), amounts ("₹6,499") or prose it puts gaps around the punctuation. That is why `body` does not set it.
+
+A replacement face must have tabular figures (`tnum`), its own ₹ and weights up to 800. Albert Sans was dropped because it has no tabular figures at all.
 
 | Utility | Size | Weight | Use for |
 | --- | --- | --- | --- |
