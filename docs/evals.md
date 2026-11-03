@@ -11,10 +11,17 @@ make eval ARGS="--case sue-is-a-name"       # one case while you fix it
 make eval ARGS="--tag safety_floor"         # one slice
 make eval ARGS="--compare packages/evals/results/<earlier>.json"
 make eval ARGS="--rescore packages/evals/results/<earlier>.json"   # new labels or checks, no model calls
+make eval ARGS="--compare packages/evals/baselines/2026-11-04-claude-haiku-5-5.json"
 uv run herald-evals --model fake            # offline smoke run of the harness itself
 ```
 
 `make eval` needs `ANTHROPIC_API_KEY` in the environment or in `.env`. The model is `HERALD_MODEL_NAME` (default `claude-haiku-5-5`), or `--model-name`. Each run writes `<time>-<model>.md` and `.json` to `packages/evals/results/`, which git ignores.
+
+`--rescore` scores the recorded notes and verdicts again. It assumes the case emails have not changed since that run; a case whose email changed needs a real run.
+
+## The baseline
+
+`packages/evals/baselines/` holds the reference run that fixes are compared against: [2026-11-04-claude-haiku-5-5.md](../packages/evals/baselines/2026-11-04-claude-haiku-5-5.md), three runs per case on Claude Haiku 5.5. Every case in it is still unreviewed, so it is a draft. After a fix that is kept, replace it with the new run.
 
 ## What is measured
 

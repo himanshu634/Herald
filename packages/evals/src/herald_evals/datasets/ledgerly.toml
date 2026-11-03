@@ -188,9 +188,9 @@ This is the third client of ours this week who can't get past the two-step code 
 recommended Ledgerly to all of them. Frankly this is getting embarrassing for us and we need
 it fixed now.
 """
-note = "product-scope.md says an important contact 'makes moderate anger worth an alert'. decide alerts an important contact only at anger 4, so at anger 3 this goes to the inbox."
+note = "product-scope.md disagrees with itself: its setup table says an important contact 'makes moderate anger worth an alert', its decide table (and decide) say anger 4. The email has no ultimatum, so anger 3 fits the scale. Either route is right until the spec settles it."
 [cases.expect]
-route = "alert"
+route = ["alert", "inbox"]
 topic = "Account and login"
 anger = [3, 4]
 
