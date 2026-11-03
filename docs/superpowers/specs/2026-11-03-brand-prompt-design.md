@@ -120,6 +120,7 @@ Expected reading: topic "Damaged or defective", urgency high, anger 2 or 3, flag
 - **Order is fixed:** Name, Profile, Topics, Facts, Guidance, Rules. The order is part of the cache key, so it must not depend on the data.
 - **Empty sections are left out.** Tripfold has no guidance, so there is no "Guidance:" heading. Claude never sees an empty list.
 - **A topic without a meaning** is written as a bare label: `- Questions`.
+- **List items stay on one line.** Inner whitespace in topic names, meanings, facts, guidance and rule conditions collapses to single spaces, so a newline in an owner's line cannot start a fake section such as `Rules:`. The profile keeps its own line breaks.
 - **Rules are written as `- id=<id>: <when>`.** The id is how a verdict is matched to its rule. The rule's name and action are not shown: Claude judges the condition only, and must not know which rules alert.
 - **The important-contact marker comes from code**, using `WorkspaceConfig.is_important(sender)`. The contact list itself never goes into the prompt. It would make the prompt longer and show one customer's address in every other customer's call.
 - **The brand name comes from `Workspace.name`.** It is not copied into `WorkspaceConfig`. The pipeline passes it with the config.
@@ -242,4 +243,4 @@ Plain functions. The only I/O is reading `triage.md` once at import.
 
 ## Open items
 
-- **Order of work.** The rules section only makes sense once the two calls are one. Recommended: plan this spec and the single-call spec together, and implement them in one branch. If this spec ships first, the notes call would carry rule instructions it cannot answer.
+- **Order of work (resolved).** This spec ships before the single-call change. Until then, `write_notes` and `judge_rules` both send the same system prompt, so they share one cache entry. Each call's output schema decides what Claude answers: `Notes` for the notes call, the verdict list for the rules call. When the two calls merge, the prompt does not change; only the output schema does.
