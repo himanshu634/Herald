@@ -19,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
-from herald_core.decide import decide
+from herald_core.decide import decide, not_for_business
 from herald_core.history import (
     RECENT_CORRECTIONS,
     SENDER_HISTORY,
@@ -95,8 +95,13 @@ def build_graph(model: TriageModel) -> CompiledStateGraph:
             return {"notes": None}
 
     async def judge_rules(state: TriageState) -> TriageState:
-        config = state["config"]
-        if not config.rules or state.get("notes") is None:
+        config, notes = state["config"], state.get("notes")
+        # Mail that decide will close before the rules needs no verdicts: skip the model call.
+        if (
+            not config.rules
+            or notes is None
+            or not_for_business(notes, config, state["email"].sender)
+        ):
             return {"verdicts": []}
         try:
             verdicts = await model.judge_rules(

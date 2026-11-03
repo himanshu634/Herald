@@ -140,6 +140,8 @@ def test_triage_md_matches_the_code():
     for urgency in Urgency:
         assert urgency.value in TRIAGE_INSTRUCTIONS
     assert SPAM_TOPIC in TRIAGE_INSTRUCTIONS
+    # Spam is judged by whether the mail is about the business, not by who sent it.
+    assert "about this business" in TRIAGE_INSTRUCTIONS
     # No brand data belongs in the fixed instructions.
     assert "</business>" not in TRIAGE_INSTRUCTIONS
     assert "Name:" not in TRIAGE_INSTRUCTIONS

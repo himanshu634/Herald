@@ -54,6 +54,9 @@ class TriageModel(Protocol):
     async def suggest_setup(self, name: str, description: str) -> SetupDraft: ...
 
 
+# Lines found in promotions and newsletters, never in a customer's own email.
+_FAKE_BULK_MARKERS = ("unsubscribe", "view in browser", "email preferences", "% off")
+
 # FakeModel's topic guesses: a word in the description gives a topic.
 _FAKE_TOPICS = [
     (("order", "deliver", "ship"), "Orders and delivery", "Where an order is and when it arrives"),
@@ -84,9 +87,13 @@ class FakeModel:
     ) -> Notes:
         text = f"{email.subject}\n{email.body}"
         lower = text.lower()
-        topic = next((t.name for t in config.topics if t.name.lower() in lower), None)
-        if topic is None:
-            topic = SPAM_TOPIC if "unsubscribe" in lower else config.topics[0].name
+        # Bulk-mail footers win over topic words: a sale email that names "orders" is still
+        # not about this business.
+        if any(marker in lower for marker in _FAKE_BULK_MARKERS):
+            topic = SPAM_TOPIC
+        else:
+            topic = next((t.name for t in config.topics if t.name.lower() in lower), None)
+            topic = topic or config.topics[0].name
         letters = [c for c in text if c.isalpha()]
         caps = sum(c.isupper() for c in letters) / max(len(letters), 1)
         anger = 5 if caps > 0.6 else 3 if text.count("!") >= 3 else 1

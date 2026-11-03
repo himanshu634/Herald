@@ -1,5 +1,6 @@
 import asyncio
 
+import pytest
 from pydantic import BaseModel
 
 from herald_core.graph import build_graph, triage
@@ -64,6 +65,69 @@ async def test_rule_closes_newsletter():
     )
     assert state["decision"].route is Route.CLOSED
     assert state["decision"].fired_rule_ids == ["r-newsletter"]
+
+
+class CountingModel(FakeModel):
+    def __init__(self) -> None:
+        self.rule_calls = 0
+
+    async def judge_rules(self, email, business_name, config, history=None):
+        self.rule_calls += 1
+        return await super().judge_rules(email, business_name, config, history)
+
+
+ALERT_ON_CUSTOMERS = CONFIG.model_copy(
+    update={
+        "rules": [
+            Rule(
+                id="r-public",
+                name="Going public",
+                when="customer threatens social media review",
+                action=RuleAction.ALERT,
+            )
+        ]
+    }
+)
+
+
+@pytest.mark.parametrize(
+    ("subject", "body"),
+    [
+        ("SALE IS LIVE: Creative Cloud Pro now Rs 999/mo", "Ends today! 40% off. Unsubscribe."),
+        ("Why isn't AI showing up in productivity?", "Customer review roundup. Unsubscribe."),
+        ("unreal.julie and more in your feed", "Manage your email preferences."),
+    ],
+)
+async def test_promotions_close_without_judging_rules(subject, body):
+    model = CountingModel()
+    state = await triage(
+        build_graph(model), email(subject, body), ALERT_ON_CUSTOMERS, business_name="Tripfold"
+    )
+    assert state["decision"].route is Route.CLOSED
+    assert state["verdicts"] == []
+    assert model.rule_calls == 0
+
+
+async def test_customer_email_still_judges_rules():
+    model = CountingModel()
+    state = await triage(
+        build_graph(model),
+        email("Bad experience", "I will post a review on social media about this customer care."),
+        ALERT_ON_CUSTOMERS,
+        business_name="Tripfold",
+    )
+    assert model.rule_calls == 1
+    assert state["decision"].route is Route.ALERT
+
+
+async def test_floor_word_in_a_newsletter_still_alerts():
+    state = await triage(
+        build_graph(FakeModel()),
+        email("Today's epaper", "Court rules on the fraud case. Unsubscribe."),
+        ALERT_ON_CUSTOMERS,
+        business_name="Tripfold",
+    )
+    assert state["decision"].route is Route.ALERT
 
 
 class BrokenModel(FakeModel):
