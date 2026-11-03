@@ -4,6 +4,7 @@ uv run herald-evals                         # every dataset, Claude, one run eac
 uv run herald-evals --repeats 3             # three runs each, to see unstable cases
 uv run herald-evals --case sue-is-a-name    # one case while fixing it
 uv run herald-evals --compare packages/evals/results/<earlier>.json
+uv run herald-evals --rescore packages/evals/results/<earlier>.json   # new labels, no calls
 uv run herald-evals --model fake            # offline smoke run of the harness itself
 """
 
@@ -22,7 +23,7 @@ from herald_core.model import DEFAULT_MODEL, AnthropicModel, FakeModel, TriageMo
 from herald_core.prompt import TRIAGE_INSTRUCTIONS
 from herald_evals import dataset as ds
 from herald_evals.report import markdown, run_record, write
-from herald_evals.runner import run_all, stderr
+from herald_evals.runner import Trial, run_all, stderr
 from herald_evals.score import score_trials
 
 RESULTS = Path(__file__).resolve().parents[2] / "results"
@@ -86,9 +87,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--reviewed-only", action="store_true", help="Only hand-checked cases.")
     parser.add_argument("--compare", type=Path, help="An earlier run's JSON to compare with.")
     parser.add_argument("--out", type=Path, default=RESULTS, help="Where results are written.")
+    parser.add_argument(
+        "--rescore",
+        type=Path,
+        help="Score an earlier run's JSON against the current labels, with no model calls.",
+    )
     args = parser.parse_args(argv)
 
-    datasets = [ds.load_named(n) for n in args.dataset or ds.builtin_names()]
+    recorded = json.loads(args.rescore.read_text(encoding="utf-8")) if args.rescore else None
+    names = args.dataset or (list(recorded["datasets"]) if recorded else ds.builtin_names())
+    datasets = [ds.load_named(n) for n in names]
     work = [
         (d, c)
         for d in datasets
@@ -99,16 +107,22 @@ def main(argv: list[str] | None = None) -> None:
     ]
     if not work:
         raise SystemExit("No cases match.")
-    model = _model(args.model, args.model_name)
     started = datetime.now(UTC)
+    if recorded:
+        wanted = {(d.name, c.id) for d, c in work}
+        trials = [
+            t
+            for t in (Trial.model_validate(raw) for raw in recorded["trials"])
+            if (t.dataset, t.case_id) in wanted
+        ]
+        _report(args, datasets, work, trials, recorded["meta"] | {"rescored": _stamp(started)})
+        return
+    model = _model(args.model, args.model_name)
     trials = asyncio.run(
         run_all(model, work, repeats=args.repeats, concurrency=args.concurrency, progress=stderr)
     )
-
-    cases = {(d.name, c.id): c for d, c in work}
-    scored = score_trials(cases, trials)
     meta = {
-        "started": started.strftime("%Y-%m-%d %H:%M UTC"),
+        "started": _stamp(started),
         "model": args.model,
         "model_name": args.model_name if args.model == "anthropic" else "fake",
         # AnthropicModel sets no temperature, so the API default applies.
@@ -117,13 +131,32 @@ def main(argv: list[str] | None = None) -> None:
         "prompt_hash": hashlib.sha256(TRIAGE_INSTRUCTIONS.encode()).hexdigest()[:12],
         "commit": _commit(),
     }
+    _report(args, datasets, work, trials, meta)
+
+
+def _stamp(when: datetime) -> str:
+    return when.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _report(
+    args: argparse.Namespace,
+    datasets: list[ds.Dataset],
+    work: list[tuple[ds.Dataset, ds.Case]],
+    trials: list[Trial],
+    meta: dict,
+) -> None:
+    cases = {(d.name, c.id): c for d, c in work}
+    rule_ids = {d.name: {r.id for r in d.config.rules} for d in datasets}
+    scored = score_trials(cases, trials, rule_ids)
     info = {
         d.name: {"business": d.business, "config_ref": d.config_ref, "config_hash": d.config_hash()}
         for d in datasets
     }
     previous = json.loads(args.compare.read_text(encoding="utf-8")) if args.compare else None
     report = markdown(meta, scored, previous)
-    stem = started.strftime("%Y%m%d-%H%M%S") + f"-{meta['model_name']}"
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    suffix = "-rescored" if "rescored" in meta else ""
+    stem = f"{stamp}-{meta['model_name']}{suffix}"
     json_path, md_path = write(args.out, stem, run_record(meta, info, scored), report)
     print(report)
     stderr(f"Report: {md_path}\nRun record: {json_path}")

@@ -47,12 +47,29 @@ _QUOTE_MARKS = re.compile(r"^[\"'“”‘’]+|[\"'“”‘’]+$")
 
 
 def grounded(quote: str, case: Case) -> bool:
-    """True when the quote is a line from this email (subject or body), not from history."""
+    """True when the quote is a line from this email, not from history.
+
+    The prompt asks for lines from the <email> block, whose header lines ("From: ...",
+    "Subject: ...") count as lines of the email.
+    """
     text = _norm(_QUOTE_MARKS.sub("", quote.strip()))
-    return bool(text) and text in _norm(f"{case.subject}\n{case.body}")
+    email = f"From: {case.sender}\nSubject: {case.subject}\n{case.body}"
+    return bool(text) and text in _norm(email)
 
 
-def check(case: Case, trial: Trial) -> list[Check]:
+def rule_talk(summary: str, rule_ids: Iterable[str]) -> bool:
+    """True when the summary talks about the owner's rules instead of the email.
+
+    The summary is what the owner reads on an alert. Rule verdicts have their own call, so a
+    line like "the travel-soon rule does not match" is noise to them. Only ids with a dash or
+    underscore are matched: a plain-word id such as "corporate" is also an ordinary word.
+    """
+    ids = [re.escape(i) for i in rule_ids if re.search(r"[-_]", i)]
+    pattern = "|".join([r"\brules?\b", *(rf"\b{i}\b" for i in ids)])
+    return re.search(pattern, summary, re.I) is not None
+
+
+def check(case: Case, trial: Trial, rule_ids: Iterable[str] = ()) -> list[Check]:
     expect, notes = case.expect, trial.notes
     checks = [
         Check(
@@ -119,6 +136,15 @@ def check(case: Case, trial: Trial) -> list[Check]:
                 ok=matched == want,
                 expected="yes" if want else "no",
                 got=got if verdict else "no (not judged)",
+            )
+        )
+    if notes and rule_talk(notes.summary, rule_ids):
+        checks.append(
+            Check(
+                name="summary",
+                ok=False,
+                expected="about the email, not the rules",
+                got=notes.summary,
             )
         )
     for quote in notes.quotes if notes else []:
@@ -199,8 +225,10 @@ class Scores:
     floor_either: Ratio = field(default_factory=Ratio)
     # Trials where the word check raised a floor flag the label does not expect. The floor
     # always alerts, so each one is an alert no rule can undo.
-    word_false_alarms: list[str] = field(default_factory=list)
+    word_false_alarms: Counter = field(default_factory=Counter)
     quotes: Ratio = field(default_factory=Ratio)
+    # Summaries that stay about the email (see `rule_talk`).
+    summaries: Ratio = field(default_factory=Ratio)
     by_tag: dict[str, Ratio] = field(default_factory=lambda: defaultdict(Ratio))
     confusion: Counter = field(default_factory=Counter)
     ms: list[int] = field(default_factory=list)
@@ -214,9 +242,19 @@ class Scores:
         return round(statistics.median(ordered)), p95
 
 
-def score_trials(cases: dict[tuple[str, str], Case], trials: Iterable[Trial]) -> list[Scored]:
+def score_trials(
+    cases: dict[tuple[str, str], Case],
+    trials: Iterable[Trial],
+    rule_ids: dict[str, set[str]] | None = None,
+) -> list[Scored]:
+    """`rule_ids` maps each dataset to its config's rule ids, for the summary check."""
+    rule_ids = rule_ids or {}
     return [
-        Scored(case=(case := cases[(t.dataset, t.case_id)]), trial=t, checks=check(case, t))
+        Scored(
+            case=(case := cases[(t.dataset, t.case_id)]),
+            trial=t,
+            checks=check(case, t, rule_ids.get(t.dataset, set())),
+        )
         for t in trials
     ]
 
@@ -260,9 +298,11 @@ def summarise(scored: Sequence[Scored]) -> Scores:
             s.floor_words.add(flag in trial.word_flags)
             s.floor_either.add(flag in ai_flags or flag in trial.word_flags)
         if extra := (set(trial.word_flags) & FLOOR_FLAGS) - expect.floor:
-            s.word_false_alarms.append(f"{trial.dataset}/{x.case.id}: {', '.join(sorted(extra))}")
+            s.word_false_alarms[f"{trial.dataset}/{x.case.id}: {', '.join(sorted(extra))}"] += 1
         for quote in notes.quotes if notes else []:
             s.quotes.add(grounded(quote.text, x.case))
+        if notes:
+            s.summaries.add(all(c.name != "summary" for c in x.checks))
         for tag in x.case.tags:
             s.by_tag[tag].add(x.passed)
         label = expect.route[0] if len(expect.route) == 1 else "either"

@@ -93,14 +93,15 @@ rules = { invoices-broken = true, payout-late = false }
 anger = [1, 2]
 
 [[cases]]
-id = "payout-five-days-late"
+id = "payout-a-week-late"
 tags = ["rule"]
 sender = "karan.motion@gmail.com"
 subject = "Payout not received"
 body = """
-My client paid invoice LG-2219 on Monday the 1st and Ledgerly shows it as paid. It's Monday
-the 8th and nothing has reached my HDFC account. I need this for rent.
+My client paid invoice LG-2219 on Monday the 1st and Ledgerly shows it as paid. It's Friday
+the 12th and nothing has reached my HDFC account. I need this for rent.
 """
+note = "Due on Wednesday the 3rd (two working days), so 7 working days late. An earlier draft said Monday the 8th, which is exactly 3 days late and not 'more than 3': the model was right to say no."
 [cases.expect]
 route = "alert"
 topic = "Payouts"
@@ -187,7 +188,7 @@ This is the third client of ours this week who can't get past the two-step code 
 recommended Ledgerly to all of them. Frankly this is getting embarrassing for us and we need
 it fixed now.
 """
-note = "Anger 4 from an important contact alerts."
+note = "product-scope.md says an important contact 'makes moderate anger worth an alert'. decide alerts an important contact only at anger 4, so at anger 3 this goes to the inbox."
 [cases.expect]
 route = "alert"
 topic = "Account and login"

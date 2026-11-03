@@ -55,6 +55,7 @@ def _headline(columns: dict[str, Scores]) -> list[str]:
         ("Urgency right", "urgency"),
         ("Anger in range", "anger"),
         ("Quotes taken from the email", "quotes"),
+        ("Summaries free of rule talk", "summaries"),
     ]
     for label, metric in rows:
         cells = [
@@ -191,8 +192,9 @@ def markdown(meta: dict, scored: Sequence[Scored], previous: dict | None = None)
         f"| Either (what the owner gets) | {total.floor_either} |",
         "",
         "Word check raised a floor flag the label does not expect "
-        f"({len(total.word_false_alarms)}). No rule can undo these alerts:",
-        *(f"- {w}" for w in sorted(set(total.word_false_alarms)) or ["none"]),
+        f"({total.word_false_alarms.total()} runs). No rule can undo these alerts:",
+        *(f"- {w} ×{n}" for w, n in sorted(total.word_false_alarms.items())),
+        *(["- none"] if not total.word_false_alarms else []),
         "",
         "## Rules",
         "",

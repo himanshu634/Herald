@@ -11,7 +11,7 @@ from herald_evals import dataset as ds
 from herald_evals.cli import main
 from herald_evals.report import markdown
 from herald_evals.runner import Trial, run_all
-from herald_evals.score import check, grounded, score_trials, summarise
+from herald_evals.score import check, grounded, rule_talk, score_trials, summarise
 from herald_server.seed import TRIPFOLD
 
 
@@ -97,10 +97,20 @@ def _trial(route=Route.INBOX, quotes=(), verdicts=(), word_flags=(), errors=()):
     )
 
 
+def test_summaries_that_talk_about_rules_are_caught():
+    ids = {"travel-soon", "corporate"}
+    assert rule_talk("The travel-soon rule does not match.", ids)
+    assert rule_talk("Not travel-soon.", ids)
+    assert not rule_talk("A corporate order for 250 bags.", ids)
+    assert not rule_talk("Bag late before a flight.", ids)
+
+
 def test_quotes_are_matched_with_whitespace_collapsed():
     case = _case(route="alert")
     assert grounded("I fly   tomorrow at 7 am.", case)
     assert grounded('"Flight tomorrow"', case)
+    # The <email> block's header lines are lines of the email too.
+    assert grounded("Subject: Flight tomorrow", case)
     assert not grounded("I fly on Friday", case)
     assert not grounded("  ", case)
 
@@ -182,6 +192,16 @@ def test_fake_run_writes_a_report(tmp_path, capsys):
     files = sorted(p.suffix for p in tmp_path.iterdir())
     assert files == [".json", ".md"]
     assert "# Herald score report" in capsys.readouterr().out
+
+
+def test_rescore_reads_an_earlier_run_without_a_model(tmp_path, capsys):
+    main(["--model", "fake", "--dataset", "ledgerly", "--out", str(tmp_path / "first")])
+    first = next((tmp_path / "first").glob("*.json"))
+    capsys.readouterr()
+    main(["--rescore", str(first), "--out", str(tmp_path / "again")])
+    again = next((tmp_path / "again").glob("*.json"))
+    assert again.name.endswith("-rescored.json")
+    assert "ledgerly" in capsys.readouterr().out
 
 
 def test_report_names_unreviewed_cases():
