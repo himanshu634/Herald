@@ -1,0 +1,14 @@
+[project]
+name = "herald-core"
+version = "0.1.0"
+description = "Business-agnostic email triage core: LangGraph pipeline, safety floor and decide step."
+requires-python = ">=3.13"
+dependencies = [
+    "anthropic>=0.60",
+    "langgraph>=1.0",
+    "pydantic>=2.11",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"

@@ -1,0 +1,129 @@
+"""Emails in one workspace: the test-email box, the inbox list and the owner's actions."""
+
+from typing import Annotated
+
+from asyncer import asyncify
+from fastapi import APIRouter, HTTPException, Path, Query, status
+from sqlmodel import Session, col, select
+
+from herald_server.api.deps import QueueDep, ServicesDep, SessionDep, WorkspaceDep
+from herald_server.api.schemas import EmailIn, EmailOut
+from herald_server.bus import BusEvent
+from herald_server.events import EMAIL_RECEIVED, EMAIL_STATUS, add_event, to_bus
+from herald_server.models import Correction, Email, EmailStatus
+from herald_server.services import Services
+
+router = APIRouter(prefix="/api/workspaces/{workspace_id}/emails", tags=["emails"])
+
+EmailId = Annotated[str, Path()]
+
+
+def _out(email: Email) -> EmailOut:
+    return EmailOut.model_validate(email, from_attributes=True)
+
+
+def _get_email(session: Session, workspace_id: str, email_id: str) -> Email:
+    email = session.get(Email, email_id)
+    if email is None or email.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Email not found")
+    return email
+
+
+def _store_received(
+    services: Services, workspace_id: str, data: EmailIn
+) -> tuple[EmailOut, BusEvent]:
+    with Session(services.engine) as session:
+        email = Email(workspace_id=workspace_id, **data.model_dump())
+        session.add(email)
+        event = add_event(
+            session,
+            workspace_id,
+            EMAIL_RECEIVED,
+            {"email_id": email.id, "sender": email.sender, "subject": email.subject},
+        )
+        session.commit()
+        session.refresh(email)
+        session.refresh(event)
+        return _out(email), to_bus(event)
+
+
+def _move(
+    services: Services, workspace_id: str, email_id: str, to: EmailStatus, *, only_from=None
+) -> tuple[EmailOut, BusEvent]:
+    """Owner action: the only way, besides the decide step, that an email's status changes."""
+    with Session(services.engine) as session:
+        email = _get_email(session, workspace_id, email_id)
+        previous = email.status
+        if only_from is not None and previous is not only_from:
+            raise HTTPException(status_code=409, detail=f"Email is {previous}, not {only_from}")
+        email.status = to
+        event = add_event(
+            session, workspace_id, EMAIL_STATUS, {"email_id": email.id, "from": previous, "to": to}
+        )
+        if previous is EmailStatus.ALERTED and to is EmailStatus.INBOX:
+            session.add(
+                Correction(
+                    workspace_id=workspace_id,
+                    email_id=email.id,
+                    field="route",
+                    from_value="alert",
+                    to_value="inbox",
+                )
+            )
+        session.commit()
+        session.refresh(email)
+        session.refresh(event)
+        return _out(email), to_bus(event)
+
+
+@router.get("")
+def list_emails(
+    workspace: WorkspaceDep,
+    session: SessionDep,
+    status_: Annotated[EmailStatus | None, Query(alias="status")] = None,
+) -> list[EmailOut]:
+    query = select(Email).where(Email.workspace_id == workspace.id)
+    if status_ is not None:
+        query = query.where(Email.status == status_)
+    rows = session.exec(query.order_by(col(Email.received_at).desc())).all()
+    return [_out(row) for row in rows]
+
+
+@router.post("", status_code=status.HTTP_202_ACCEPTED)
+async def receive_test_email(
+    data: EmailIn, workspace: WorkspaceDep, services: ServicesDep, queue: QueueDep
+) -> EmailOut:
+    email, event = await asyncify(_store_received)(services, workspace.id, data)
+    await services.bus.publish(event)
+    await queue.enqueue_email(email.id)
+    return email
+
+
+@router.get("/{email_id}")
+def get_email(workspace: WorkspaceDep, session: SessionDep, email_id: EmailId) -> EmailOut:
+    return _out(_get_email(session, workspace.id, email_id))
+
+
+@router.post("/{email_id}/on-it")
+async def mark_on_it(workspace: WorkspaceDep, services: ServicesDep, email_id: EmailId) -> EmailOut:
+    email, event = await asyncify(_move)(services, workspace.id, email_id, EmailStatus.IN_PROGRESS)
+    await services.bus.publish(event)
+    return email
+
+
+@router.post("/{email_id}/not-urgent")
+async def mark_not_urgent(
+    workspace: WorkspaceDep, services: ServicesDep, email_id: EmailId
+) -> EmailOut:
+    email, event = await asyncify(_move)(
+        services, workspace.id, email_id, EmailStatus.INBOX, only_from=EmailStatus.ALERTED
+    )
+    await services.bus.publish(event)
+    return email
+
+
+@router.post("/{email_id}/done")
+async def mark_done(workspace: WorkspaceDep, services: ServicesDep, email_id: EmailId) -> EmailOut:
+    email, event = await asyncify(_move)(services, workspace.id, email_id, EmailStatus.DONE)
+    await services.bus.publish(event)
+    return email

@@ -1,0 +1,12 @@
+{
+  "name": "herald",
+  "private": true,
+  "packageManager": "pnpm@11.2.2",
+  "scripts": {
+    "dev:web": "pnpm -C apps/web dev",
+    "build:web": "pnpm -C apps/web build",
+    "check:web": "pnpm -C apps/web check",
+    "lint:web": "pnpm -C apps/web lint",
+    "test:web": "pnpm -C apps/web test"
+  }
+}
