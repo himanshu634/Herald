@@ -11,7 +11,7 @@ import {
 	type Filters
 } from './inbox';
 
-const NO_FILTERS: Filters = { query: '', urgentOnly: false, angry: false, unsure: false };
+const NO_FILTERS: Filters = { query: '', urgentOnly: false, unsure: false };
 
 function email(id: string, over: Partial<Email> = {}): Email {
 	return {
@@ -62,7 +62,7 @@ describe('visibleEmails', () => {
 		]);
 	});
 
-	it('filters by search text, anger and unsure notes', () => {
+	it('filters by search text and unsure notes', () => {
 		const list = [
 			email('ritika', { subject: 'Flight on Thursday', notes: notes('urgent', 2) }),
 			email('arjun', { subject: 'Refund', notes: notes('urgent', 4) }),
@@ -71,9 +71,6 @@ describe('visibleEmails', () => {
 		expect(visibleEmails(list, 'all', { ...NO_FILTERS, query: 'flight' }).map((e) => e.id)).toEqual(
 			['ritika']
 		);
-		expect(visibleEmails(list, 'all', { ...NO_FILTERS, angry: true }).map((e) => e.id)).toEqual([
-			'arjun'
-		]);
 		expect(visibleEmails(list, 'all', { ...NO_FILTERS, unsure: true }).map((e) => e.id)).toEqual([
 			'sunita'
 		]);

@@ -41,7 +41,7 @@
 	let connecting = $state(false);
 
 	let view = $state<ViewId>('needs-you');
-	let filters = $state<Filters>({ query: '', urgentOnly: false, angry: false, unsure: false });
+	let filters = $state<Filters>({ query: '', urgentOnly: false, unsure: false });
 	let chosenId = $state<string | null>(null);
 	// The email the owner opened in full. Keyed by id, so picking another email folds it again.
 	let fullId = $state<string | null>(null);
@@ -340,7 +340,6 @@
 							class="h-control-md w-56 rounded-sm border border-control bg-surface px-2.5 text-sm"
 						/>
 						<FilterChip bind:pressed={filters.urgentOnly}>Urgent</FilterChip>
-						<FilterChip bind:pressed={filters.angry}>Anger 4+</FilterChip>
 						<FilterChip bind:pressed={filters.unsure}>Herald unsure</FilterChip>
 					</div>
 
@@ -355,7 +354,7 @@
 							class="rounded-lg border border-dashed border-line-strong bg-surface px-6 py-10 text-center"
 						>
 							<p class="text-lg font-bold">
-								{filters.query || filters.urgentOnly || filters.angry || filters.unsure
+								{filters.query || filters.urgentOnly || filters.unsure
 									? 'No emails match these filters.'
 									: EMPTY[view]}
 							</p>

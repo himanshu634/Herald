@@ -65,7 +65,7 @@ function urgencyRank(email: Email): number {
 	return urgency ? URGENCY_RANK[urgency] : 4;
 }
 
-export type Filters = { query: string; urgentOnly: boolean; angry: boolean; unsure: boolean };
+export type Filters = { query: string; urgentOnly: boolean; unsure: boolean };
 
 export function matches(email: Email, filters: Filters): boolean {
 	const query = filters.query.trim().toLowerCase();
@@ -77,7 +77,6 @@ export function matches(email: Email, filters: Filters): boolean {
 	}
 	if (filters.urgentOnly && (email.decision?.urgency ?? email.notes?.urgency) !== 'urgent')
 		return false;
-	if (filters.angry && (email.notes?.anger ?? 0) < 4) return false;
 	if (filters.unsure && email.notes?.sure !== false) return false;
 	return true;
 }
