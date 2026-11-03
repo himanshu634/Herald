@@ -23,6 +23,13 @@ from herald_server.sync import sync_mailbox
 
 settings = get_settings()
 
+# Seconds. The sync lock's timeout and the worker's job timeout: a job that arq has cut off
+# no longer holds the lock, so the next sync of that mailbox is not blocked for long.
+SYNC_LOCK_TTL = 300
+# Seconds. A pending flag nobody consumed (e.g. the job failed) expires; the catch-up sync
+# covers that mailbox meanwhile.
+SYNC_PENDING_TTL = 3600
+
 
 async def startup(ctx: dict[str, Any]) -> None:
     ctx["services"] = build_services(settings)
@@ -42,31 +49,41 @@ async def process_email_job(ctx: dict[str, Any], email_id: str) -> str:
 
 async def sync_mailbox_job(ctx: dict[str, Any], mailbox_id: str) -> None:
     redis: ArqRedis = ctx["redis"]
+    pending_key = f"herald:sync-pending:{mailbox_id}"
+    # The flag records "something changed in this mailbox" even when the lock is busy, so no
+    # push is lost: whoever holds the lock sees the flag and syncs again. Nothing depends on
+    # arq's job-id dedupe, which refuses an id while that job runs or keeps a result.
+    await redis.set(pending_key, 1, ex=SYNC_PENDING_TTL)
     # One sync per mailbox at a time, across all workers: two at once would fetch from the
     # same cursor and race to store the same batch. The timeout frees the lock if this worker
-    # dies mid-sync; it matches arq's default job timeout of 300 s.
-    lock = redis.lock(f"herald:sync:{mailbox_id}", timeout=300)
+    # dies mid-sync.
+    lock = redis.lock(f"herald:sync:{mailbox_id}", timeout=SYNC_LOCK_TTL)
     if not await lock.acquire(blocking=False):
-        # A sync already running may have read history before this change arrived, so a rerun
-        # is needed once it is done. The fixed job id collapses a burst of pushes into one
-        # rerun: arq does not enqueue a job whose id is already queued.
-        await redis.enqueue_job(
-            SYNC_MAILBOX_JOB, mailbox_id, _job_id=f"sync-again:{mailbox_id}", _defer_by=10
-        )
+        # The sync running now holds the lock and sees the flag before it lets go.
         return
     try:
-        email_ids = await sync_mailbox(ctx["services"], mailbox_id)
-    except RateLimited as exc:
-        # The cursor did not move, so the retry reads the same changes again.
-        raise Retry(defer=exc.retry_after) from exc
+        # GETDEL clears the flag before each sync, so a push that lands during the sync sets
+        # it again and the loop reads the history once more from the new cursor.
+        while await redis.getdel(pending_key):
+            try:
+                email_ids = await sync_mailbox(ctx["services"], mailbox_id)
+            except RateLimited as exc:
+                # The cursor did not move, so the retry reads the same changes again; the
+                # retried job sets the flag again. At least 5 s: a Retry-After of 0 would
+                # burn every try at once.
+                raise Retry(defer=max(exc.retry_after, 5)) from exc
+            for email_id in email_ids:
+                await redis.enqueue_job(PROCESS_EMAIL_JOB, email_id)
     finally:
         # A sync that ran past the lock timeout no longer owns the lock (it expired, and
         # another sync may hold it now). Nothing is left to release; failing here would
-        # drop the triage of the mail this sync just stored.
+        # fail a job whose mail is already stored and queued for triage.
         with contextlib.suppress(LockNotOwnedError):
             await lock.release()
-    for email_id in email_ids:
-        await redis.enqueue_job(PROCESS_EMAIL_JOB, email_id)
+    # A push between the last GETDEL and the release found the lock busy and returned, and
+    # nobody holds the lock to see its flag now. A fresh job picks it up.
+    if await redis.exists(pending_key):
+        await redis.enqueue_job(SYNC_MAILBOX_JOB, mailbox_id)
 
 
 async def renew_subscriptions_job(ctx: dict[str, Any]) -> int:
@@ -87,9 +104,7 @@ async def catch_up_syncs_job(ctx: dict[str, Any]) -> int:
 class WorkerSettings:
     functions = [
         func(process_email_job, name=PROCESS_EMAIL_JOB),
-        # keep_result=0: with a stored result, arq refuses to enqueue the same _job_id again
-        # until the result expires (an hour by default), so the "sync-again" rerun of a
-        # mailbox would be dropped for an hour after its first run.
+        # keep_result=0: the job returns nothing worth reading back, so store no result.
         func(sync_mailbox_job, name=SYNC_MAILBOX_JOB, keep_result=0, max_tries=5),
     ]
     cron_jobs = [
@@ -100,3 +115,4 @@ class WorkerSettings:
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     max_jobs = 20
+    job_timeout = SYNC_LOCK_TTL
