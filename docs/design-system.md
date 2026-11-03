@@ -10,7 +10,7 @@ The web app styles everything with **Tailwind CSS v4**, and the tokens below are
 | --- | --- |
 | `apps/web/src/lib/styles/tokens.css` | The Tailwind theme (`@theme`): every colour, type size, radius, size and shadow, plus the dark values |
 | `apps/web/src/app.css` | Imports Tailwind, the font and the tokens; page basics (font, background, focus ring, reduced motion) |
-| `apps/web/src/lib/ui/` | The components (`Button`, `Tag`, `StatusTag`, `AngerMeter`, `Tabs`, `FilterChip`, `Panel`, `Kbd`, `Toast`, `Icon`) and `tones.ts` |
+| `apps/web/src/lib/ui/` | The components (`Button`, `Tag`, `StatusTag`, `AngerMeter`, `Tabs`, `FilterChip`, `Panel`, `Kbd`, `Toast`, `Icon`, `Logo`) and `tones.ts` |
 | `apps/web/src/lib/inbox/` | The inbox built from them: `EmailTable`, `EmailPanel`, `SendTestEmail`, and `inbox.ts` (views, order, actions, proof highlighting) |
 | `/design-system` in the web app | The gallery: every token and component, with a light and dark switch |
 
@@ -57,6 +57,7 @@ The web app styles everything with **Tailwind CSS v4**, and the tokens below are
 | `on-accent` | ink | ink | Text on chartreuse: always ink, never white |
 | `focus` | ink | chartreuse | The focus ring |
 | `live` | `#1F9D6A` | same | The "Herald is reading" dot only |
+| `logo-tile`, `logo-edge`, `logo-row` | `#15171C`, `#15171C`, white at 40% | `#23272E`, `#3A3F48`, same | The logo only (`Logo`). Nothing else uses them |
 
 ### Tones: status, urgency and flags
 
@@ -149,6 +150,17 @@ A short message after an owner action, bottom centre, ink on canvas. It uses the
 ### Icon
 
 Line icons on a 24 px grid, 1.8 stroke, `currentColor`. Add new glyphs to `Icon.svelte`; don't paste SVG into screens. An icon next to a label is decoration (hidden from screen readers); an icon alone needs `label`. No emoji.
+
+### Logo
+
+The mark is three emails on a tile, with one pulled out of the pile and lit chartreuse: most mail stays quiet, one thing needs you. It is drawn in three places that must match: `Logo.svelte`, `lib/assets/favicon.svg` and `lib/assets/apple-touch-icon.png`.
+
+- **Shapes:** a 64-unit square tile, `rx` 14.25. Rows are 8 units tall on a 4-unit grid so they land on whole pixels at 16 and 32 px: quiet rows at x 12 (28 and 20 wide), the lit row at x 20, 32 wide.
+- **Colour:** chartreuse only ever sits on the tile; on a light surface it disappears. In dark mode the tile lifts to `#23272E` with a `#3A3F48` edge so it doesn't sink into the canvas. The favicon does the same with its own `prefers-color-scheme` block.
+- **Sizes:** 34 px in the rail, 16 px as the favicon. Don't use it smaller than 16 px.
+- **Wordmark:** "Herald" in Schibsted Grotesk ExtraBold with `tracking-display`, set beside the mark with its type about three quarters of the mark's height (30 px type with a 40 px mark). Never redraw it as an image.
+- **Touch icon:** full-bleed, square corners; iOS rounds them.
+- Give it `label="Herald"` where it stands alone (the rail); leave the label off next to the word "Herald".
 
 ## Patterns
 

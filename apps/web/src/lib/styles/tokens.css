@@ -57,6 +57,9 @@
 	--color-muted-fg: #5b606b;
 	--color-floor-bg: #15171c;
 	--color-floor-fg: #c5ee3f;
+	--color-logo-tile: #15171c; /* the logo's tile; Logo.svelte and favicon.svg */
+	--color-logo-edge: #15171c; /* matches the tile in light, lifts it off the dark canvas */
+	--color-logo-row: rgb(255 255 255 / 0.4); /* the two quiet rows */
 	--color-live: #1f9d6a;
 	--color-anger-on: #15171c;
 	--color-anger-off: #e1e4e9;
@@ -161,6 +164,8 @@
 		--color-muted-fg: #a3a9b4;
 		--color-floor-bg: #c5ee3f;
 		--color-floor-fg: #15171c;
+		--color-logo-tile: #23272e;
+		--color-logo-edge: #3a3f48;
 		--color-anger-on: #eceef1;
 		--color-anger-off: #343941;
 		--shadow-popover: 0 8px 24px rgb(0 0 0 / 0.5);
@@ -200,6 +205,8 @@
 	--color-muted-fg: #a3a9b4;
 	--color-floor-bg: #c5ee3f;
 	--color-floor-fg: #15171c;
+	--color-logo-tile: #23272e;
+	--color-logo-edge: #3a3f48;
 	--color-anger-on: #eceef1;
 	--color-anger-off: #343941;
 	--shadow-popover: 0 8px 24px rgb(0 0 0 / 0.5);

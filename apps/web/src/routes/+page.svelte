@@ -16,7 +16,7 @@
 		type Filters,
 		type ViewId
 	} from '#lib/inbox/inbox.js';
-	import { Button, FilterChip, Icon, Tabs, Toast, type TabItem } from '#lib/ui/index.js';
+	import { Button, FilterChip, Icon, Logo, Tabs, Toast, type TabItem } from '#lib/ui/index.js';
 
 	let workspaces = $state.raw<Workspace[]>([]);
 	let workspaceId = $state<string | null>(null);
@@ -155,9 +155,7 @@
 		aria-label="Main"
 		class="flex w-rail flex-none flex-col items-center gap-1.5 border-r border-line bg-sunken py-3"
 	>
-		<span class="mb-2.5 flex size-8.5 items-center justify-center rounded-md bg-ink text-accent">
-			<Icon name="mail" size={18} label="Herald" />
-		</span>
+		<span class="mb-2.5"><Logo size={34} label="Herald" /></span>
 		<a
 			href={resolve('/')}
 			aria-current="page"
