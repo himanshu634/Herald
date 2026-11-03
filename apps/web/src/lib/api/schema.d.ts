@@ -390,6 +390,13 @@ export interface components {
             /** Description */
             description: string;
         };
+        /** Topic */
+        Topic: {
+            /** Name */
+            name: string;
+            /** Meaning */
+            meaning?: string | null;
+        };
         /**
          * Urgency
          * @enum {string}
@@ -416,7 +423,12 @@ export interface components {
             /** Business Profile */
             business_profile: string;
             /** Topics */
-            topics: string[];
+            topics: components["schemas"]["Topic"][];
+            /**
+             * Facts
+             * @description Short facts about the brand.
+             */
+            facts?: string[];
             /**
              * Important Contacts
              * @description Email addresses or domains such as bigclient.com.

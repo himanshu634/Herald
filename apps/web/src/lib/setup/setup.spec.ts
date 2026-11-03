@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { Rule, WorkspaceConfig } from '#lib/api/client.js';
-import { MAX_TOPICS, addTopic, isEdited, newRule, problems, withAction } from './setup';
+import type { Rule, Topic, WorkspaceConfig } from '#lib/api/client.js';
+import {
+	MAX_FACTS,
+	MAX_MEANING_LENGTH,
+	MAX_TOPICS,
+	addTopic,
+	isEdited,
+	newRule,
+	problems,
+	withAction
+} from './setup';
 
 function rule(over: Partial<Rule> = {}): Rule {
 	return {
@@ -13,10 +22,15 @@ function rule(over: Partial<Rule> = {}): Rule {
 	};
 }
 
+function topic(name: string, meaning: string | null = null): Topic {
+	return { name, meaning };
+}
+
 function config(over: Partial<WorkspaceConfig> = {}): WorkspaceConfig {
 	return {
 		business_profile: 'We bake custom cakes to order in Ahmedabad.',
-		topics: ['Orders and delivery'],
+		topics: [topic('Orders and delivery')],
+		facts: [],
 		important_contacts: [],
 		guidance: [],
 		rules: [],
@@ -25,18 +39,21 @@ function config(over: Partial<WorkspaceConfig> = {}): WorkspaceConfig {
 }
 
 describe('addTopic', () => {
-	it('adds a trimmed topic', () => {
-		expect(addTopic(['Orders'], '  Allergies ')).toEqual(['Orders', 'Allergies']);
+	it('adds a trimmed topic without a meaning', () => {
+		expect(addTopic([topic('Orders')], '  Allergies ')).toEqual([
+			topic('Orders'),
+			{ name: 'Allergies', meaning: null }
+		]);
 	});
 
 	it('ignores blanks, repeats and the spam topic', () => {
-		expect(addTopic(['Orders'], '   ')).toEqual(['Orders']);
-		expect(addTopic(['Orders'], 'orders')).toEqual(['Orders']);
-		expect(addTopic(['Orders'], 'spam or not for me')).toEqual(['Orders']);
+		expect(addTopic([topic('Orders')], '   ')).toEqual([topic('Orders')]);
+		expect(addTopic([topic('Orders')], ' orders ')).toEqual([topic('Orders')]);
+		expect(addTopic([topic('Orders')], 'spam or not for me')).toEqual([topic('Orders')]);
 	});
 
 	it('stops at the cap', () => {
-		const full = Array.from({ length: MAX_TOPICS }, (_, i) => `Topic ${i}`);
+		const full = Array.from({ length: MAX_TOPICS }, (_, i) => topic(`Topic ${i}`));
 		expect(addTopic(full, 'One more')).toBe(full);
 	});
 });
@@ -70,12 +87,14 @@ describe('problems', () => {
 		const found = problems(
 			config({
 				topics: [],
+				facts: [' '],
 				guidance: [' '],
 				rules: [rule({ when: '' }), rule({ name: '', action: 'set_urgency', urgency: null })]
 			})
 		);
 		expect(found).toEqual([
 			'Add at least one topic.',
+			'Fill in or remove the empty fact.',
 			'Fill in or remove the empty guidance line.',
 			'Event cake at risk needs a "When".',
 			'Give every rule a name.',
@@ -84,10 +103,31 @@ describe('problems', () => {
 	});
 });
 
+describe('problems for facts and meanings', () => {
+	it('caps facts', () => {
+		const facts = Array.from({ length: MAX_FACTS + 1 }, (_, i) => `Fact ${i}`);
+		expect(problems(config({ facts }))).toEqual(['Keep to 10 facts.']);
+	});
+
+	it('names a topic whose meaning is too long', () => {
+		const long = 'x'.repeat(MAX_MEANING_LENGTH + 1);
+		expect(problems(config({ topics: [topic('Orders', long)] }))).toEqual([
+			"Orders's meaning is too long."
+		]);
+		expect(problems(config({ topics: [topic('Orders', 'x'.repeat(MAX_MEANING_LENGTH))] }))).toEqual(
+			[]
+		);
+	});
+});
+
 describe('isEdited', () => {
 	it('notices a change', () => {
 		const draft = config();
 		expect(isEdited(draft, config())).toBe(false);
-		expect(isEdited(draft, config({ topics: ['Orders'] }))).toBe(true);
+		expect(isEdited(draft, config({ topics: [topic('Orders')] }))).toBe(true);
+		expect(isEdited(draft, config({ topics: [topic('Orders and delivery', 'Where is it')] }))).toBe(
+			true
+		);
+		expect(isEdited(draft, config({ facts: ['Returns within 7 days.'] }))).toBe(true);
 	});
 });
