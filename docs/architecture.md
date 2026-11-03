@@ -147,7 +147,7 @@ The owner can disconnect from `active`, `paused` and `needs_reauth`. Every chang
 
 The same account can be connected in more than one workspace. Each workspace has its own row and gets its own copy of the mail, but Gmail has one watch and one grant per account. So pause and disconnect stop the watch only when no other workspace has that address `active`, and disconnect revokes the grant only when no other workspace has it in any status but `disconnected`.
 
-The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt the stored mailbox credentials (they open one to check). This catches a worker whose key differs from the API's, which would otherwise move every mailbox to `needs_reauth`. To change the key, disconnect every mailbox first, then reconnect them after the change.
+The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt the stored mailbox credentials (they open one to check, an `active` mailbox's when there is one). This catches a worker whose key differs from the API's, which would otherwise move every mailbox to `needs_reauth`. To change the key, disconnect every mailbox first, then reconnect them after the change.
 
 ### Routes
 

@@ -14,7 +14,7 @@ from herald_server.bus import EventBus, InMemoryEventBus, RedisEventBus
 from herald_server.connectors import build_connectors
 from herald_server.connectors.base import MailConnector
 from herald_server.crypto import BadSecret, SecretBox
-from herald_server.models import Mailbox
+from herald_server.models import Mailbox, MailboxStatus
 from herald_server.notifier import LogNotifier, NtfyNotifier
 from herald_server.settings import Settings
 
@@ -38,10 +38,18 @@ def _check_token_key(engine: Engine, secrets: SecretBox) -> None:
     move every mailbox it syncs to needs_reauth, and each owner would have to reconnect.
     """
     # Cross-tenant by design: one sample row from any workspace tests the process's key.
+    # Prefer an ACTIVE mailbox: those are the ones syncs open. A needs_reauth row may hold
+    # credentials sealed with an older key (that can be why it needs a reconnect), and it must
+    # not block startup while the active mailboxes open fine. Any row is the fallback.
+    has_credentials = col(Mailbox.credentials_enc).is_not(None)
     with Session(engine) as session:
         sealed = session.exec(
-            select(Mailbox.credentials_enc).where(col(Mailbox.credentials_enc).is_not(None))
+            select(Mailbox.credentials_enc).where(
+                has_credentials, Mailbox.status == MailboxStatus.ACTIVE
+            )
         ).first()
+        if sealed is None:
+            sealed = session.exec(select(Mailbox.credentials_enc).where(has_credentials)).first()
     if sealed is None:
         return
     try:

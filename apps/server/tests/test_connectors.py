@@ -5,7 +5,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from herald_server.connectors import build_connectors
 from herald_server.crypto import SecretBox
-from herald_server.models import Mailbox, Workspace
+from herald_server.models import Mailbox, MailboxStatus, Workspace
 from herald_server.services import build_services
 from herald_server.settings import Settings
 
@@ -22,7 +22,12 @@ async def test_services_have_secrets_when_key_set(app):
     assert app.state.services.secrets is not None
 
 
-def add_sealed_mailbox(settings: Settings, secrets: SecretBox) -> None:
+def add_sealed_mailbox(
+    settings: Settings,
+    secrets: SecretBox,
+    status: MailboxStatus = MailboxStatus.ACTIVE,
+    email_address: str = "owner@shop.in",
+) -> None:
     engine = create_engine(settings.database_url)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
@@ -33,7 +38,8 @@ def add_sealed_mailbox(settings: Settings, secrets: SecretBox) -> None:
             Mailbox(
                 workspace_id=workspace.id,
                 provider="gmail",
-                email_address="owner@shop.in",
+                email_address=email_address,
+                status=status,
                 credentials_enc=secrets.seal({"refresh_token": "r1"}),
             )
         )
@@ -68,3 +74,21 @@ def test_startup_fails_when_key_cannot_open_stored_credentials(settings):
     assert str(raised.value) == "HERALD_TOKEN_KEY cannot decrypt stored mailbox credentials"
     assert raised.value.__cause__ is None
     assert raised.value.__suppress_context__
+
+
+async def test_startup_check_prefers_active_mailboxes(settings):
+    # A needs_reauth row may hold credentials sealed with an old key: that is why it needs a
+    # reconnect. It must not fail startup while the active mailboxes open fine. Inserted
+    # first, so an unordered pick of any row would land on it.
+    assert settings.token_key is not None
+    add_sealed_mailbox(
+        settings,
+        SecretBox(Fernet.generate_key().decode()),
+        status=MailboxStatus.NEEDS_REAUTH,
+        email_address="old@shop.in",
+    )
+    add_sealed_mailbox(settings, SecretBox(settings.token_key))
+
+    services = build_services(settings)
+    await services.http.aclose()
+    services.engine.dispose()
