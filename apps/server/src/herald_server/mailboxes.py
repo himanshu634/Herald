@@ -9,6 +9,7 @@ from herald_server.services import Services
 
 
 def get_mailbox(services: Services, mailbox_id: str) -> Mailbox | None:
+    """By id alone, for jobs. A route must also check the mailbox's `workspace_id`."""
     with Session(services.engine) as session:
         return session.get(Mailbox, mailbox_id)
 

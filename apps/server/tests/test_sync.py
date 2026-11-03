@@ -113,6 +113,17 @@ async def test_rate_limited_keeps_cursor(app, client, fake_connector):
     assert load_mailbox(app, mailbox_id).cursor == "7"
 
 
+async def test_inline_sync_failure_logs_only_the_type(app, client, fake_connector, caplog):
+    mailbox_id = add_mailbox(app, await demo_workspace(client), cursor="7")
+    fake_connector.raise_on_fetch = RuntimeError("leak-me-xyz")
+
+    await sync(app, mailbox_id)
+
+    assert "RuntimeError" in caplog.text
+    assert "leak-me-xyz" not in caplog.text
+    assert load_mailbox(app, mailbox_id).cursor == "7"
+
+
 async def test_paused_mailbox_is_not_fetched(app, client, fake_connector):
     mailbox_id = add_mailbox(app, await demo_workspace(client), status=MailboxStatus.PAUSED)
     fake_connector.queue = [message("m1")]

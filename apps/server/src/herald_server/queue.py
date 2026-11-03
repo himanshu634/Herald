@@ -1,6 +1,7 @@
 """Hand mailbox syncs and emails to background jobs. arq runs them in the worker; inline here."""
 
 import asyncio
+import logging
 from collections.abc import Coroutine
 from typing import Any, Protocol, Self
 
@@ -13,6 +14,8 @@ from herald_server.sync import sync_mailbox
 
 PROCESS_EMAIL_JOB = "process_email"
 SYNC_MAILBOX_JOB = "sync_mailbox"
+
+log = logging.getLogger(__name__)
 
 
 class JobQueue(Protocol):
@@ -63,7 +66,14 @@ class InlineQueue:
         # race to store the same batch. A second request waits, then reads from the new cursor.
         lock = self._sync_locks.setdefault(mailbox_id, asyncio.Lock())
         async with lock:
-            email_ids = await sync_mailbox(self._services, mailbox_id)
+            try:
+                email_ids = await sync_mailbox(self._services, mailbox_id)
+            except Exception as exc:
+                # Inline has no retry (arq retries in the worker), so log and stop. The cursor
+                # did not move, so the next push or catch-up sync reads these changes again.
+                # Only the type name: str() of an HTTP error can carry provider responses.
+                log.warning("%s on sync of mailbox %s", type(exc).__name__, mailbox_id)
+                return
         for email_id in email_ids:
             await self.enqueue_email(email_id)
 
