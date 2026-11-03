@@ -63,6 +63,20 @@ class EmailOut(BaseModel):
     received_at: datetime
 
 
+class TryIn(BaseModel):
+    """A draft config the owner has not saved, to try on one email."""
+
+    config: WorkspaceConfig
+
+
+class TryOut(BaseModel):
+    """What Herald would do with the email under the draft. Nothing was saved."""
+
+    status: EmailStatus
+    notes: Notes | None
+    decision: Decision
+
+
 class MailboxOut(BaseModel):
     """A connected mailbox. Never carries credentials, the cursor or provider state."""
 
