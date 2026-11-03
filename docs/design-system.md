@@ -119,7 +119,7 @@ A raised face sits `--press-depth` (3 px) above a darker base. On click it drops
 | `secondary` | Every other action (**Not urgent**, **Done**, **Test on past emails**) | White face, 3:1 edge |
 | `quiet` | Low-stakes actions and links in toolbars (**Open thread**) | No base, no press |
 
-- Pass `kbd` to show the shortcut. The owner actions are fixed: **O** On it, **N** Not urgent, **D** Done, **/** Search, **J** and **K** next and previous email. Wiring the key is the screen's job; the button only shows it.
+- Pass `kbd` to show the shortcut. The owner actions are fixed: **O** On it, **N** Not urgent, **D** Done, **E** read the whole email, **/** Search, **J** and **K** next and previous email. Wiring the key is the screen's job; the button only shows it.
 - Labels say what happens, and the result uses the same words: the button **Not urgent** gives the message "Moved to Inbox. Herald saved this as a correction."
 - There is no destructive red button. Herald never deletes; closing is reversible.
 
@@ -177,7 +177,7 @@ The mark is three emails on a tile, with one pulled out of the pile and lit char
 ## Patterns
 
 - **The inbox** has tabs per status (Needs you, Inbox, In progress, Done, Closed quietly, All mail) and a table: Status, From, Summary, Topic (wide screens only), Urgency, Anger, Why, Time. Sorted by status, then urgency, then anger, then newest, the way the decide step orders them. The selected row gets `bg-accent-soft` and a chartreuse edge.
-- **The side panel** explains the open email: the safety floor callout first if there is one, then why Herald put it there, then the email with the proof highlighted (`bg-accent-tint` with an olive underline), then the notes, then the actions at the bottom.
+- **The side panel** explains the open email on a `bg-sunken` background, so its two cards (`Panel`) stand out: the safety floor callout first if there is one, then a **Why it's here** card (the reason in bold, Herald's summary, the quoted lines as proof in `bg-accent-tint`, then the notes), then **The email** card, then the actions at the bottom. The email card shows a three-line preview; **E** or "Read it all" opens the whole email with the proof highlighted, and picking another email folds it again. An email with no notes (Herald is still reading, or the AI failed) opens in full, because there is no summary to read instead.
 - **The safety floor callout** is a `bg-floor-bg text-floor-fg` block with the `shield` icon and one sentence: "Safety floor: legal threat. This always alerts you, whatever your rules say."
 - **What Herald handled** is always one line, never hidden: "Also today: 18 in the inbox, 2 in progress, 40 closed quietly." with a way to see them.
 - **Live** is the `live` dot with "Live". Nothing else in the app animates on its own.

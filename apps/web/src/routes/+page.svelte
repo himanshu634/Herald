@@ -44,6 +44,8 @@
 	let view = $state<ViewId>('needs-you');
 	let filters = $state<Filters>({ query: '', urgentOnly: false, angry: false, unsure: false });
 	let chosenId = $state<string | null>(null);
+	// The email the owner opened in full. Keyed by id, so picking another email folds it again.
+	let fullId = $state<string | null>(null);
 
 	let search = $state<HTMLInputElement>();
 	let sender = $state<SendTestEmail>();
@@ -212,6 +214,10 @@
 		chosenId = visible[Math.min(visible.length - 1, Math.max(0, index + step))].id;
 	}
 
+	function toggleFull() {
+		if (selected) fullId = fullId === selected.id ? null : selected.id;
+	}
+
 	// Owner shortcuts, from docs/design-system.md. Never while typing or in a dialog.
 	function onkeydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
@@ -225,6 +231,7 @@
 			o: () => act('on-it'),
 			n: () => act('not-urgent'),
 			d: () => act('done'),
+			e: toggleFull,
 			'/': () => search?.focus()
 		};
 		const run = keys[event.key];
@@ -385,7 +392,13 @@
 
 				{#if selected}
 					<div class="lg:flex lg:w-panel lg:flex-none">
-						<EmailPanel email={selected} {busy} onact={act} />
+						<EmailPanel
+							email={selected}
+							{busy}
+							full={fullId === selected.id}
+							ontogglefull={toggleFull}
+							onact={act}
+						/>
 					</div>
 				{/if}
 			</div>
