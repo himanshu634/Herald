@@ -6,33 +6,12 @@
 
 <button
 	type="button"
-	class={['chip', pressed && 'on']}
+	class={[
+		'inline-flex h-control-md cursor-pointer items-center gap-2 rounded-sm border bg-surface px-2.5 text-sm font-semibold whitespace-nowrap',
+		pressed ? 'border-solid border-ink text-ink' : 'border-dashed border-control text-neutral-fg'
+	]}
 	aria-pressed={pressed}
 	onclick={() => (pressed = !pressed)}
 >
 	{@render children()}
 </button>
-
-<style>
-	.chip {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-2);
-		height: var(--control-md);
-		padding: 0 0.625rem;
-		border: var(--border-hair) dashed var(--color-border-control);
-		border-radius: var(--radius-sm);
-		background: var(--color-surface);
-		color: var(--tone-neutral-fg);
-		font-size: var(--text-sm);
-		font-weight: var(--weight-semibold);
-		white-space: nowrap;
-		cursor: pointer;
-	}
-
-	.chip.on {
-		border-style: solid;
-		border-color: var(--color-text);
-		color: var(--color-text);
-	}
-</style>

@@ -9,6 +9,7 @@
 		StatusTag,
 		Tabs,
 		Tag,
+		Toast,
 		URGENCY,
 		type TabItem,
 		type Urgency
@@ -16,25 +17,25 @@
 
 	// The gallery for docs/design-system.md: every token and component, in both themes.
 	const swatches = [
-		['--color-bg', 'Concrete, the page'],
-		['--color-surface', 'Panel'],
-		['--color-surface-sunken', 'Sunken: rails, table heads'],
-		['--color-text', 'Ink'],
-		['--color-text-muted', 'Muted text'],
-		['--color-border', 'Border'],
-		['--color-accent', 'Chartreuse, act here'],
-		['--color-accent-base', 'Press base']
+		['bg-canvas', 'Canvas, the page'],
+		['bg-surface', 'Surface, panels'],
+		['bg-sunken', 'Sunken: rail, table heads'],
+		['bg-ink', 'Ink, text'],
+		['bg-muted', 'Muted text'],
+		['bg-line', 'Line'],
+		['bg-accent', 'Accent, act here'],
+		['bg-accent-base', 'Accent base']
 	] as const;
 
 	const type = [
-		['--text-4xl', 'Display 42', '62 sorted today', 800],
-		['--text-3xl', 'Hero 30', '3 need you now', 800],
-		['--text-2xl', 'Page title 24', 'Inbox', 800],
-		['--text-xl', 'Panel title 18', 'Refund still not received', 800],
-		['--text-lg', 'Row title 16', 'Flight on Thursday, still no bag', 700],
-		['--text-md', 'Body 14', 'Herald read every email and sorted it for you.', 400],
-		['--text-sm', 'Table 13', 'Orders and delivery', 400],
-		['--text-xs', 'Tag 12', 'Needs a look', 600]
+		['text-4xl font-extrabold tracking-display', 'Display 42', '62 sorted today'],
+		['text-3xl font-extrabold tracking-display', 'Hero 30', '3 need you now'],
+		['text-2xl font-extrabold', 'Page title 24', 'Inbox'],
+		['text-xl font-extrabold', 'Panel title 18', 'Refund still not received'],
+		['text-lg font-bold', 'Row title 16', 'Flight on Thursday, still no bag'],
+		['text-md', 'Body 14', 'Herald read every email and sorted it for you.'],
+		['text-sm', 'Table 13', 'Orders and delivery'],
+		['text-xs font-semibold', 'Tag 12', 'Needs a look']
 	] as const;
 
 	const statuses: EmailStatus[] = [
@@ -56,23 +57,29 @@
 	];
 	let tab = $state('needs-you');
 	let anger4 = $state(true);
+	let toast = $state<string | null>(null);
 	let theme = $state<'light' | 'dark' | null>(null);
 
 	function setTheme(next: 'light' | 'dark') {
 		theme = next;
 		document.documentElement.dataset.theme = next;
 	}
+
+	const th = 'h-8.5 border-b border-line bg-sunken px-3 text-left text-xs font-bold text-muted';
+	const td = 'h-row border-b border-dashed border-line-dashed px-3 whitespace-nowrap';
 </script>
 
 <svelte:head><title>Design system · Herald</title></svelte:head>
 
-<main>
-	<header class="top">
+<main class="mx-auto flex max-w-7xl flex-col gap-6 px-6 pt-8 pb-12">
+	<header class="flex flex-wrap items-end justify-between gap-4">
 		<div>
-			<h1>Herald design system</h1>
-			<p class="muted">Direction M, Control room. Rules in <code>docs/design-system.md</code>.</p>
+			<h1 class="text-4xl font-extrabold tracking-display">Herald design system</h1>
+			<p class="text-muted">
+				Direction M, Control room. Rules in <code class="font-mono">docs/design-system.md</code>.
+			</p>
 		</div>
-		<div class="row">
+		<div class="flex gap-2">
 			<Button
 				variant={theme === 'light' ? 'primary' : 'secondary'}
 				size="sm"
@@ -86,40 +93,38 @@
 		</div>
 	</header>
 
-	<div class="grid">
+	<div class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,32rem),1fr))] items-start gap-4">
 		<Panel title="Colour">
-			<div class="swatches">
-				{#each swatches as [token, name] (token)}
-					<div class="swatch">
-						<span class="chip" style:background={`var(${token})`}></span>
-						<span><b>{name}</b><br /><code>{token}</code></span>
+			<div class="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3 text-xs">
+				{#each swatches as [utility, name] (utility)}
+					<div class="flex flex-col gap-2">
+						<span class={['h-11 rounded-sm border border-line', utility]}></span>
+						<span><b>{name}</b><br /><code class="font-mono">{utility}</code></span>
 					</div>
 				{/each}
 			</div>
 		</Panel>
 
 		<Panel title="Type, Albert Sans">
-			<div class="stack">
-				{#each type as [token, name, sample, weight] (token)}
-					<div class="type-row">
-						<span class="muted small">{name}</span>
-						<span style:font-size={`var(${token})`} style:font-weight={weight} class="sample"
-							>{sample}</span
-						>
+			<div class="flex flex-col gap-3">
+				{#each type as [classes, name, sample] (name)}
+					<div class="grid grid-cols-[7rem_1fr] items-baseline gap-3">
+						<span class="text-sm text-muted">{name}</span>
+						<span class={['wrap-anywhere', classes]}>{sample}</span>
 					</div>
 				{/each}
 			</div>
 		</Panel>
 
 		<Panel title="Buttons press down">
-			<div class="stack">
-				<div class="row">
+			<div class="flex flex-col gap-3">
+				<div class="flex flex-wrap items-center gap-2">
 					<Button variant="primary" kbd="O">On it</Button>
 					<Button kbd="N">Not urgent</Button>
 					<Button kbd="D">Done</Button>
 					<Button variant="quiet">Open thread</Button>
 				</div>
-				<div class="row">
+				<div class="flex flex-wrap items-center gap-2">
 					<Button variant="primary" size="sm">Save rule</Button>
 					<Button size="sm">Test on past emails</Button>
 					<Button size="sm" disabled>Disabled</Button>
@@ -128,16 +133,16 @@
 		</Panel>
 
 		<Panel title="Status, urgency and the safety floor">
-			<div class="stack">
-				<div class="row">
+			<div class="flex flex-col gap-3">
+				<div class="flex flex-wrap gap-2">
 					{#each statuses as status (status)}<StatusTag {status} />{/each}
 				</div>
-				<div class="row">
+				<div class="flex flex-wrap gap-2">
 					{#each urgencies as urgency (urgency)}
 						<Tag tone={URGENCY[urgency].tone}>{URGENCY[urgency].label}</Tag>
 					{/each}
 				</div>
-				<div class="row">
+				<div class="flex flex-wrap gap-2">
 					<Tag tone="floor" icon="shield">Safety floor: legal threat</Tag>
 					<Tag tone="accent">Important contact</Tag>
 					<Tag tone="neutral">About to cancel</Tag>
@@ -146,7 +151,7 @@
 		</Panel>
 
 		<Panel title="Anger, kept apart from urgency">
-			<div class="stack">
+			<div class="flex flex-col gap-3">
 				{#each [1, 2, 3, 4, 5] as level (level)}
 					<AngerMeter {level} showLabel />
 				{/each}
@@ -154,9 +159,9 @@
 		</Panel>
 
 		<Panel title="Tabs and filters">
-			<div class="stack">
+			<div class="flex flex-col gap-3">
 				<Tabs items={tabs} bind:selected={tab} label="Inbox views" />
-				<div class="row">
+				<div class="flex flex-wrap gap-2">
 					<FilterChip pressed>Status: needs you</FilterChip>
 					<FilterChip>Topic</FilterChip>
 					<FilterChip>Urgency</FilterChip>
@@ -166,174 +171,58 @@
 		</Panel>
 
 		<Panel title="A table row">
-			{#snippet actions()}<span class="muted small">42px rows, dashed rules</span>{/snippet}
-			<div class="table-wrap">
-				<table>
+			{#snippet actions()}<span class="text-sm text-muted">42px rows, dashed rules</span>{/snippet}
+			<div class="overflow-x-auto">
+				<table class="w-full min-w-136 border-collapse text-sm">
 					<thead>
-						<tr><th>Status</th><th>From</th><th>Summary</th><th>Urgency</th><th>Anger</th></tr>
+						<tr>
+							<th class={th}>Status</th>
+							<th class={th}>From</th>
+							<th class={th}>Summary</th>
+							<th class={th}>Urgency</th>
+							<th class={th}>Anger</th>
+						</tr>
 					</thead>
 					<tbody>
-						<tr class="selected">
-							<td><StatusTag status="alerted" /></td>
-							<td><b>Arjun Mehta</b></td>
-							<td>Will file in consumer court if the refund isn't done by Friday</td>
-							<td><Tag tone="danger">Urgent</Tag></td>
-							<td><AngerMeter level={4} /></td>
+						<tr class="bg-accent-soft">
+							<td class={[td, 'shadow-[inset_3px_0_0_var(--color-accent)]']}>
+								<StatusTag status="alerted" />
+							</td>
+							<td class={[td, 'font-bold']}>Arjun Mehta</td>
+							<td class={td}>Will file in consumer court if the refund isn't done by Friday</td>
+							<td class={td}><Tag tone="danger">Urgent</Tag></td>
+							<td class={td}><AngerMeter level={4} /></td>
 						</tr>
 						<tr>
-							<td><StatusTag status="inbox" /></td>
-							<td><b>Neha Kapoor</b></td>
-							<td>Wheel snapped on the first trip</td>
-							<td><Tag tone="warning">High</Tag></td>
-							<td><AngerMeter level={3} /></td>
+							<td class={td}><StatusTag status="inbox" /></td>
+							<td class={[td, 'font-bold']}>Neha Kapoor</td>
+							<td class={td}>Wheel snapped on the first trip</td>
+							<td class={td}><Tag tone="warning">High</Tag></td>
+							<td class={td}><AngerMeter level={3} /></td>
 						</tr>
 					</tbody>
 				</table>
 			</div>
 		</Panel>
 
+		<Panel title="Toast">
+			<div class="flex flex-wrap items-center gap-3">
+				<Button onclick={() => (toast = 'Moved to Inbox. Herald saved this as a correction.')}
+					>Show a toast</Button
+				>
+				<span class="text-sm text-muted">Bottom centre, the action's own words.</span>
+			</div>
+		</Panel>
+
 		<Panel title="The safety floor callout">
-			<div class="floor">
+			<div class="flex items-start gap-3 rounded-lg bg-floor-bg px-4 py-3 text-floor-fg">
 				<Icon name="shield" size={18} />
-				<p>Safety floor: legal threat. This always alerts you, whatever your rules say.</p>
+				<p class="text-sm">
+					Safety floor: legal threat. This always alerts you, whatever your rules say.
+				</p>
 			</div>
 		</Panel>
 	</div>
 </main>
 
-<style>
-	main {
-		max-width: 80rem;
-		margin: 0 auto;
-		padding: var(--space-8) var(--space-6) var(--space-12);
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-6);
-	}
-
-	.top {
-		display: flex;
-		align-items: flex-end;
-		justify-content: space-between;
-		gap: var(--space-4);
-		flex-wrap: wrap;
-	}
-
-	h1 {
-		font-size: var(--text-4xl);
-		font-weight: var(--weight-heavy);
-		letter-spacing: var(--tracking-display);
-	}
-
-	.grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(100%, 32rem), 1fr));
-		gap: var(--space-4);
-		align-items: start;
-	}
-
-	.stack {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-
-	.row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--space-2);
-	}
-
-	.muted {
-		color: var(--color-text-muted);
-	}
-
-	.small {
-		font-size: var(--text-sm);
-	}
-
-	.swatches {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-		gap: var(--space-3);
-		font-size: var(--text-xs);
-	}
-
-	.swatch {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-	}
-
-	.chip {
-		height: 2.75rem;
-		border: var(--border-hair) solid var(--color-border);
-		border-radius: var(--radius-sm);
-	}
-
-	.type-row {
-		display: grid;
-		grid-template-columns: 7rem 1fr;
-		align-items: baseline;
-		gap: var(--space-3);
-	}
-
-	.sample {
-		line-height: var(--leading-tight);
-		overflow-wrap: anywhere;
-	}
-
-	.table-wrap {
-		overflow-x: auto;
-	}
-
-	table {
-		min-width: 34rem;
-		width: 100%;
-		border-collapse: collapse;
-		font-size: var(--text-sm);
-	}
-
-	th {
-		height: 2.125rem;
-		padding: 0 var(--space-3);
-		background: var(--color-surface-sunken);
-		color: var(--color-text-muted);
-		font-size: var(--text-xs);
-		font-weight: var(--weight-bold);
-		text-align: left;
-		border-bottom: var(--border-hair) solid var(--color-border);
-	}
-
-	td {
-		white-space: nowrap;
-		height: var(--row-height);
-		padding: 0 var(--space-3);
-		border-bottom: var(--border-hair) dashed var(--color-border-dashed);
-	}
-
-	tr.selected td {
-		background: var(--color-accent-soft);
-	}
-
-	tr.selected td:first-child {
-		box-shadow: inset 3px 0 0 var(--color-accent);
-	}
-
-	.floor {
-		display: flex;
-		gap: var(--space-3);
-		align-items: flex-start;
-		padding: var(--space-3) var(--space-4);
-		border-radius: var(--radius-lg);
-		background: var(--tone-floor-bg);
-		color: var(--tone-floor-fg);
-	}
-
-	.floor p {
-		color: var(--tone-floor-fg);
-		font-size: var(--text-sm);
-		line-height: var(--leading-normal);
-	}
-</style>
+<Toast message={toast} ondismiss={() => (toast = null)} />

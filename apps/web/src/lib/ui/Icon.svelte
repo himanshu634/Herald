@@ -32,6 +32,7 @@
 <svg
 	width={size}
 	height={size}
+	class="block flex-none"
 	viewBox="0 0 24 24"
 	fill="none"
 	stroke="currentColor"
@@ -45,10 +46,3 @@
 	<!-- eslint-disable-next-line svelte/no-at-html-tags -- static glyphs from PATHS above -->
 	{@html PATHS[name]}
 </svg>
-
-<style>
-	svg {
-		flex: none;
-		display: block;
-	}
-</style>

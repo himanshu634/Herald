@@ -29,13 +29,22 @@
 	}
 </script>
 
-<div class="tabs" role="tablist" aria-label={label} tabindex="-1" {onkeydown}>
+<div
+	class="flex gap-1 overflow-x-auto border-b border-line"
+	role="tablist"
+	aria-label={label}
+	tabindex="-1"
+	{onkeydown}
+>
 	{#each items as item (item.id)}
 		<button
 			type="button"
 			role="tab"
 			data-tab={item.id}
-			class={['tab', item.id === current && 'on']}
+			class={[
+				'-mb-px inline-flex h-tab cursor-pointer items-center gap-2 rounded-t-md border border-line px-3 text-sm font-semibold whitespace-nowrap',
+				item.id === current ? 'border-b-surface bg-surface text-ink' : 'bg-subtle text-muted'
+			]}
 			aria-selected={item.id === current}
 			tabindex={item.id === current ? 0 : -1}
 			onclick={() => (selected = item.id)}
@@ -47,35 +56,3 @@
 		</button>
 	{/each}
 </div>
-
-<style>
-	.tabs {
-		display: flex;
-		gap: var(--space-1);
-		overflow-x: auto;
-		border-bottom: var(--border-hair) solid var(--color-border);
-	}
-
-	.tab {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-2);
-		height: var(--tab-height);
-		padding: 0 var(--space-3);
-		margin-bottom: calc(var(--border-hair) * -1);
-		border: var(--border-hair) solid var(--color-border);
-		border-radius: var(--radius-md) var(--radius-md) 0 0;
-		background: var(--color-surface-muted);
-		color: var(--color-text-muted);
-		font-size: var(--text-sm);
-		font-weight: var(--weight-semibold);
-		white-space: nowrap;
-		cursor: pointer;
-	}
-
-	.tab.on {
-		background: var(--color-surface);
-		border-bottom-color: var(--color-surface);
-		color: var(--color-text);
-	}
-</style>
