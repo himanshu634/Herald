@@ -272,7 +272,14 @@ Last backend task, so it can be cut on its own.
 
 ### Task 6: Web: compose, send and show replies
 
-**The layout is open.** Herald's earlier screens each went through a `design-directions` round. If the owner wants options, run that first. The states, the copy and the contract below are fixed.
+**Layout: direction AH · Room to write** (picked 2026-11-04). Canvas https://claude.ai/artifact/WmiNnvDNj9HEW8Kh468H72, page "Round 10 · Reply box", frames `AH-Write` and `AH-After`, plus the shared `R10-States` board. Build to those frames:
+- Pressing **R** or the panel's **Reply** button swaps the email list (tabs stay) for a composer card that fills the list area. The card holds a header "Reply to {sender name or address}" with a "Back to the list" link (**Esc**), the customer's email as a quoted block ("{name} wrote, {time}"), the To line, a "Re" line with the subject, the text area, a caption "Plain text. It goes from {mailbox address} into {name}'s Gmail thread.", and a footer with **Send and mark done** (primary, **⌘↵** / Ctrl+Enter), **Send** (secondary) and **Discard** (link).
+- The email panel stays on the right, unchanged, so the notes are visible while writing.
+- After a send, the list comes back. The panel gains a "Your replies" section listing the sent replies, and a toast says "Sent to {to}" or "Sent to {to} and marked done".
+- At phone width the composer takes the whole screen, as the list area does there.
+- No reply from the table without the panel.
+
+The states, the copy and the contract below are fixed.
 
 **Files:**
 - Create: `apps/web/src/lib/inbox/reply.ts`, `reply.spec.ts`, `ReplyBox.svelte`
