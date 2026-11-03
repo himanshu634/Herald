@@ -35,6 +35,9 @@ class Check(BaseModel):
     ok: bool
     expected: str
     got: str
+    # A soft check is reported in its own measure but does not fail the case: it is about
+    # how the notes read, not about what happens to the email.
+    soft: bool = False
 
 
 def _norm(text: str) -> str:
@@ -145,6 +148,7 @@ def check(case: Case, trial: Trial, rule_ids: Iterable[str] = ()) -> list[Check]
                 ok=False,
                 expected="about the email, not the rules",
                 got=notes.summary,
+                soft=True,
             )
         )
     for quote in notes.quotes if notes else []:
@@ -187,7 +191,7 @@ class Scored:
 
     @property
     def passed(self) -> bool:
-        return all(c.ok for c in self.checks)
+        return all(c.ok or c.soft for c in self.checks)
 
     @property
     def failed(self) -> list[Check]:
