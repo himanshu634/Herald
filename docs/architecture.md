@@ -136,7 +136,7 @@ The owner writes a reply in the email's panel and sends it through the email's m
 
 A send has three steps, so no database session is open while the provider is called:
 
-1. **Begin.** In one transaction: look up the draft's `client_key`, check the mailbox, then commit a `sending` row. A key already used for this email returns its row and sends nothing, so a double click or a second tab sends once. A key used for another email, or a second draft while one is `sending`, answers 409 `already_sending` (the partial unique index `uq_reply_one_sending` allows one `sending` row per email). An email with no mailbox, a mailbox that is not `active`, or one without send permission answers 409 `no_mailbox`, `mailbox_inactive` or `send_not_allowed`.
+1. **Begin.** In one transaction: look up the draft's `client_key`, check the mailbox, then commit a `sending` row. A key already used for this email returns its row and sends nothing, so a double click or a second tab sends once. A key used for another email, or a second draft while one is `sending`, answers 409 `already_sending` (the partial unique index `uq_reply_one_sending` allows one `sending` row per email). An email with no mailbox, a mailbox that is not `active`, or one without send permission answers 409 `no_mailbox`, `mailbox_inactive` or `send_not_allowed`. An email with no usable recipient (a `From` the provider could not parse), or one whose reply would go to the mailbox's own address (a form sent from the shop with no usable `Reply-To`), answers 409 `no_recipient`. Every 409 saves nothing.
 2. **Send.** One call to `connector.send_reply`, under a 60 s timeout, and never retried.
 3. **Finish.** In one transaction: save the outcome, stage `reply.status` (`email_id`, `reply_id`, `status`), and for "Send and mark done" move the email to `done` if the reply was sent. Commit, then publish.
 
@@ -145,12 +145,12 @@ The answer is 200 whatever the outcome; the reply's `status` says it:
 | Status | Meaning | `error` |
 | --- | --- | --- |
 | `sent` | The provider took it | — |
-| `not_sent` | The provider refused; nothing went out | `rate_limited`, `auth` (the mailbox moves to `needs_reauth`), `send_not_allowed` (`can_send` turns off until a reconnect), `rejected` |
+| `not_sent` | The provider refused; nothing went out | `rate_limited`, `auth` (the grant was revoked or the stored credentials no longer open; the mailbox moves to `needs_reauth`), `send_not_allowed` (`can_send` turns off until a reconnect), `rejected` |
 | `unknown` | A timeout, a 5xx or any other error. The customer may have it, so the owner checks the mailbox's Sent folder | `unknown` |
 
-A `sending` row older than 2 minutes belongs to a process that died mid-send. The next reply to that email, or a resend of the same draft, turns it `unknown` (and stages `reply.status`), so it never blocks the email. Two minutes is longer than the slowest send: two requests (a token refresh and the send) under the 60 s timeout.
+A `sending` row older than 2 minutes belongs to a process that died mid-send. The next reply to that email, or a resend of the same draft, turns it `unknown` (and stages `reply.status`), so it never blocks the email. Until then the API reports it as `unknown` (error `unknown`) wherever it returns the reply, without writing, so the panel never says "Sending…" forever. Two minutes is longer than the slowest send: two requests (a token refresh and the send) under the 60 s timeout.
 
-The reply goes to the email's `Reply-To` when that is one plain address (a contact form sends from a no-reply address), and to `From` otherwise. It carries `In-Reply-To` and `References`, and the provider's thread id, so it lands in the customer's thread.
+The reply goes to the email's `Reply-To` when that is one plain address (a contact form sends from a no-reply address), and to `From` otherwise. `EmailOut.reply_address` carries that address (empty when there is none), so the web app's To line uses the server's rule instead of a copy of it. It carries `In-Reply-To` and `References`, and the provider's thread id, so it lands in the customer's thread.
 
 ## Mail connectors
 
