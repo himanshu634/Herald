@@ -1,14 +1,25 @@
 <script lang="ts">
 	import type { Email } from '#lib/api/client.js';
 	import { AngerMeter, Button, Icon, StatusTag, Tag, URGENCY } from '#lib/ui/index.js';
-	import { ACTIONS, actionsFor, floorLabel, formatTime, highlight, type Action } from './inbox';
+	import {
+		ACTIONS,
+		actionsFor,
+		floorLabel,
+		formatTime,
+		highlight,
+		tidyBody,
+		type Action
+	} from './inbox';
 
 	let { email, busy, onact }: { email: Email; busy: boolean; onact: (action: Action) => void } =
 		$props();
 
 	const floor = $derived(floorLabel(email.decision?.floor_flags ?? []));
 	const urgency = $derived(email.decision?.urgency ?? email.notes?.urgency);
-	const parts = $derived(highlight(email.body, email.notes?.quotes?.map((q) => q.text) ?? []));
+	// Quotes are tidied the same way as the body, so a quote that spans lines still matches.
+	const parts = $derived(
+		highlight(tidyBody(email.body), email.notes?.quotes?.map((q) => tidyBody(q.text)) ?? [])
+	);
 	const actions = $derived(actionsFor(email.status));
 	const otherFlags = $derived(
 		(email.notes?.risk_flags ?? []).includes('about_to_cancel') ? ['About to cancel'] : []

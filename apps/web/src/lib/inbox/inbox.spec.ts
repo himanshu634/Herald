@@ -6,6 +6,7 @@ import {
 	floorLabel,
 	highlight,
 	senderName,
+	tidyBody,
 	visibleEmails,
 	type Filters
 } from './inbox';
@@ -128,5 +129,18 @@ describe('labels', () => {
 
 	it('turns an address into a name', () => {
 		expect(senderName('ritika.sharma@gmail.com')).toBe('Ritika Sharma');
+	});
+});
+
+describe('tidyBody', () => {
+	it('caps blank-line runs and drops trailing spaces', () => {
+		const body =
+			'E-paper\r\r\n\r\r\n \r\r\n  Welcome! \r\n    \r\n\r\n  Good Morning!\r\r\n  Out now.\n';
+		expect(tidyBody(body)).toBe('E-paper\n\n  Welcome!\n\n  Good Morning!\n  Out now.');
+	});
+
+	it('leaves a tidy body as it is', () => {
+		const body = 'Hi,\n\nWhere is my order?';
+		expect(tidyBody(tidyBody(body))).toBe(body);
 	});
 });

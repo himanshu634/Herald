@@ -90,3 +90,37 @@ def test_empty_plain_part_falls_back_to_html():
     msg = _msg(body="  ")
     msg.add_alternative("<p>Refund please</p>", subtype="html")
     assert parse_raw_message(_raw(msg)).body == "Refund please"
+
+
+def test_newsletter_html_keeps_its_lines_without_blank_runs():
+    # Shaped like a real newsletter: a title, CRLF source indentation, layout
+    # tables nested several deep, and cells with no whitespace between them.
+    html = (
+        "<html><head><title>E-paper</title></head><body>\r\n"
+        "  <table>\r\n    <tr>\r\n      <td>\r\n        Welcome to <b>E-paper</b>!\r\n"
+        "      </td>\r\n    </tr>\r\n    <tr><td><table><tr><td><table><tr>"
+        "<td>November 03, 2026</td><td>Tuesday</td>"
+        "</tr></table></td></tr></table></td></tr>\r\n  </table>\r\n"
+        "  <p>Good Morning!<br/>The latest ePaper is out.</p>\r\n"
+        "  <p>Read&nbsp;more</p>\r\n</body></html>"
+    )
+    msg = EmailMessage()
+    msg["From"] = "news@paper.in"
+    msg.set_content(html, subtype="html")
+    assert parse_raw_message(_raw(msg)).body == (
+        "Welcome to E-paper!\n\n"
+        "November 03, 2026\nTuesday\n\n"
+        "Good Morning!\nThe latest ePaper is out.\n\n"
+        "Read more"
+    )
+
+
+def test_plain_text_blank_runs_are_capped_and_indent_kept():
+    msg = _msg(body="Hi,\r\n\r\n\r\n\r\nWhere is it?   \r\n  > earlier reply\r\n")
+    assert parse_raw_message(_raw(msg)).body == "Hi,\n\nWhere is it?\n  > earlier reply"
+
+
+def test_doubled_carriage_return_is_one_line_break():
+    raw = b"From: a@b.com\r\nContent-Type: text/plain\r\n\r\nGood Morning!\r\r\nOut now."
+    body = parse_raw_message(base64.urlsafe_b64encode(raw).decode()).body
+    assert body == "Good Morning!\nOut now."
