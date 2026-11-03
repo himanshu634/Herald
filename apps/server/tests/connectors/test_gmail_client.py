@@ -126,14 +126,34 @@ async def test_get_raw_message_404_raises_message_gone():
         await make_client(handler).get_raw_message("tok", "m1")
 
 
-@pytest.mark.parametrize("status", [400, 403, 410])
-async def test_get_raw_message_other_4xx_raises_message_unavailable(status):
+@pytest.mark.parametrize("reason", ["dailyLimitExceeded", "quotaExceeded"])
+async def test_daily_limit_403_raises_rate_limited(reason):
+    def handler(request):
+        return httpx.Response(403, json={"error": {"errors": [{"reason": reason}]}})
+
+    with pytest.raises(RateLimited):
+        await make_client(handler).get_raw_message("tok", "m1")
+
+
+@pytest.mark.parametrize("status", [400, 410])
+async def test_get_raw_message_400_and_410_raise_message_unavailable(status):
     def handler(request):
         return httpx.Response(status, json={"error": {"message": "leak-me-xyz"}})
 
     with pytest.raises(MessageUnavailable) as exc:
         await make_client(handler).get_raw_message("tok", "m1")
     assert "leak-me-xyz" not in str(exc.value)
+
+
+@pytest.mark.parametrize("status", [403, 408])
+async def test_get_raw_message_other_4xx_raises_http_error(status):
+    def handler(request):
+        return httpx.Response(
+            status, json={"error": {"errors": [{"reason": "insufficientPermissions"}]}}
+        )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await make_client(handler).get_raw_message("tok", "m1")
 
 
 async def test_get_raw_message_5xx_still_raises():

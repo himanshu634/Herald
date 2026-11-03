@@ -18,7 +18,14 @@ REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
 
 DEFAULT_RETRY_AFTER = 30.0
-_RATE_LIMIT_REASONS = {"rateLimitExceeded", "userRateLimitExceeded"}
+# 403 reasons that pass with time. The daily and project quotas reset on Google's side, so they
+# are rate limits too: the job retries later and the cursor stays where it is.
+_RATE_LIMIT_REASONS = {
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+    "dailyLimitExceeded",
+    "quotaExceeded",
+}
 
 
 class HistoryExpired(Exception):
@@ -30,7 +37,7 @@ class MessageGone(Exception):
 
 
 class MessageUnavailable(Exception):
-    """Gmail refuses this one message for good (a 4xx other than auth, rate limit or 404)."""
+    """Gmail refuses this one message for good (400 or 410 on the message get)."""
 
 
 class TokenSet(NamedTuple):
@@ -238,12 +245,14 @@ class GmailClient:
         )
         if response.status_code == 404:
             raise MessageGone(message_id)
-        # 401 and rate limits were raised by _request already. Any other 4xx will answer the
-        # same next time, so the connector skips this message instead of failing every sync
-        # at it. 5xx still raises: it may pass, and the retry reads the message again.
-        # The message names the id only, never the response body.
-        if 400 <= response.status_code < 500:
+        # 401 and rate limits were raised by _request already. 400 and 410 are about this one
+        # message and will answer the same next time, so the connector skips it instead of
+        # failing every sync at it. The message names the id only, never the response body.
+        if response.status_code in (400, 410):
             raise MessageUnavailable(f"{message_id} answered {response.status_code}")
+        # Every other status raises and fails the fetch, so the cursor does not move. A 403
+        # (insufficientPermissions, domainPolicy, ...) refuses the whole account, not this
+        # message, and a 408 or 5xx may pass: skipping them would lose mail for good.
         response.raise_for_status()
         data = _json(response)
         return RawMessage(

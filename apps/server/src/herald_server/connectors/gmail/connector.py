@@ -127,8 +127,9 @@ class GmailConnector(MailConnector):
             except MessageGone:
                 continue  # deleted between the listing and now
             except MessageUnavailable as exc:
-                # A permanent refusal for this one message: raising would fail every sync at
-                # it and the cursor would never move. Log the id and error type only.
+                # A permanent refusal for this one message (400 or 410): raising would fail
+                # every sync at it and the cursor would never move. Any other refusal raises
+                # from the client and fails the fetch. Log the id and error type only.
                 log.warning(
                     "skipping unavailable gmail message %s (%s)", message_id, type(exc).__name__
                 )

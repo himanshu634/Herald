@@ -316,9 +316,10 @@ async def test_single_record_larger_than_cap_is_taken_whole(connector, google):
     assert (second.cursor, second.has_more) == ("5000", False)
 
 
-async def test_permanent_message_error_is_skipped(connector, google, caplog):
+@pytest.mark.parametrize("status", [400, 410])
+async def test_400_and_410_on_message_are_skipped(connector, google, caplog, status):
     google.history_pages = {None: _history_page("600", ["bad", "m1"])}
-    google.message_errors["bad"] = 400
+    google.message_errors["bad"] = status
     google.add_message("m1")
 
     with caplog.at_level(logging.WARNING, logger="herald_server.connectors.gmail.connector"):
@@ -329,6 +330,26 @@ async def test_permanent_message_error_is_skipped(connector, google, caplog):
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any("bad" in w and "MessageUnavailable" in w for w in warnings)
     assert "leak-me-xyz" not in caplog.text
+
+
+async def test_other_403_on_message_fails_the_fetch(connector, google):
+    # insufficientPermissions, domainPolicy and the like refuse every message of the account,
+    # not this one: skipping would move the cursor past mail that was never read.
+    google.history_pages = {None: _history_page("600", ["m1", "m2"])}
+    google.add_message("m1")
+    google.message_errors["m2"] = 403
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await connector.fetch_changes(CREDS, "400")
+
+
+async def test_408_on_message_fails_the_fetch(connector, google):
+    google.history_pages = {None: _history_page("600", ["slow", "m1"])}
+    google.message_errors["slow"] = 408
+    google.add_message("m1")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await connector.fetch_changes(CREDS, "400")
 
 
 async def test_server_error_on_a_message_fails_the_fetch(connector, google):
