@@ -56,6 +56,8 @@ async def test_sender_history_sees_only_earlier_emails(app):
     assert out.count_30d == 2 and out.count_7d == 2
     assert {e.id for e in out.recent} == {ids[0], ids[1]}
     assert out.first_seen == _before(engine, ids[0])
+    # decide places its 7-day repeat window from this, in the same naive time as `recent`.
+    assert out.as_of == _before(engine, ids[3])
 
 
 async def test_same_timestamp_excludes_itself(app):
