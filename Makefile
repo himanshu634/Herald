@@ -2,20 +2,21 @@
 SERVER := cd apps/server &&
 LITE := HERALD_DATABASE_URL=sqlite:///./herald-dev.db HERALD_BUS=memory HERALD_QUEUE=inline
 
-.PHONY: help install infra infra-down api worker web lite test lint format gen-api
+.PHONY: help install infra infra-down api worker web lite docker-dev docker-prod docker-prod-down \
+	test lint format gen-api
 
 help: ## List tasks
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-11s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
 
 install: ## Install Python and JS dependencies
 	uv sync
 	pnpm install
 
 infra: ## Start Postgres and Redis (Docker)
-	docker compose up -d
+	docker compose -f infra/docker-compose.yml up -d
 
 infra-down: ## Stop Postgres and Redis
-	docker compose down
+	docker compose -f infra/docker-compose.yml down
 
 api: ## Run the API on :8000 (needs make infra)
 	$(SERVER) uv run fastapi dev --port 8000
@@ -28,6 +29,15 @@ web: ## Run the web app on :5173 (proxies /api to :8000)
 
 lite: ## Run the API with no Docker: SQLite, in-memory bus, inline pipeline
 	$(SERVER) $(LITE) uv run fastapi dev --port 8000
+
+docker-dev: ## Run the full stack in Docker with hot reload (web :5173, API :8000)
+	docker compose -f infra/docker-compose.dev.yml up --build
+
+docker-prod: ## Build and start the production stack in Docker (needs .env)
+	docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --build
+
+docker-prod-down: ## Stop the production stack (keeps its data)
+	docker compose --env-file .env -f infra/docker-compose.prod.yml down
 
 test: ## Run all tests
 	uv run pytest

@@ -1,4 +1,7 @@
 # Local infra for Herald: Postgres for data, Redis for the job queue and SSE fan-out.
+# Named herald so its volume keeps the name it had when this file lived at the repo root.
+name: herald
+
 services:
   postgres:
     image: postgres:17

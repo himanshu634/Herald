@@ -52,8 +52,10 @@ STATUS_FOR_ROUTE = {
 class Workspace(SQLModel, table=True):
     id: str = Field(default_factory=_id, primary_key=True)
     name: str
-    # A serialized herald_core.schema.WorkspaceConfig.
+    # A serialized herald_core.schema.WorkspaceConfig. Always valid, even in a draft workspace.
     config: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
+    # False until the owner saves the setup. A draft workspace accepts no email.
+    setup_done: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_now)
 
 

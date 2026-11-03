@@ -1,0 +1,51 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/schibsted-grotesk';
+@import '@fontsource-variable/jetbrains-mono';
+@import './lib/styles/tokens.css';
+
+/* Page basics. Components style themselves with utilities. */
+@layer base {
+	html {
+		font-family: var(--font-sans);
+		color: var(--color-ink);
+		background: var(--color-canvas);
+		-webkit-font-smoothing: antialiased;
+	}
+
+	body {
+		min-height: 100vh;
+		font-size: var(--text-md);
+		line-height: var(--text-md--line-height);
+	}
+
+	h1,
+	h2,
+	h3 {
+		letter-spacing: var(--tracking-title);
+	}
+
+	a {
+		font-weight: 600;
+		text-underline-offset: 0.2em;
+	}
+
+	:focus-visible {
+		outline: 2px solid var(--color-focus);
+		outline-offset: 2px;
+	}
+
+	::selection {
+		background: var(--color-accent);
+		color: var(--color-on-accent);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		*::before,
+		*::after {
+			transition-duration: 0ms !important;
+			animation-duration: 0ms !important;
+			animation-iteration-count: 1 !important;
+		}
+	}
+}

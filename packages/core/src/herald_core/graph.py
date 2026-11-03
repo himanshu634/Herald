@@ -21,6 +21,7 @@ from herald_core.schema import Decision, Email, Notes, RiskFlag, RuleVerdict, Wo
 class TriageState(TypedDict, total=False):
     email: Email
     config: WorkspaceConfig
+    business_name: str
     word_flags: set[RiskFlag]
     notes: Notes | None
     notes_error: str | None
@@ -35,16 +36,21 @@ def build_graph(model: TriageModel) -> CompiledStateGraph:
 
     async def write_notes(state: TriageState) -> TriageState:
         try:
-            return {"notes": await model.write_notes(state["email"], state["config"])}
+            return {
+                "notes": await model.write_notes(
+                    state["email"], state["business_name"], state["config"]
+                )
+            }
         except ModelError as exc:
             return {"notes": None, "notes_error": str(exc)}
 
     async def judge_rules(state: TriageState) -> TriageState:
-        rules = state["config"].rules
-        if not rules or state.get("notes") is None:
+        config = state["config"]
+        if not config.rules or state.get("notes") is None:
             return {"verdicts": []}
         try:
-            return {"verdicts": await model.judge_rules(state["email"], state["notes"], rules)}
+            verdicts = await model.judge_rules(state["email"], state["business_name"], config)
+            return {"verdicts": verdicts}
         except ModelError:
             return {"verdicts": []}
 
@@ -72,5 +78,7 @@ def build_graph(model: TriageModel) -> CompiledStateGraph:
     return graph.compile()
 
 
-async def triage(graph: CompiledStateGraph, email: Email, config: WorkspaceConfig) -> TriageState:
-    return await graph.ainvoke({"email": email, "config": config})
+async def triage(
+    graph: CompiledStateGraph, email: Email, config: WorkspaceConfig, *, business_name: str
+) -> TriageState:
+    return await graph.ainvoke({"email": email, "config": config, "business_name": business_name})

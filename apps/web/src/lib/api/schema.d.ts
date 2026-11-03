@@ -56,6 +56,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Setup
+         * @description Onboarding step one: a draft workspace holding the AI's first guess at its config.
+         */
+        post: operations["start_setup_api_workspaces_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}": {
         parameters: {
             query?: never;
@@ -66,6 +86,46 @@ export interface paths {
         /** Get Workspace */
         get: operations["get_workspace_api_workspaces__workspace_id__get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/setup/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest Setup
+         * @description Draft again from a new description. Saves nothing: only PUT /config writes.
+         */
+        post: operations["suggest_setup_api_workspaces__workspace_id__setup_suggest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Config
+         * @description Save the owner's reviewed setup. Ends onboarding; also the save for later edits.
+         */
+        put: operations["save_config_api_workspaces__workspace_id__config_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -295,10 +355,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/webhooks/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Receive Push */
+        post: operations["receive_push_api_webhooks__provider__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ConfigIn */
+        ConfigIn: {
+            /** Name */
+            name: string;
+            config: components["schemas"]["WorkspaceConfig"];
+        };
         /** ConnectOut */
         ConnectOut: {
             /** Authorization Url */
@@ -314,6 +397,15 @@ export interface components {
             fired_rule_ids?: string[];
             /** Floor Flags */
             floor_flags?: components["schemas"]["RiskFlag"][];
+        };
+        /** DraftOut */
+        DraftOut: {
+            config: components["schemas"]["WorkspaceConfig"];
+            /**
+             * Drafted
+             * @description False when the AI failed and a plain fallback was used.
+             */
+            drafted: boolean;
         };
         /** EmailIn */
         EmailIn: {
@@ -448,6 +540,34 @@ export interface components {
          * @enum {string}
          */
         RuleAction: "alert" | "set_urgency" | "close";
+        /** SetupIn */
+        SetupIn: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+        };
+        /** SetupOut */
+        SetupOut: {
+            workspace: components["schemas"]["WorkspaceOut"];
+            /**
+             * Drafted
+             * @description False when the AI failed and a plain fallback was used.
+             */
+            drafted: boolean;
+        };
+        /** SuggestIn */
+        SuggestIn: {
+            /** Description */
+            description: string;
+        };
+        /** Topic */
+        Topic: {
+            /** Name */
+            name: string;
+            /** Meaning */
+            meaning?: string | null;
+        };
         /**
          * Urgency
          * @enum {string}
@@ -474,12 +594,22 @@ export interface components {
             /** Business Profile */
             business_profile: string;
             /** Topics */
-            topics: string[];
+            topics: components["schemas"]["Topic"][];
+            /**
+             * Facts
+             * @description Short facts about the brand.
+             */
+            facts?: string[];
             /**
              * Important Contacts
              * @description Email addresses or domains such as bigclient.com.
              */
             important_contacts?: string[];
+            /**
+             * Guidance
+             * @description The owner's own lines on how to read topic, urgency and anger.
+             */
+            guidance?: string[];
             /** Rules */
             rules?: components["schemas"]["Rule"][];
         };
@@ -496,6 +626,8 @@ export interface components {
             /** Name */
             name: string;
             config: components["schemas"]["WorkspaceConfig"];
+            /** Setup Done */
+            setup_done: boolean;
             /**
              * Created At
              * Format: date-time
@@ -606,6 +738,39 @@ export interface operations {
             };
         };
     };
+    start_setup_api_workspaces_setup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetupIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_workspace_api_workspaces__workspace_id__get: {
         parameters: {
             query?: never;
@@ -616,6 +781,76 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suggest_setup_api_workspaces__workspace_id__setup_suggest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_config_api_workspaces__workspace_id__config_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfigIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1080,6 +1315,35 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    receive_push_api_webhooks__provider__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

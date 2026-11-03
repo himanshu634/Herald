@@ -25,6 +25,7 @@ class Services:
     engine: Engine
     bus: EventBus
     notifier: Notifier
+    model: TriageModel
     graph: CompiledStateGraph
     http: httpx.AsyncClient
     secrets: SecretBox | None  # None when token_key is unset
@@ -89,6 +90,7 @@ def build_services(settings: Settings) -> Services:
         engine=engine,
         bus=bus,
         notifier=notifier,
+        model=model,
         graph=build_graph(model),
         http=http,
         secrets=secrets,

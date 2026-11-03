@@ -1,0 +1,18 @@
+# Ignore list for infra/Dockerfile (BuildKit reads <Dockerfile>.dockerignore).
+# Keep the build context small and free of host-built binaries and secrets.
+.git
+.claude
+.worktrees
+.venv
+**/.venv
+**/node_modules
+**/__pycache__
+.pytest_cache
+.ruff_cache
+apps/web/build
+apps/web/.svelte-kit
+*.db
+.env
+.env.*
+!.env.example
+.DS_Store
