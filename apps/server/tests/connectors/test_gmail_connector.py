@@ -106,7 +106,13 @@ class FakeGoogle:
             raw, labels = self.messages[message_id]
             return httpx.Response(
                 200,
-                json={"id": message_id, "raw": raw, "labelIds": labels, "internalDate": "1000"},
+                json={
+                    "id": message_id,
+                    "threadId": f"t-{message_id}",
+                    "raw": raw,
+                    "labelIds": labels,
+                    "internalDate": "1000",
+                },
             )
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
@@ -214,6 +220,7 @@ async def test_first_fetch_backfills_and_takes_cursor_from_profile(connector, go
     first = result.messages[0]
     assert (first.sender, first.subject, first.body) == ("riya@customer.in", "Order", "Where?")
     assert first.received_at.timestamp() == 1.0
+    assert first.thread_id == "t-m1"
     assert google.calls.index("profile") < google.calls.index("list")
 
 

@@ -155,6 +155,7 @@ class GmailConnector(MailConnector):
                     subject=parsed.subject,
                     body=parsed.body,
                     received_at=raw.internal_date,
+                    thread_id=raw.thread_id,
                 )
             )
         return FetchResult(messages=messages, cursor=new_cursor, has_more=has_more)

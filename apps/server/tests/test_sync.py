@@ -32,13 +32,16 @@ def add_mailbox(app, workspace_id: str, **fields) -> str:
         return mailbox.id
 
 
-def message(provider_message_id: str, subject: str = "Product questions") -> InboundMessage:
+def message(
+    provider_message_id: str, subject: str = "Product questions", thread_id: str | None = None
+) -> InboundMessage:
     return InboundMessage(
         provider_message_id=provider_message_id,
         sender="riya@customer.in",
         subject=subject,
         body="Does the cabin bag fit Indigo?",
         received_at=datetime(2026, 11, 3, 9, 0, tzinfo=UTC),
+        thread_id=thread_id,
     )
 
 
@@ -71,6 +74,16 @@ async def test_sync_stores_new_mail_and_runs_triage(app, client, fake_connector)
     mailbox = load_mailbox(app, mailbox_id)
     assert mailbox.cursor == "1"
     assert mailbox.last_synced_at is not None
+
+
+async def test_sync_stores_the_thread_id_per_mailbox(app, client, fake_connector):
+    mailbox_id = add_mailbox(app, await demo_workspace(client))
+    fake_connector.queue = [message("m1", thread_id="th1"), message("m2")]
+
+    await sync(app, mailbox_id)
+
+    threads = {e.provider_message_id: e.thread_id for e in emails_of(app, mailbox_id)}
+    assert threads == {"m1": f"{mailbox_id}:th1", "m2": None}
 
 
 async def test_sync_twice_does_not_duplicate(app, client, fake_connector):
