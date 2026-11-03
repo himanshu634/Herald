@@ -391,7 +391,9 @@
 				</main>
 
 				{#if selected}
-					<div class="lg:flex lg:w-panel lg:flex-none">
+					<div
+						class="px-4 pb-4 lg:flex lg:w-panel lg:flex-none lg:border-t lg:border-line lg:py-4 lg:pr-4 lg:pl-0"
+					>
 						<EmailPanel
 							email={selected}
 							{busy}

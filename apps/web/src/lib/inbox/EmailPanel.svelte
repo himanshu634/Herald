@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Email } from '#lib/api/client.js';
-	import { AngerMeter, Button, Icon, Panel, StatusTag, Tag, URGENCY } from '#lib/ui/index.js';
+	import { AngerMeter, Button, Icon, StatusTag, Tag, URGENCY } from '#lib/ui/index.js';
 	import {
 		ACTIONS,
 		actionsFor,
@@ -41,9 +41,9 @@
 
 <aside
 	aria-label="Herald on this email"
-	class="flex min-w-0 flex-1 flex-col border-l border-line bg-sunken max-lg:border-t max-lg:border-l-0 lg:overflow-y-auto"
+	class="flex min-w-0 flex-1 flex-col rounded-lg border border-line bg-surface lg:overflow-y-auto"
 >
-	<header class="border-b border-line bg-surface px-5 py-4">
+	<header class="border-b border-dashed border-line-dashed px-5 py-4">
 		<div class="flex items-center justify-between gap-3">
 			<p class="truncate text-xs text-muted">{email.sender}, {formatTime(email.received_at)}</p>
 			<StatusTag status={email.status} />
@@ -51,15 +51,17 @@
 		<h2 class="mt-1 text-xl font-extrabold">{email.subject}</h2>
 	</header>
 
-	<div class="flex flex-1 flex-col gap-3 p-4">
-		{#if floor}
-			<div class="flex items-start gap-3 rounded-lg bg-floor-bg px-4 py-3 text-floor-fg">
-				<Icon name="shield" size={18} />
-				<p class="text-sm">{floor}. This always alerts you, whatever your rules say.</p>
-			</div>
-		{/if}
+	<!-- One card: its parts are split by dashed dividers, never cards inside the card. -->
+	<div class="flex flex-1 flex-col">
+		<section aria-labelledby="why-title" class="px-5 py-4">
+			{#if floor}
+				<div class="mb-4 flex items-start gap-3 rounded-lg bg-floor-bg px-4 py-3 text-floor-fg">
+					<Icon name="shield" size={18} />
+					<p class="text-sm">{floor}. This always alerts you, whatever your rules say.</p>
+				</div>
+			{/if}
 
-		<Panel title="Why it's here">
+			<h3 id="why-title" class="mb-2 text-sm font-bold text-muted">Why it's here</h3>
 			{#if email.decision}
 				<p class="text-md font-bold">{floor ?? email.decision.reason}</p>
 			{:else}
@@ -104,10 +106,14 @@
 					{/if}
 				</dl>
 			{/if}
-		</Panel>
+		</section>
 
-		<Panel title="The email">
-			{#snippet actions()}
+		<section
+			aria-labelledby="email-title"
+			class="border-t border-dashed border-line-dashed px-5 py-4"
+		>
+			<div class="mb-2 flex items-center justify-between gap-3">
+				<h3 id="email-title" class="text-sm font-bold text-muted">The email</h3>
 				{#if email.notes}
 					<Button
 						variant="quiet"
@@ -118,7 +124,7 @@
 						onclick={ontogglefull}>{showFull ? 'Hide' : 'Read it all'}</Button
 					>
 				{/if}
-			{/snippet}
+			</div>
 			{#if showFull}
 				<p id="email-body" class="text-md whitespace-pre-line text-body">
 					{#each parts as part, i (i)}{#if part.quoted}<mark
@@ -135,10 +141,10 @@
 					onclick={ontogglefull}>{tidyBody(email.body).replace(/\s*\n\s*/g, ' ')}</button
 				>
 			{/if}
-		</Panel>
+		</section>
 
 		{#if actions.length}
-			<div class="mt-auto flex flex-wrap gap-2 pt-2">
+			<div class="mt-auto flex flex-wrap gap-2 border-t border-dashed border-line-dashed px-5 py-4">
 				{#each actions as action, i (action)}
 					<Button
 						variant={i === 0 ? 'primary' : 'secondary'}
