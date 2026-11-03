@@ -64,10 +64,16 @@
 	--color-transparent: transparent;
 	--color-current: currentColor;
 
-	/* Type: one family */
+	/*
+	 * Type: one family for everything, plus a mono for keys and IDs.
+	 * Schibsted's tabular figures also widen , . : ; # and %, so tabular-nums is not set on body.
+	 * Put the tabular-nums utility only on text that is all digits. Docs: design-system.md, Type.
+	 */
 	--font-sans:
-		'Albert Sans Variable', 'Albert Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-	--font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+		'Schibsted Grotesk Variable', 'Schibsted Grotesk', system-ui, -apple-system, 'Segoe UI',
+		sans-serif;
+	--font-mono:
+		'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 	--text-xs: 0.75rem; /* 12: tags, kbd, table heads */
 	--text-xs--line-height: 1rem;
 	--text-sm: 0.8125rem; /* 13: table cells, meta, chips */
