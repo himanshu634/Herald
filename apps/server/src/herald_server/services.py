@@ -78,6 +78,13 @@ def _check_token_key(engine: Engine, secrets: SecretBox) -> None:
         raise RuntimeError("HERALD_TOKEN_KEY cannot decrypt stored mailbox credentials") from None
 
 
+def _anthropic_key(settings: Settings) -> str:
+    # Without a key every email fails in the model call, so stop here instead.
+    if settings.anthropic_api_key is None or not settings.anthropic_api_key.get_secret_value():
+        raise RuntimeError("HERALD_MODEL_PROVIDER is anthropic but ANTHROPIC_API_KEY is not set")
+    return settings.anthropic_api_key.get_secret_value()
+
+
 def build_services(settings: Settings) -> Services:
     connect_args = (
         {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
@@ -94,7 +101,7 @@ def build_services(settings: Settings) -> Services:
         RedisEventBus(settings.redis_url) if settings.bus == "redis" else InMemoryEventBus()
     )
     model: TriageModel = (
-        AnthropicModel(model=settings.model_name)
+        AnthropicModel(model=settings.model_name, api_key=_anthropic_key(settings))
         if settings.model_provider == "anthropic"
         else FakeModel()
     )

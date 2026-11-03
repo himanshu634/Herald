@@ -32,7 +32,7 @@ from herald_core.history import (
     Thread,
     ThreadIn,
 )
-from herald_core.model import ModelError, TriageModel
+from herald_core.model import TriageModel
 from herald_core.safety import word_check
 from herald_core.schema import Decision, Email, Notes, RiskFlag, RuleVerdict, WorkspaceConfig
 from herald_core.tools import Toolbox
@@ -90,8 +90,10 @@ def build_graph(model: TriageModel) -> CompiledStateGraph:
                     history=state.get("history"),
                 )
             }
-        except ModelError as exc:
-            log.warning("write_notes failed for email %s: %s", state["email"].id, exc)
+        # Any failure, not only ModelError: an uncaught one (a missing API key raises
+        # TypeError) fails the whole run and leaves the email unread for good.
+        except Exception:
+            log.exception("write_notes failed for email %s", state["email"].id)
             return {"notes": None}
 
     async def judge_rules(state: TriageState) -> TriageState:
@@ -108,7 +110,8 @@ def build_graph(model: TriageModel) -> CompiledStateGraph:
                 state["email"], state["business_name"], config, history=state.get("history")
             )
             return {"verdicts": verdicts}
-        except ModelError:
+        except Exception:
+            log.exception("judge_rules failed for email %s", state["email"].id)
             return {"verdicts": []}
 
     def run_decide(state: TriageState) -> TriageState:

@@ -7,6 +7,7 @@ from sqlmodel import create_engine
 
 from herald_server.api.main import create_app
 from herald_server.services import build_services
+from herald_server.settings import Settings
 
 
 def test_startup_names_columns_missing_from_an_old_database(settings):
@@ -47,3 +48,25 @@ async def test_debug_sends_the_traceback(settings):
 async def test_without_debug_the_traceback_stays_on_the_server(settings):
     body = await _boom_response(settings)
     assert body == "Internal Server Error"
+
+
+def test_startup_fails_without_an_anthropic_key(settings, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    settings = settings.model_copy(
+        update={"model_provider": "anthropic", "anthropic_api_key": None}
+    )
+
+    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+        build_services(settings)
+
+
+def test_anthropic_key_is_read_from_the_env_file(tmp_path, monkeypatch):
+    # pydantic-settings reads .env into Settings only; the SDK never sees os.environ for it.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("ANTHROPIC_API_KEY=sk-ant-test\n")
+
+    settings = Settings(_env_file=env_file)
+
+    assert settings.anthropic_api_key is not None
+    assert settings.anthropic_api_key.get_secret_value() == "sk-ant-test"
