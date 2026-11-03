@@ -11,7 +11,7 @@ The web app styles everything with **Tailwind CSS v4**, and the tokens below are
 | `apps/web/src/lib/styles/tokens.css` | The Tailwind theme (`@theme`): every colour, type size, radius, size and shadow, plus the dark values |
 | `apps/web/src/app.css` | Imports Tailwind, the font and the tokens; page basics (font, background, focus ring, reduced motion) |
 | `apps/web/src/lib/ui/` | The components (`Button`, `Tag`, `StatusTag`, `AngerMeter`, `Tabs`, `FilterChip`, `Panel`, `Kbd`, `Toast`, `Icon`, `Logo`) and `tones.ts` |
-| `apps/web/src/lib/inbox/` | The inbox built from them: `EmailTable`, `EmailPanel`, `SendTestEmail`, and `inbox.ts` (views, order, actions, proof highlighting) |
+| `apps/web/src/lib/inbox/` | The inbox built from them: `EmailTable`, `EmailPanel` and `inbox.ts` (views, order, actions, proof highlighting) |
 | `/design-system` in the web app | The gallery: every token and component, with a light and dark switch |
 
 ## Principles

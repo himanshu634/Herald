@@ -30,7 +30,7 @@ export const EMPTY: Record<ViewId, string> = {
 	'in-progress': 'Nothing in progress. Press On it on an email to start it.',
 	done: 'Nothing done yet today.',
 	closed: 'Nothing closed yet. Newsletters and spam land here without bothering you.',
-	all: 'No emails yet. Send a test email to see Herald sort it.'
+	all: 'No emails yet. New mail shows up here as Herald sorts it.'
 };
 
 const STATUS_RANK: Record<EmailStatus, number> = {
