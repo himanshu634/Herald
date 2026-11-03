@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from anthropic import AsyncAnthropic
 from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy import Engine
 from sqlmodel import SQLModel, create_engine
@@ -39,11 +40,19 @@ def build_services(settings: Settings) -> Services:
         if settings.ntfy_topic
         else LogNotifier()
     )
-    model: TriageModel = (
-        AnthropicModel(model=settings.model_name)
-        if settings.model_provider == "anthropic"
-        else FakeModel()
-    )
     return Services(
-        settings=settings, engine=engine, bus=bus, notifier=notifier, graph=build_graph(model)
+        settings=settings,
+        engine=engine,
+        bus=bus,
+        notifier=notifier,
+        graph=build_graph(build_model(settings)),
     )
+
+
+def build_model(settings: Settings) -> TriageModel:
+    if settings.model_provider == "fake":
+        return FakeModel()
+    key = settings.anthropic_api_key
+    # No key in settings: the SDK falls back to its own credential lookup.
+    client = AsyncAnthropic(api_key=key.get_secret_value()) if key else None
+    return AnthropicModel(client=client, model=settings.model_name)

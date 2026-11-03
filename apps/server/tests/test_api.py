@@ -1,3 +1,8 @@
+from herald_core.model import AnthropicModel
+from herald_server.services import build_model
+from herald_server.settings import Settings
+
+
 async def demo_workspace(client) -> str:
     response = await client.post("/api/workspaces/demo")
     assert response.status_code == 201
@@ -50,3 +55,14 @@ async def test_workspaces_are_isolated(app, client):
 
 async def test_unknown_workspace_is_404(client):
     assert (await client.get("/api/workspaces/nope/emails")).status_code == 404
+
+
+def test_api_key_from_env_file_reaches_the_claude_client(tmp_path, monkeypatch):
+    # A real exported key would outrank the .env file.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("HERALD_MODEL_PROVIDER", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("HERALD_MODEL_PROVIDER=anthropic\nANTHROPIC_API_KEY=sk-test-123\n")
+    model = build_model(Settings(_env_file=env))
+    assert isinstance(model, AnthropicModel)
+    assert model._client.api_key == "sk-test-123"
