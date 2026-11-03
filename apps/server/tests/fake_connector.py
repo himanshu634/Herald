@@ -21,6 +21,8 @@ class FakeConnector:
     def __init__(self) -> None:
         self.queue: list[InboundMessage] = []
         self.raise_on_fetch: Exception | None = None
+        self.raise_on_authorize: Exception | None = None
+        self.raise_on_subscribe: Exception | None = None
         self.calls: list[str] = []
         self.account = ConnectedAccount(email_address="owner@shop.in", credentials={"token": "t"})
 
@@ -30,12 +32,16 @@ class FakeConnector:
 
     async def complete_authorization(self, code: str) -> ConnectedAccount:
         self.calls.append("complete_authorization")
+        if self.raise_on_authorize is not None:
+            raise self.raise_on_authorize
         return self.account
 
     async def subscribe(
         self, credentials: dict[str, str], provider_state: dict[str, Any]
     ) -> Subscription:
         self.calls.append("subscribe")
+        if self.raise_on_subscribe is not None:
+            raise self.raise_on_subscribe
         return Subscription(expires_at=None, provider_state={})
 
     async def unsubscribe(

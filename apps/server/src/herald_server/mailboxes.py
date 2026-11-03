@@ -1,11 +1,40 @@
-"""Connected mailboxes: lookups and status changes, the same for every provider."""
+"""Connected mailboxes: connect, disconnect, lookups and status changes, for every provider."""
 
+import logging
+
+from asyncer import asyncify
 from sqlmodel import Session, select
 
 from herald_server.bus import BusEvent
+from herald_server.connectors.base import ConnectedAccount, MailConnector, Subscription
+from herald_server.crypto import BadSecret
 from herald_server.events import MAILBOX_STATUS, add_event, to_bus
-from herald_server.models import Mailbox, MailboxStatus
+from herald_server.models import Event, Mailbox, MailboxStatus
 from herald_server.services import Services
+
+log = logging.getLogger(__name__)
+
+
+class StatusConflict(Exception):
+    """The mailbox is not in a status that allows this change (the API answers 409)."""
+
+    def __init__(self, status: MailboxStatus) -> None:
+        super().__init__(f"Mailbox is {status}")
+        self.status = status
+
+
+def stage_status_event(session: Session, mailbox: Mailbox) -> Event:
+    """Stage `mailbox.status` with the mailbox's current status. Publish it after commit."""
+    return add_event(
+        session,
+        mailbox.workspace_id,
+        MAILBOX_STATUS,
+        {
+            "mailbox_id": mailbox.id,
+            "email_address": mailbox.email_address,
+            "status": mailbox.status,
+        },
+    )
 
 
 def get_mailbox(services: Services, mailbox_id: str) -> Mailbox | None:
@@ -35,12 +64,7 @@ def set_status(
         if only_from is not None and mailbox.status != only_from:
             return None
         mailbox.status = status
-        event = add_event(
-            session,
-            mailbox.workspace_id,
-            MAILBOX_STATUS,
-            {"mailbox_id": mailbox.id, "email_address": mailbox.email_address, "status": status},
-        )
+        event = stage_status_event(session, mailbox)
         session.commit()
         session.refresh(event)
         return to_bus(event)
@@ -69,3 +93,169 @@ def active_mailbox_ids(services: Services) -> list[str]:
         return list(
             session.exec(select(Mailbox.id).where(Mailbox.status == MailboxStatus.ACTIVE)).all()
         )
+
+
+def open_credentials(services: Services, mailbox: Mailbox) -> dict[str, str] | None:
+    """Decrypt the mailbox's credentials, or None when that is not possible."""
+    if mailbox.credentials_enc is None or services.secrets is None:
+        return None
+    try:
+        return services.secrets.open(mailbox.credentials_enc)
+    except BadSecret:
+        # Only a reconnect fixes this; the next sync marks the mailbox needs_reauth.
+        log.warning("BadSecret on credentials of mailbox %s", mailbox.id)
+        return None
+
+
+def upsert_connected(
+    services: Services, workspace_id: str, provider: str, account: ConnectedAccount
+) -> Mailbox:
+    """Save a freshly authorized account as an ACTIVE mailbox, reusing its row on reconnect.
+
+    The cursor is kept, so a mailbox that was needs_reauth or disconnected resumes where its
+    last sync stopped and no mail in the gap is skipped.
+    """
+    if services.secrets is None:
+        raise RuntimeError("token_key is not set")
+    email_address = account.email_address.lower()
+    with Session(services.engine) as session:
+        mailbox = session.exec(
+            select(Mailbox).where(
+                Mailbox.workspace_id == workspace_id,
+                Mailbox.provider == provider,
+                Mailbox.email_address == email_address,
+            )
+        ).first()
+        if mailbox is None:
+            mailbox = Mailbox(
+                workspace_id=workspace_id, provider=provider, email_address=email_address
+            )
+        mailbox.credentials_enc = services.secrets.seal(account.credentials)
+        mailbox.status = MailboxStatus.ACTIVE
+        session.add(mailbox)
+        session.commit()
+        session.refresh(mailbox)
+        return mailbox
+
+
+def _save_subscription(services: Services, mailbox_id: str, subscription: Subscription) -> None:
+    with Session(services.engine) as session:
+        # By id alone: the caller already loaded this mailbox filtered by workspace_id.
+        mailbox = session.get(Mailbox, mailbox_id)
+        if mailbox is None:
+            return
+        mailbox.subscription_expires_at = subscription.expires_at
+        # provider_state is a JSON column without mutation tracking: assign a new dict.
+        mailbox.provider_state = dict(subscription.provider_state)
+        session.add(mailbox)
+        session.commit()
+
+
+async def subscribe_mailbox(services: Services, mailbox: Mailbox) -> None:
+    """Start push for the mailbox and save the subscription. Best effort.
+
+    A failure is logged and the mailbox stays ACTIVE: the renewal cron retries the subscribe,
+    and the catch-up sync fetches the mail that push would have announced until then.
+    """
+    connector = services.connectors.get(mailbox.provider)
+    credentials = open_credentials(services, mailbox)
+    if connector is None or credentials is None:
+        return
+    try:
+        subscription = await connector.subscribe(credentials, mailbox.provider_state)
+    except Exception as exc:
+        # Only the type and id: provider errors can carry request headers with tokens.
+        log.warning("%s on subscribe of mailbox %s", type(exc).__name__, mailbox.id)
+        return
+    await asyncify(_save_subscription)(services, mailbox.id, subscription)
+
+
+async def _unsubscribe(
+    connector: MailConnector, mailbox: Mailbox, credentials: dict[str, str]
+) -> None:
+    # Best effort: the mailbox is already paused or disconnected here. A watch left running
+    # expires by itself, and its pushes start no sync because the mailbox is not ACTIVE.
+    try:
+        await connector.unsubscribe(credentials, mailbox.provider_state)
+    except Exception as exc:
+        log.warning("%s on unsubscribe of mailbox %s", type(exc).__name__, mailbox.id)
+
+
+async def unsubscribe_mailbox(services: Services, mailbox: Mailbox) -> None:
+    """Stop push for the mailbox. Best effort; errors are logged and ignored."""
+    connector = services.connectors.get(mailbox.provider)
+    credentials = open_credentials(services, mailbox)
+    if connector is not None and credentials is not None:
+        await _unsubscribe(connector, mailbox, credentials)
+
+
+def _record_status(services: Services, mailbox_id: str) -> tuple[Mailbox, BusEvent]:
+    with Session(services.engine) as session:
+        # By id alone: the mailbox was just saved for a workspace the caller checked.
+        mailbox = session.get(Mailbox, mailbox_id)
+        if mailbox is None:
+            raise LookupError(f"mailbox {mailbox_id} not found")
+        event = stage_status_event(session, mailbox)
+        session.commit()
+        session.refresh(mailbox)
+        session.refresh(event)
+        return mailbox, to_bus(event)
+
+
+async def connect_mailbox(
+    services: Services, workspace_id: str, connector: MailConnector, code: str
+) -> Mailbox:
+    """Finish OAuth: save the account as an ACTIVE mailbox, subscribe, publish the status.
+
+    The caller has checked that `workspace_id` exists and queues the first sync.
+    Raises the connector's `MissingRefreshToken` or `AuthRevoked` for a code that cannot be used.
+    """
+    account = await connector.complete_authorization(code)
+    mailbox = await asyncify(upsert_connected)(services, workspace_id, connector.provider, account)
+    await subscribe_mailbox(services, mailbox)
+    mailbox, event = await asyncify(_record_status)(services, mailbox.id)
+    await services.bus.publish(event)
+    return mailbox
+
+
+def _mark_disconnected(
+    services: Services, mailbox_id: str
+) -> tuple[Mailbox, dict[str, str] | None, BusEvent]:
+    with Session(services.engine) as session:
+        # By id alone: the caller loaded this mailbox filtered by workspace_id.
+        mailbox = session.get(Mailbox, mailbox_id)
+        if mailbox is None:
+            raise LookupError(f"mailbox {mailbox_id} not found")
+        # Checked in this session, against the committed row: the caller's copy may be stale.
+        if mailbox.status == MailboxStatus.DISCONNECTED:
+            raise StatusConflict(mailbox.status)
+        # Decrypt before clearing: unsubscribe and revoke need the credentials afterwards.
+        credentials = open_credentials(services, mailbox)
+        mailbox.credentials_enc = None
+        mailbox.status = MailboxStatus.DISCONNECTED
+        event = stage_status_event(session, mailbox)
+        session.commit()
+        session.refresh(mailbox)
+        session.refresh(event)
+        return mailbox, credentials, to_bus(event)
+
+
+async def disconnect_mailbox(services: Services, mailbox: Mailbox) -> Mailbox:
+    """Forget the credentials and stop push. Emails already stored are kept.
+
+    `mailbox` must have been loaded filtered by `workspace_id`.
+    Raises `StatusConflict` when the mailbox is already disconnected.
+    """
+    # Commit first, then call the provider: the mailbox is disconnected here even when the
+    # provider is slow or down, and no sync can start from it in the meantime.
+    mailbox, credentials, event = await asyncify(_mark_disconnected)(services, mailbox.id)
+    await services.bus.publish(event)
+    connector = services.connectors.get(mailbox.provider)
+    if connector is not None and credentials is not None:
+        await _unsubscribe(connector, mailbox, credentials)
+        try:
+            await connector.revoke(credentials)
+        except Exception as exc:
+            # Best effort: the credentials are gone from our side already.
+            log.warning("%s on revoke of mailbox %s", type(exc).__name__, mailbox.id)
+    return mailbox
