@@ -5,6 +5,7 @@
 		Button,
 		FilterChip,
 		Icon,
+		Logo,
 		Panel,
 		StatusTag,
 		Tabs,
@@ -95,6 +96,23 @@
 	</header>
 
 	<div class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,32rem),1fr))] items-start gap-4">
+		<Panel title="Logo">
+			<div class="flex flex-col gap-5">
+				<div class="flex flex-wrap items-end gap-5">
+					{#each [16, 24, 34, 56, 128] as size (size)}
+						<div class="flex flex-col items-center gap-2">
+							<Logo {size} />
+							<span class="text-xs text-muted">{size} px</span>
+						</div>
+					{/each}
+				</div>
+				<div class="flex items-center gap-2.5">
+					<Logo size={40} />
+					<span class="text-3xl font-extrabold tracking-display">Herald</span>
+				</div>
+			</div>
+		</Panel>
+
 		<Panel title="Colour">
 			<div class="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3 text-xs">
 				{#each swatches as [utility, name] (utility)}

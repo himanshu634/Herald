@@ -4,6 +4,7 @@ export { default as Button } from './Button.svelte';
 export { default as FilterChip } from './FilterChip.svelte';
 export { default as Icon, type IconName } from './Icon.svelte';
 export { default as Kbd } from './Kbd.svelte';
+export { default as Logo } from './Logo.svelte';
 export { default as Panel } from './Panel.svelte';
 export { default as StatusTag } from './StatusTag.svelte';
 export { default as Tabs, type TabItem } from './Tabs.svelte';
