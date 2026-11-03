@@ -69,6 +69,7 @@ Before the model reads an email, `gather_context` runs three tools in code: `sen
 - `word_check` never waits on the tools. A slow tool can delay the alert by at most the tool timeout (2 s).
 - History goes into the user message inside a fenced `<history>` block. Its text is untrusted, so Herald strips `<history>`, `<message>`, `<email>` and `<business>` tags from it.
 - `email.context` saves what the model saw: repeat counts, the ids it was shown, failed tools and timings.
+- `decide` also reads the sender history: the third email about the same thing this week alerts, after "about to cancel" and before "unsure". It counts this email plus earlier ones from the sender on the same topic in the 7 days before it (`SenderHistory.as_of` places the window) that are not done or closed.
 
 ## The prompt
 

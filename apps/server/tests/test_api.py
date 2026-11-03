@@ -48,6 +48,28 @@ async def test_trick_email_alerts_then_owner_marks_not_urgent(app, client):
     assert again.status_code == 409
 
 
+async def test_third_email_about_the_same_thing_alerts(app, client):
+    ws = await demo_workspace(client)
+    who = "chaser@customer.in"
+    first = await send(app, client, ws, "Product questions", "Is the zip YKK?", sender=who)
+    second = await send(app, client, ws, "Product questions", "Any news on the zip?", sender=who)
+    third = await send(app, client, ws, "Product questions", "Asking again: the zip?", sender=who)
+    assert [first["status"], second["status"]] == ["inbox", "inbox"]
+    assert third["status"] == "alerted"
+    assert third["decision"]["reason"] == "Third email about the same thing this week"
+
+
+async def test_a_done_email_does_not_count_as_a_repeat(app, client):
+    ws = await demo_workspace(client)
+    who = "chaser@customer.in"
+    first = await send(app, client, ws, "Product questions", "Is the zip YKK?", sender=who)
+    done = await client.post(f"/api/workspaces/{ws}/emails/{first['id']}/done")
+    assert done.json()["status"] == "done"
+    await send(app, client, ws, "Product questions", "Another question.", sender=who)
+    third = await send(app, client, ws, "Product questions", "And one more.", sender=who)
+    assert third["status"] == "inbox"
+
+
 async def test_workspaces_are_isolated(app, client):
     ws_a = await demo_workspace(client)
     ws_b = await demo_workspace(client)
