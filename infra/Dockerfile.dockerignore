@@ -1,3 +1,4 @@
+# Ignore list for infra/Dockerfile (BuildKit reads <Dockerfile>.dockerignore).
 # Keep the build context small and free of host-built binaries and secrets.
 .git
 .claude

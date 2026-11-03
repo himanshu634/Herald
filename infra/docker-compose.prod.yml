@@ -1,9 +1,11 @@
 # Herald in production: nginx serves the web app and proxies /api, with the API, the
 # pipeline worker, Postgres and Redis behind it. Only nginx publishes a port.
 #
-#   docker compose -f docker-compose.prod.yml up -d --build
+#   make docker-prod
 #
-# Reads secrets from .env (see .env.example). Put TLS in front of HERALD_PORT.
+# Reads secrets from the repo root .env (see .env.example). Compose looks for .env next to
+# this file, so run it through make, or pass `--env-file .env` from the repo root. Put TLS
+# in front of HERALD_PORT.
 
 # Its own project name, so it never shares volumes with the dev `herald` project. Postgres
 # only applies POSTGRES_PASSWORD when it creates the volume, so a shared volume would keep
@@ -12,12 +14,13 @@ name: herald-prod
 
 x-server: &server
   build:
-    context: .
+    context: ..
+    dockerfile: infra/Dockerfile
     target: server
   image: herald-server
   restart: unless-stopped
   env_file:
-    - path: .env
+    - path: ../.env
       required: false
   # Set here so a localhost value copied from .env.example cannot win.
   environment:
@@ -78,7 +81,8 @@ services:
 
   web:
     build:
-      context: .
+      context: ..
+      dockerfile: infra/Dockerfile
       target: web
     image: herald-web
     restart: unless-stopped

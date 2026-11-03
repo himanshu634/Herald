@@ -1,22 +1,27 @@
 # Full Herald stack for development, with hot reload. Postgres and Redis come from
-# docker-compose.yml, so `make infra` and this file share one database.
+# docker-compose.yml, and both files use the project name herald, so `make infra` and this
+# file share one database. Paths are relative to this folder; the build context is the
+# repo root.
 #
-#   docker compose -f docker-compose.dev.yml up --build
+#   make docker-dev
 #
 # Web on http://localhost:5173, API on http://localhost:8000.
+name: herald
+
 include:
   - docker-compose.yml
 
 x-server: &server
   build:
-    context: .
+    context: ..
+    dockerfile: infra/Dockerfile
     target: server-dev
   # The checkout is mounted over /app; the venv stays at /opt/venv in the image.
   volumes:
-    - .:/app
+    - ..:/app
   working_dir: /app
   env_file:
-    - path: .env
+    - path: ../.env
       required: false
   # Set here, not in .env: .env.example points these at localhost, and OS env beats the
   # .env file that Settings also reads from the mounted checkout.
@@ -60,12 +65,13 @@ services:
 
   web:
     build:
-      context: .
+      context: ..
+      dockerfile: infra/Dockerfile
       target: web-dev
     ports:
       - "5173:5173"
     volumes:
-      - .:/app
+      - ..:/app
       # Keep the image's node_modules: the host's hold macOS builds of esbuild, rollup
       # and Tailwind's oxide, which do not run in Linux. After a dependency change, run
       # `up --build --renew-anon-volumes`.

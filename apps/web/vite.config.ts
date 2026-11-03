@@ -18,7 +18,7 @@ export default defineConfig({
 	],
 	server: {
 		// Same origin for fetch and EventSource in dev, so no CORS and cookies just work.
-		// HERALD_API_URL points the proxy at the api container under docker-compose.dev.yml.
+		// HERALD_API_URL points the proxy at the api container under infra/docker-compose.dev.yml.
 		proxy: { '/api': process.env.HERALD_API_URL ?? 'http://localhost:8000' }
 	},
 	test: {

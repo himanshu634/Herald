@@ -13,10 +13,10 @@ install: ## Install Python and JS dependencies
 	pnpm install
 
 infra: ## Start Postgres and Redis (Docker)
-	docker compose up -d
+	docker compose -f infra/docker-compose.yml up -d
 
 infra-down: ## Stop Postgres and Redis
-	docker compose down
+	docker compose -f infra/docker-compose.yml down
 
 api: ## Run the API on :8000 (needs make infra)
 	$(SERVER) uv run fastapi dev --port 8000
@@ -31,13 +31,13 @@ lite: ## Run the API with no Docker: SQLite, in-memory bus, inline pipeline
 	$(SERVER) $(LITE) uv run fastapi dev --port 8000
 
 docker-dev: ## Run the full stack in Docker with hot reload (web :5173, API :8000)
-	docker compose -f docker-compose.dev.yml up --build
+	docker compose -f infra/docker-compose.dev.yml up --build
 
 docker-prod: ## Build and start the production stack in Docker (needs .env)
-	docker compose -f docker-compose.prod.yml up -d --build
+	docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --build
 
 docker-prod-down: ## Stop the production stack (keeps its data)
-	docker compose -f docker-compose.prod.yml down
+	docker compose --env-file .env -f infra/docker-compose.prod.yml down
 
 test: ## Run all tests
 	uv run pytest

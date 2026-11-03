@@ -1,5 +1,8 @@
-# Herald images. One file, many targets; build from the repo root because both the
-# uv workspace and the pnpm workspace need it as context.
+# Herald images. One file, many targets; the build context is the repo root because both
+# the uv workspace and the pnpm workspace need it. Dockerfile.dockerignore next to this
+# file is the ignore list for that context.
+#
+#   docker build -f infra/Dockerfile --target server .
 #
 #   server      API and worker for production (the worker overrides the command)
 #   server-dev  API and worker with dev deps, run against a bind-mounted checkout
@@ -87,6 +90,6 @@ COPY apps/web apps/web
 RUN pnpm -C apps/web build
 
 FROM nginx:1.27-alpine AS web
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY infra/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=web-build /app/apps/web/build /usr/share/nginx/html
 EXPOSE 80
