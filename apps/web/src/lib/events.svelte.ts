@@ -1,7 +1,13 @@
 // Live workspace events over SSE. EventSource reconnects on its own and sends Last-Event-ID,
 // so the server replays anything missed while the tab was disconnected.
 
-export const EVENT_TYPES = ['email.received', 'email.noted', 'email.status', 'alert.sent'] as const;
+export const EVENT_TYPES = [
+	'email.received',
+	'email.noted',
+	'email.status',
+	'alert.sent',
+	'mailbox.status'
+] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
 export interface WorkspaceEvent {

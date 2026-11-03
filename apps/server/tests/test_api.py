@@ -50,3 +50,15 @@ async def test_workspaces_are_isolated(app, client):
 
 async def test_unknown_workspace_is_404(client):
     assert (await client.get("/api/workspaces/nope/emails")).status_code == 404
+
+
+async def test_only_the_seeded_demo_is_marked_demo(client):
+    demo = (await client.post("/api/workspaces/demo")).json()
+    setup = (
+        await client.post(
+            "/api/workspaces/setup", json={"name": "Kesar Cakes", "description": "A cake shop."}
+        )
+    ).json()["workspace"]
+
+    assert demo["demo"] is True
+    assert setup["demo"] is False

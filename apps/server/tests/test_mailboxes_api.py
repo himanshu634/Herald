@@ -109,7 +109,7 @@ async def test_callback_creates_active_mailbox_and_backfills(app, client, fake_c
 
     query = redirect_query(response)
     [mailbox] = mailboxes_of(app, ws)
-    assert query == {"mailbox_connected": [mailbox.id]}
+    assert query == {"mailbox_connected": [mailbox.id], "workspace": [ws]}
     assert mailbox.status == MailboxStatus.ACTIVE
     assert mailbox.email_address == "owner@shop.in"
     assert len(emails_of(app, ws)) == 1
@@ -183,7 +183,7 @@ async def test_callback_access_denied(app, client, fake_connector):
 
     response = await callback(client, error="access_denied", state=state)
 
-    assert redirect_query(response) == {"mailbox_error": ["access_denied"]}
+    assert redirect_query(response) == {"mailbox_error": ["access_denied"], "workspace": [ws]}
     assert mailboxes_of(app, ws) == []
 
 
@@ -194,7 +194,7 @@ async def test_callback_without_refresh_token(app, client, fake_connector):
 
     response = await callback(client, code="c", state=state)
 
-    assert redirect_query(response) == {"mailbox_error": ["no_refresh_token"]}
+    assert redirect_query(response) == {"mailbox_error": ["no_refresh_token"], "workspace": [ws]}
     assert mailboxes_of(app, ws) == []
 
 
@@ -205,7 +205,10 @@ async def test_callback_with_bad_code_is_rejected(app, client, fake_connector):
 
     response = await callback(client, code="bad", state=state)
 
-    assert redirect_query(response) == {"mailbox_error": ["authorization_failed"]}
+    assert redirect_query(response) == {
+        "mailbox_error": ["authorization_failed"],
+        "workspace": [ws],
+    }
     assert mailboxes_of(app, ws) == []
 
 
@@ -228,7 +231,7 @@ async def test_callback_provider_error_redirects(app, client, fake_connector, ca
 
     response = await callback(client, code="c", state=state)
 
-    assert redirect_query(response) == {"mailbox_error": ["provider_error"]}
+    assert redirect_query(response) == {"mailbox_error": ["provider_error"], "workspace": [ws]}
     assert mailboxes_of(app, ws) == []
     assert type(error).__name__ in caplog.text
     assert "leak-me-xyz" not in caplog.text
@@ -257,7 +260,7 @@ async def test_callback_reports_connected_when_failure_happens_after_save(
 
     # The mailbox is saved: telling the owner the connect failed would be wrong.
     [mailbox] = mailboxes_of(app, ws)
-    assert redirect_query(response) == {"mailbox_connected": [mailbox.id]}
+    assert redirect_query(response) == {"mailbox_connected": [mailbox.id], "workspace": [ws]}
     assert mailbox.status == MailboxStatus.ACTIVE
     assert "subscribe" in fake_connector.calls
     # The first sync still ran.
@@ -287,7 +290,7 @@ async def test_callback_reports_connected_when_refresh_fails_after_commit(
     await app.state.queue.drain()
 
     [mailbox] = mailboxes_of(app, ws)
-    assert redirect_query(response) == {"mailbox_connected": [mailbox.id]}
+    assert redirect_query(response) == {"mailbox_connected": [mailbox.id], "workspace": [ws]}
     assert mailbox.status == MailboxStatus.ACTIVE
     assert status_events(app, ws) == ["active"]
 
@@ -308,7 +311,7 @@ async def test_callback_reports_connected_when_saving_subscription_fails(
     await app.state.queue.drain()
 
     [mailbox] = mailboxes_of(app, ws)
-    assert redirect_query(response) == {"mailbox_connected": [mailbox.id]}
+    assert redirect_query(response) == {"mailbox_connected": [mailbox.id], "workspace": [ws]}
     assert [e.provider_message_id for e in emails_of(app, ws)] == ["m1"]
     assert "RuntimeError" in caplog.text and mailbox.id in caplog.text
     assert "leak-me-xyz" not in caplog.text
@@ -329,7 +332,7 @@ async def test_callback_reports_connected_when_first_sync_cannot_be_queued(
 
     # The catch-up sync runs the first sync later; the connect itself worked.
     [mailbox] = mailboxes_of(app, ws)
-    assert redirect_query(response) == {"mailbox_connected": [mailbox.id]}
+    assert redirect_query(response) == {"mailbox_connected": [mailbox.id], "workspace": [ws]}
     assert mailbox.status == MailboxStatus.ACTIVE
     assert "ConnectionError" in caplog.text and mailbox.id in caplog.text
     assert "leak-me-xyz" not in caplog.text
@@ -466,7 +469,7 @@ async def test_connect_refuses_address_live_in_another_workspace(app, client, fa
     response = await callback(client, code="c", state=state)
     await app.state.queue.drain()
 
-    assert redirect_query(response) == {"mailbox_error": ["mailbox_in_use"]}
+    assert redirect_query(response) == {"mailbox_error": ["mailbox_in_use"], "workspace": [ws_b]}
     assert mailboxes_of(app, ws_b) == []
     assert status_events(app, ws_b) == []
     assert "complete_authorization" in fake_connector.calls
@@ -510,7 +513,7 @@ async def test_reconnect_own_disconnected_row_refused_when_address_live_elsewher
     state = await start_connect(client, ws_a)
     response = await callback(client, code="c", state=state)
 
-    assert redirect_query(response) == {"mailbox_error": ["mailbox_in_use"]}
+    assert redirect_query(response) == {"mailbox_error": ["mailbox_in_use"], "workspace": [ws_a]}
     assert "revoke" not in fake_connector.calls
     [old] = mailboxes_of(app, ws_a)
     assert old.status == MailboxStatus.DISCONNECTED
@@ -533,9 +536,30 @@ async def test_concurrent_connect_integrity_error_maps_to_in_use(
     state = await start_connect(client, ws_b)
     response = await callback(client, code="c", state=state)
 
-    assert redirect_query(response) == {"mailbox_error": ["mailbox_in_use"]}
+    assert redirect_query(response) == {"mailbox_error": ["mailbox_in_use"], "workspace": [ws_b]}
     assert mailboxes_of(app, ws_b) == []
     assert status_events(app, ws_b) == []
     assert "revoke" not in fake_connector.calls
     [live] = mailboxes_of(app, ws_a)
     assert live.status == MailboxStatus.ACTIVE
+
+
+async def test_access_denied_with_bad_state_names_no_workspace(app, client, fake_connector):
+    # The state is checked before the redirect names a business, so a forged one cannot send
+    # the owner to another workspace.
+    response = await callback(client, error="access_denied", state="forged")
+
+    assert redirect_query(response) == {"mailbox_error": ["invalid_state"]}
+
+
+async def test_providers_lists_configured_connectors(client, fake_connector):
+    response = await client.get("/api/providers")
+
+    assert response.status_code == 200
+    assert "fake" in response.json()
+
+
+async def test_providers_empty_without_token_key(app, client, fake_connector):
+    app.state.services.secrets = None
+
+    assert (await client.get("/api/providers")).json() == []

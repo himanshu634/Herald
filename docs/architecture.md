@@ -180,6 +180,7 @@ The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt th
 
 | Route | What it does |
 | --- | --- |
+| `GET /api/providers` | Providers this server can connect, like `["gmail"]`. Empty without `HERALD_TOKEN_KEY`. |
 | `GET /api/workspaces/{id}/mailboxes` | List mailboxes. No credential fields. |
 | `POST /api/workspaces/{id}/mailboxes/{provider}/connect` | Returns the provider's `authorization_url` |
 | `GET /api/oauth/{provider}/callback` | Finishes the connect, then redirects to the web app |
@@ -187,12 +188,12 @@ The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt th
 | `POST .../pause`, `POST .../resume`, `DELETE .../{mailbox_id}` | Owner actions. 409 when the status does not allow it. |
 | `POST /api/webhooks/{provider}` | Provider push. Verified by the connector. |
 
-The OAuth callback always redirects to `HERALD_WEB_URL` with one query value:
+The OAuth callback always redirects to `HERALD_WEB_URL` with one outcome below. Once the state is checked, it also adds `workspace=<id>`, so the web opens the business the connect started from. `provider_unavailable` and `invalid_state` come before that check and name no workspace. A refusal at the provider (`access_denied`) is reported only with a valid state; with a bad one it is `invalid_state`.
 
 | Query | Meaning |
 | --- | --- |
 | `mailbox_connected=<id>` | The mailbox is saved and `active`. Its first sync is queued (if queueing fails, the catch-up sync runs it). A failure after the save is logged and does not change this answer. |
-| `mailbox_error=access_denied` | The owner refused at the provider |
+| `mailbox_error=access_denied` | The owner refused at the provider (and the state is valid) |
 | `mailbox_error=provider_unavailable` | The provider is not set up, or `HERALD_TOKEN_KEY` is not set |
 | `mailbox_error=invalid_state` | The state is bad, expired, for another provider, or names a missing workspace |
 | `mailbox_error=authorization_failed` | No code came back, or the provider refused the code |

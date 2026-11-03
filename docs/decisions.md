@@ -24,6 +24,7 @@ Herald ships as a multi-tenant framework, and the demo shows one business: Tripf
 | 2026-11-03 | **The contact list stays out of the prompt.** Code adds an "(important contact)" marker to the email. | The list would make the prompt longer and show one customer's address in every other customer's call. |
 | 2026-11-03 | **The general instructions are in `triage.md`, not API Agent Skills.** | Agent Skills need a code-execution container on every request, Claude loads a skill only when it judges the task needs it, and they add tool round trips before Claude reads the email. Triage needs the same instructions on every email, in one call. |
 | 2026-11-03 | **The default model is Claude Haiku 5.5** (`claude-haiku-5-5`), not Opus 5.5. `HERALD_MODEL_NAME` still picks another model. | Every email waits on the model, so it sets triage latency and cost. Revisit with the test-email set and the score report. |
+| 2026-11-03 | **A business with no mailbox stays closed.** Until a mailbox is connected (in any status but `disconnected`), the web shows only the Connect Gmail screen: no inbox and no test-email box. The seeded demo (`workspace.demo`) is the one exception. | A real business is about its own customers' mail. An inbox that can never fill only misleads; the demo exists so Herald can be tried without a mailbox. |
 
 ## Cuts
 
