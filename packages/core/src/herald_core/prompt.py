@@ -115,7 +115,9 @@ def history_block(history: History) -> str:
         for m in history.thread.messages:
             # A quote in the sender would end the attribute and let the text add its own.
             # Drop quotes first: removing them after cleaning could rebuild a tag.
-            who = _clean(_line(m.sender).replace('"', ""))
+            # The owner's own messages read "the owner": a bare mailbox address means nothing to
+            # the model. The fixed label also keeps the address out of the prompt.
+            who = "the owner" if m.from_owner else _clean(_line(m.sender).replace('"', ""))
             body = _clean(m.body)
             messages.append(
                 f'<message from="{who}" date="{_day(m.received_at)}">\n{body}\n</message>'

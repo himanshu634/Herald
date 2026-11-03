@@ -22,7 +22,7 @@ from herald_core.history import (
     ThreadMessage,
 )
 from herald_core.schema import Urgency
-from herald_server.models import Correction, Email
+from herald_server.models import Correction, Email, Reply, ReplyStatus
 
 MAX_SENDER_ROWS = 200
 MAX_BODY_CHARS = 1500
@@ -113,24 +113,56 @@ class ThreadTool(_Bound):
 
     def _query(self, args: ThreadIn) -> Thread:
         with Session(self.engine) as session:
-            rows = session.exec(
+            emails = session.exec(
                 self.earlier_emails()
                 .where(Email.thread_id == args.thread_id)
                 .order_by(col(Email.received_at).desc(), col(Email.id))
                 .limit(args.limit)
             ).all()
-        # Newest few were fetched; the model reads them in conversation order.
-        return Thread(
-            messages=[
-                ThreadMessage(
-                    id=row.id,
-                    sender=row.sender,
-                    received_at=row.received_at,
-                    body=row.body[:MAX_BODY_CHARS],
+            # Only SENT replies: a sending, failed or unknown one may never have reached the
+            # customer, and the model must not treat it as something they were told. The
+            # cutoff is strict, so a reply sent after this email arrived is never shown.
+            # Both rows must be in the bound workspace, as for corrections.
+            replies = session.exec(
+                select(Reply)
+                .join(Email, col(Email.id) == col(Reply.email_id))
+                .where(
+                    Reply.workspace_id == self.workspace_id,
+                    Email.workspace_id == self.workspace_id,
+                    Email.thread_id == args.thread_id,
+                    Reply.status == ReplyStatus.SENT,
+                    col(Reply.sent_at) < self.before,
                 )
-                for row in reversed(rows)
-            ]
-        )
+                .order_by(col(Reply.sent_at).desc(), col(Reply.id))
+                .limit(args.limit)
+            ).all()
+        # Each list holds its own newest `limit` rows. Merge by time and cap again: the newest
+        # `limit` of the union are all inside these two lists, so none is lost. Capping each
+        # list alone would show up to twice the limit. Then flip to conversation order.
+        merged = [
+            ThreadMessage(
+                id=row.id,
+                sender=row.sender,
+                received_at=row.received_at,
+                body=row.body[:MAX_BODY_CHARS],
+            )
+            for row in emails
+        ] + [
+            ThreadMessage(
+                id=reply.id,
+                sender=reply.from_address,
+                received_at=reply.sent_at,
+                body=reply.body[:MAX_BODY_CHARS],
+                from_owner=True,
+            )
+            for reply in replies
+            if reply.sent_at is not None
+        ]
+        # Newest first, ties by id, matching the per-list order. Sorting the id first and then
+        # the time (stable) avoids negating a datetime.
+        merged.sort(key=lambda m: m.id)
+        merged.sort(key=lambda m: m.received_at, reverse=True)
+        return Thread(messages=merged[: args.limit][::-1])
 
 
 class CorrectionsTool(_Bound):

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from sqlmodel import Session
 
@@ -10,7 +11,7 @@ from herald_core.history import (
     SenderHistoryIn,
     ThreadIn,
 )
-from herald_server.models import Correction, Email, Workspace
+from herald_server.models import Correction, Email, Mailbox, Reply, ReplyStatus, Workspace
 from herald_server.seed import TRIPFOLD
 from herald_server.tools import build_toolbox
 
@@ -34,6 +35,21 @@ def _email(session, ws, *, at, sender=SENDER, thread_id=None, notes=None, body="
     session.commit()
     session.refresh(email)
     return email
+
+
+def _reply(session, ws, email, *, at, status=ReplyStatus.SENT, body="on it") -> Reply:
+    mailbox = Mailbox(workspace_id=ws, provider="fake", email_address=f"{uuid4().hex}@shop.in")
+    session.add(mailbox)
+    session.commit()
+    reply = Reply(
+        workspace_id=ws, email_id=email.id, mailbox_id=mailbox.id, client_key=f"k{mailbox.id}",
+        from_address=mailbox.email_address, to_address=email.sender, subject="Re: s", body=body,
+        status=status, sent_at=at,
+    )  # fmt: skip
+    session.add(reply)
+    session.commit()
+    session.refresh(reply)
+    return reply
 
 
 def _before(engine, email_id) -> datetime:
@@ -114,6 +130,69 @@ async def test_thread_is_oldest_first_and_capped(app):
     assert all(len(m.body) <= 1500 for m in out.messages)
 
 
+async def test_thread_includes_sent_owner_replies(app):
+    engine = app.state.services.engine
+    with Session(engine) as s:
+        ws = _workspace(s)
+        first = _email(s, ws, at=NOW - timedelta(hours=3), thread_id="t1")
+        reply = _reply(s, ws, first, at=NOW - timedelta(hours=2), body="Refund is on its way")
+        second = _email(s, ws, at=NOW - timedelta(hours=1), thread_id="t1")
+        cur = _email(s, ws, at=NOW, thread_id="t1").id
+        ids = [first.id, reply.id, second.id]
+        address = reply.from_address
+    box = build_toolbox(engine, ws, cur, _before(engine, cur))
+    out = await box.call(THREAD, ThreadIn(thread_id="t1"))
+    assert [m.id for m in out.messages] == ids
+    assert [m.from_owner for m in out.messages] == [False, True, False]
+    assert out.messages[1].body == "Refund is on its way"
+    assert out.messages[1].sender == address
+
+
+async def test_thread_caps_after_merging_replies(app):
+    engine = app.state.services.engine
+    with Session(engine) as s:
+        ws = _workspace(s)
+        emails = [
+            _email(s, ws, at=NOW - timedelta(hours=10 - 2 * i), thread_id="t1") for i in range(4)
+        ]
+        replies = [_reply(s, ws, e, at=e.received_at + timedelta(hours=1)) for e in emails[:3]]
+        cur = _email(s, ws, at=NOW, thread_id="t1").id
+        merged = [x.id for pair in zip(emails, replies, strict=False) for x in pair] + [
+            emails[3].id
+        ]
+    box = build_toolbox(engine, ws, cur, _before(engine, cur))
+    out = await box.call(THREAD, ThreadIn(thread_id="t1"))
+    assert [m.id for m in out.messages] == merged[-5:]
+
+
+async def test_thread_skips_unsent_replies(app):
+    engine = app.state.services.engine
+    with Session(engine) as s:
+        ws = _workspace(s)
+        first = _email(s, ws, at=NOW - timedelta(hours=3), thread_id="t1")
+        for status in (ReplyStatus.SENDING, ReplyStatus.NOT_SENT, ReplyStatus.UNKNOWN):
+            # A timestamp on purpose: only the status may keep these out.
+            _reply(s, ws, first, at=NOW - timedelta(hours=2), status=status)
+        cur = _email(s, ws, at=NOW, thread_id="t1").id
+        first_id = first.id
+    box = build_toolbox(engine, ws, cur, _before(engine, cur))
+    out = await box.call(THREAD, ThreadIn(thread_id="t1"))
+    assert [m.id for m in out.messages] == [first_id]
+
+
+async def test_thread_skips_replies_after_this_email(app):
+    engine = app.state.services.engine
+    with Session(engine) as s:
+        ws = _workspace(s)
+        first = _email(s, ws, at=NOW - timedelta(hours=3), thread_id="t1")
+        _reply(s, ws, first, at=NOW + timedelta(hours=1))
+        cur = _email(s, ws, at=NOW, thread_id="t1").id
+        first_id = first.id
+    box = build_toolbox(engine, ws, cur, _before(engine, cur))
+    out = await box.call(THREAD, ThreadIn(thread_id="t1"))
+    assert [m.id for m in out.messages] == [first_id]
+
+
 async def test_corrections_newest_first(app):
     engine = app.state.services.engine
     with Session(engine) as s:
@@ -148,11 +227,15 @@ async def test_tools_are_isolated(app):
             )
             s.add(c)
             s.commit()
+            r = _reply(s, ws, e, at=NOW - timedelta(hours=12))
             if ws == ws_a:
+                a_reply = r.id
                 a_email, a_ids = e.id, {e.id, c.id}
             else:
                 b_email, b_ids = e.id, {e.id, c.id}
         cur = _email(s, ws_a, at=NOW, thread_id="t1").id
+        # A reply owned by B on A's email: the Reply workspace filter must drop it.
+        b_cross = _reply(s, ws_b, s.get(Email, a_email), at=NOW - timedelta(hours=11)).id
         # Mismatched pairs: each has one side in A and the other in B. Each join filter must
         # catch its own half.
         cross_1 = Correction(
@@ -171,7 +254,8 @@ async def test_tools_are_isolated(app):
     # Each tool returns exactly A's earlier email or correction, so nothing from B leaks in
     # and nothing of A's is lost. cross_2 is dropped only by the Correction.workspace_id filter.
     assert {e.id for e in sender.recent} == {a_email}
-    assert {m.id for m in thread.messages} == {a_email}
+    assert {m.id for m in thread.messages} == {a_email, a_reply}
+    assert b_cross not in {m.id for m in thread.messages}
     assert {c.id for c in corrections.items} == a_ids - {a_email}
     assert not (a_ids | {a_email}) & b_ids
 
