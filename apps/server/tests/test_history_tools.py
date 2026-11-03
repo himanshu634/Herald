@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from herald_core.history import (
     RECENT_CORRECTIONS,
@@ -151,6 +151,19 @@ async def test_tools_are_isolated(app):
             if ws == ws_b:
                 b_ids = {e.id, c.id}
         cur = _email(s, ws_a, at=NOW, thread_id="t1").id
+        a_email = s.exec(select(Email).where(Email.workspace_id == ws_a)).first().id
+        b_email = s.exec(select(Email).where(Email.workspace_id == ws_b)).first().id
+        # Mismatched pairs: each has one side in A and the other in B. Each join filter must
+        # catch its own half.
+        cross_1 = Correction(
+            workspace_id=ws_a, email_id=b_email, field="route", from_value=None, to_value="x"
+        )
+        cross_2 = Correction(
+            workspace_id=ws_b, email_id=a_email, field="route", from_value=None, to_value="x"
+        )
+        s.add_all([cross_1, cross_2])
+        s.commit()
+        b_ids |= {cross_1.id, cross_2.id}
     box = build_toolbox(engine, ws_a, cur, _before(engine, cur))
     sender = await box.call(SENDER_HISTORY, SenderHistoryIn(sender=SENDER))
     thread = await box.call(THREAD, ThreadIn(thread_id="t1"))
@@ -161,3 +174,22 @@ async def test_tools_are_isolated(app):
         | {c.id for c in corrections.items}
     )
     assert ids and not ids & b_ids
+
+
+async def test_corrections_skip_the_current_and_later_emails(app):
+    engine = app.state.services.engine
+    with Session(engine) as s:
+        ws = _workspace(s)
+        earlier = _email(s, ws, at=NOW - timedelta(days=1))
+        cur = _email(s, ws, at=NOW)
+        later = _email(s, ws, at=NOW + timedelta(days=1))
+        rows = [
+            Correction(workspace_id=ws, email_id=e.id, field="route", from_value=None, to_value="x")
+            for e in (earlier, cur, later)
+        ]
+        s.add_all(rows)
+        s.commit()
+        keep, cur_id = rows[0].id, cur.id
+    box = build_toolbox(engine, ws, cur_id, _before(engine, cur_id))
+    out = await box.call(RECENT_CORRECTIONS, CorrectionsIn())
+    assert [c.id for c in out.items] == [keep]

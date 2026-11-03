@@ -37,15 +37,18 @@ class _Bound:
         self.email_id = email_id
         self.before = before
 
-    def earlier_emails(self):
+    def _scope(self) -> tuple:
         # Same workspace, never the email being judged (compared by id, since two emails can
         # share a timestamp), and nothing received after it. `<=` plus the id check means two
         # emails with equal timestamps each see the other but never themselves.
-        return select(Email).where(
+        return (
             Email.workspace_id == self.workspace_id,
             Email.id != self.email_id,
             Email.received_at <= self.before,
         )
+
+    def earlier_emails(self):
+        return select(Email).where(*self._scope())
 
 
 def _past_email(email: Email) -> PastEmail:
@@ -85,12 +88,7 @@ class SenderHistoryTool(_Bound):
             ).all()
             # Not limited to the window: "first seen" is the sender's oldest earlier email.
             first_seen = session.exec(
-                select(func.min(Email.received_at)).where(
-                    Email.workspace_id == self.workspace_id,
-                    Email.id != self.email_id,
-                    Email.received_at <= self.before,
-                    Email.sender == sender,
-                )
+                select(func.min(Email.received_at)).where(*self._scope(), Email.sender == sender)
             ).one()
         week_start = self.before - timedelta(days=7)
         month_start = self.before - timedelta(days=30)
@@ -146,14 +144,15 @@ class CorrectionsTool(_Bound):
 
     def _query(self, args: CorrectionsIn) -> Corrections:
         with Session(self.engine) as session:
-            # Both rows must be in the bound workspace, so a bad email_id cannot leak a
-            # subject or summary from another tenant.
+            # Both rows must be in the bound workspace (the Email side comes from the shared
+            # scope), so a bad email_id cannot leak a subject or summary from another tenant.
+            # The scope also drops corrections on the current email and on later ones.
             rows = session.exec(
                 select(Correction, Email)
                 .join(Email, col(Email.id) == col(Correction.email_id))
                 .where(
                     Correction.workspace_id == self.workspace_id,
-                    Email.workspace_id == self.workspace_id,
+                    *self._scope(),
                 )
                 .order_by(col(Correction.created_at).desc(), col(Correction.id))
                 .limit(args.limit)
