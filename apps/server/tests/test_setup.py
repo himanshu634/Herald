@@ -1,5 +1,6 @@
 from herald_core.graph import build_graph
 from herald_core.model import FakeModel, ModelError
+from herald_core.prompt import business_block
 from herald_core.schema import (
     SPAM_TOPIC,
     RuleAction,
@@ -205,3 +206,11 @@ async def test_put_accepts_string_topics(client):
 def test_tripfold_seed_has_meanings_and_facts():
     assert all(t.meaning for t in TRIPFOLD.topics)
     assert len(TRIPFOLD.facts) == 4
+
+
+def test_seed_renders_its_meanings_and_facts():
+    block = business_block("Tripfold", TRIPFOLD)
+    for topic in TRIPFOLD.topics:
+        assert f"- {topic.name}: {topic.meaning}" in block
+    for fact in TRIPFOLD.facts:
+        assert f"- {fact}" in block

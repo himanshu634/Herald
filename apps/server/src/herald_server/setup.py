@@ -1,8 +1,8 @@
 """Onboarding: turn a business name and description into a first config the owner edits.
 
-The AI drafts topics, guidance and rules. Its draft is never trusted as is: `clean_draft` makes
-it a valid `WorkspaceConfig`, and if the AI fails the owner gets a plain fallback instead of an
-error, so setup never depends on the model being up.
+The AI drafts topics with meanings, facts, guidance and rules. Its draft is never trusted as
+is: `clean_draft` makes it a valid `WorkspaceConfig`, and if the AI fails the owner gets a plain
+fallback instead of an error, so setup never depends on the model being up.
 """
 
 import logging

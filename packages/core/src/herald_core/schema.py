@@ -95,11 +95,20 @@ class WorkspaceConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _plain_string_topics(cls, data):
-        # Keeps configs saved before topic meanings loading, with no migration.
+        # Keeps configs saved before topic meanings loading, with no migration. Old data could
+        # hold names that differ only by case. Drop the repeats so stored configs still load;
+        # object topics skip this and keep the strict unique-name error.
         if isinstance(data, dict) and isinstance(data.get("topics"), list):
-            data = data | {
-                "topics": [{"name": t} if isinstance(t, str) else t for t in data["topics"]]
-            }
+            topics, seen = [], set()
+            for t in data["topics"]:
+                if isinstance(t, str):
+                    key = t.strip().lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    t = {"name": t}
+                topics.append(t)
+            data = data | {"topics": topics}
         return data
 
     @model_validator(mode="after")
@@ -116,9 +125,6 @@ class WorkspaceConfig(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("Rule ids must be unique")
         return self
-
-    def topic_names(self) -> list[str]:
-        return [t.name for t in self.topics]
 
     def is_important(self, sender: str) -> bool:
         sender = sender.lower()

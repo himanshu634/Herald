@@ -46,5 +46,7 @@ def system_prompt(name: str, config: WorkspaceConfig) -> str:
 
 
 def email_block(email: Email, important: bool) -> str:
-    sender = f"{email.sender} (important contact)" if important else email.sender
-    return f"<email>\nFrom: {sender}\nSubject: {email.subject}\n\n{email.body}\n</email>"
+    # Header fields are one line each: a newline must not forge a line like "From: ...".
+    sender = _line(email.sender)
+    sender = f"{sender} (important contact)" if important else sender
+    return f"<email>\nFrom: {sender}\nSubject: {_line(email.subject)}\n\n{email.body}\n</email>"

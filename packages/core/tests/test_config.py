@@ -64,7 +64,14 @@ def test_blank_meaning_becomes_none():
 
 def test_topic_names_are_unique_ignoring_case():
     with pytest.raises(ValidationError):
-        config(topics=["Orders", "orders"])
+        config(topics=[{"name": "Orders"}, {"name": "orders"}])
+
+
+def test_old_string_topics_with_case_repeats_still_load():
+    assert [t.name for t in config(topics=["Orders", "orders", "Refunds"]).topics] == [
+        "Orders",
+        "Refunds",
+    ]
 
 
 def test_facts_are_capped():
