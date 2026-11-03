@@ -1,0 +1,223 @@
+/*
+ * Herald design tokens: direction M, "Control room".
+ * Rules for using them live in docs/design-system.md. Components use the semantic
+ * tokens (--color-*, --tone-*), never the primitives (--concrete-*, --chartreuse-*).
+ */
+
+:root {
+	/* Primitives */
+	--concrete-0: #ffffff;
+	--concrete-50: #f6f7f9;
+	--concrete-100: #eef0f3;
+	--concrete-200: #e6e8ec;
+	--concrete-300: #d9dce2;
+	--concrete-350: #cdd1d8;
+	--concrete-400: #b9bec7;
+	--concrete-500: #9aa0ab;
+	--concrete-600: #5b606b;
+	--concrete-700: #3e434c;
+	--concrete-900: #15171c;
+
+	--chartreuse-50: #fbfdf3;
+	--chartreuse-100: #f3fad9;
+	--chartreuse-400: #c5ee3f;
+	--chartreuse-600: #7e9a1e;
+	--chartreuse-800: #4f6312;
+
+	--red-50: #fde7e4;
+	--red-700: #a3291e;
+	--amber-50: #fff1d1;
+	--amber-700: #7a4d00;
+	--green-50: #e2f3ec;
+	--green-500: #1f9d6a;
+	--green-700: #1d6247;
+
+	/* Surfaces and text */
+	--color-bg: var(--concrete-200);
+	--color-surface: var(--concrete-0);
+	--color-surface-sunken: var(--concrete-50);
+	--color-surface-muted: var(--concrete-100);
+	--color-text: var(--concrete-900);
+	--color-text-body: rgb(21 23 28 / 0.88);
+	--color-text-muted: var(--concrete-600);
+	--color-border: var(--concrete-300);
+	--color-border-dashed: var(--concrete-350);
+	--color-border-strong: var(--concrete-500);
+	--color-border-control: #7b818b; /* 3:1 on surface and bg: inputs, secondary buttons */
+
+	/* The one loud colour: primary action, selection, focus */
+	--color-accent: var(--chartreuse-400);
+	--color-accent-base: var(--chartreuse-600);
+	--color-accent-edge: var(--chartreuse-800);
+	--color-accent-soft: var(--chartreuse-50);
+	--color-accent-tint: var(--chartreuse-100);
+	--color-on-accent: var(--concrete-900);
+	--color-focus: var(--concrete-900);
+
+	/* Secondary press button */
+	--color-press-face: var(--concrete-0);
+	--color-press-base: #c3c7cf;
+	--color-press-edge: var(--color-border-control);
+
+	/* Status tones. Never use --color-accent for status. */
+	--tone-danger-bg: var(--red-50);
+	--tone-danger-fg: var(--red-700);
+	--tone-warning-bg: var(--amber-50);
+	--tone-warning-fg: var(--amber-700);
+	--tone-success-bg: var(--green-50);
+	--tone-success-fg: var(--green-700);
+	--tone-neutral-bg: var(--concrete-100);
+	--tone-neutral-fg: var(--concrete-700);
+	--tone-muted-bg: var(--concrete-100);
+	--tone-muted-fg: var(--concrete-600);
+	--tone-floor-bg: var(--concrete-900);
+	--tone-floor-fg: var(--chartreuse-400);
+	--color-live: var(--green-500);
+
+	/* Anger meter */
+	--anger-on: var(--concrete-900);
+	--anger-off: #e1e4e9;
+
+	/* Type */
+	--font-sans:
+		'Albert Sans Variable', 'Albert Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--text-xs: 0.75rem; /* 12: tags, kbd, table headers */
+	--text-sm: 0.8125rem; /* 13: table cells, meta */
+	--text-md: 0.875rem; /* 14: body, buttons */
+	--text-lg: 1rem; /* 16: row titles, emphasised body */
+	--text-xl: 1.125rem; /* 18: panel titles */
+	--text-2xl: 1.5rem; /* 24: page titles */
+	--text-3xl: 1.875rem; /* 30: hero numbers */
+	--text-4xl: 2.625rem; /* 42: display, rare */
+	--leading-tight: 1.2;
+	--leading-normal: 1.45;
+	--leading-body: 1.55;
+	--weight-regular: 400;
+	--weight-medium: 500;
+	--weight-semibold: 600;
+	--weight-bold: 700;
+	--weight-heavy: 800;
+	--tracking-display: -0.03em;
+	--tracking-title: -0.01em;
+
+	/* Space: a 4px scale */
+	--space-1: 0.25rem;
+	--space-2: 0.5rem;
+	--space-3: 0.75rem;
+	--space-4: 1rem;
+	--space-5: 1.25rem;
+	--space-6: 1.5rem;
+	--space-8: 2rem;
+	--space-10: 2.5rem;
+	--space-12: 3rem;
+
+	/* Shape */
+	--radius-xs: 4px; /* tags, kbd */
+	--radius-sm: 7px; /* inputs, filter chips */
+	--radius-md: 8px; /* buttons, tabs */
+	--radius-lg: 10px; /* panels, tables */
+	--radius-xl: 14px; /* dialogs */
+	--border-hair: 1px;
+	--border-press: 1.5px;
+
+	/* Sizes */
+	--control-sm: 1.75rem; /* 28 */
+	--control-md: 2rem; /* 32: inputs, chips */
+	--control-lg: 2.5rem; /* 40: rail items */
+	--row-height: 2.625rem; /* 42: table rows */
+	--tab-height: 2.125rem; /* 34 */
+	--rail-width: 3.5rem; /* 56 */
+	--panel-width: 22rem; /* 352: detail side panel */
+
+	/* Press: the raised face sits this far above its base */
+	--press-depth: 3px;
+	--press-depth-active: 1px;
+
+	/* Elevation: only things that float get a shadow */
+	--shadow-popover: 0 8px 24px rgb(21 23 28 / 0.14);
+
+	/* Motion */
+	--duration-fast: 80ms;
+	--duration-base: 160ms;
+	--ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+	color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light']) {
+		--color-bg: #121418;
+		--color-surface: #1a1d22;
+		--color-surface-sunken: #16181c;
+		--color-surface-muted: #23272e;
+		--color-text: #eceef1;
+		--color-text-body: rgb(236 238 241 / 0.88);
+		--color-text-muted: #a3a9b4;
+		--color-border: #2c3038;
+		--color-border-dashed: #3a3f48;
+		--color-border-strong: #5b606b;
+		--color-border-control: #6a707b;
+		--color-accent-base: #6e8719;
+		--color-accent-edge: #3e4e0e;
+		--color-accent-soft: #1d2312;
+		--color-accent-tint: #263015;
+		--color-focus: var(--chartreuse-400);
+		--color-press-face: #23272e;
+		--color-press-base: #0c0d10;
+		--color-press-edge: var(--color-border-control);
+		--tone-danger-bg: #3a1814;
+		--tone-danger-fg: #ff8a7e;
+		--tone-warning-bg: #33270f;
+		--tone-warning-fg: #f5c163;
+		--tone-success-bg: #12301f;
+		--tone-success-fg: #6fd3a0;
+		--tone-neutral-bg: #23272e;
+		--tone-neutral-fg: #c9ced6;
+		--tone-muted-bg: #1f2227;
+		--tone-muted-fg: #a3a9b4;
+		--tone-floor-bg: var(--chartreuse-400);
+		--tone-floor-fg: var(--concrete-900);
+		--anger-on: #eceef1;
+		--anger-off: #343941;
+		--shadow-popover: 0 8px 24px rgb(0 0 0 / 0.5);
+		color-scheme: dark;
+	}
+}
+
+:root[data-theme='dark'] {
+	--color-bg: #121418;
+	--color-surface: #1a1d22;
+	--color-surface-sunken: #16181c;
+	--color-surface-muted: #23272e;
+	--color-text: #eceef1;
+	--color-text-body: rgb(236 238 241 / 0.88);
+	--color-text-muted: #a3a9b4;
+	--color-border: #2c3038;
+	--color-border-dashed: #3a3f48;
+	--color-border-strong: #5b606b;
+	--color-border-control: #6a707b;
+	--color-accent-base: #6e8719;
+	--color-accent-edge: #3e4e0e;
+	--color-accent-soft: #1d2312;
+	--color-accent-tint: #263015;
+	--color-focus: var(--chartreuse-400);
+	--color-press-face: #23272e;
+	--color-press-base: #0c0d10;
+	--color-press-edge: var(--color-border-control);
+	--tone-danger-bg: #3a1814;
+	--tone-danger-fg: #ff8a7e;
+	--tone-warning-bg: #33270f;
+	--tone-warning-fg: #f5c163;
+	--tone-success-bg: #12301f;
+	--tone-success-fg: #6fd3a0;
+	--tone-neutral-bg: #23272e;
+	--tone-neutral-fg: #c9ced6;
+	--tone-muted-bg: #1f2227;
+	--tone-muted-fg: #a3a9b4;
+	--tone-floor-bg: var(--chartreuse-400);
+	--tone-floor-fg: var(--concrete-900);
+	--anger-on: #eceef1;
+	--anger-off: #343941;
+	--shadow-popover: 0 8px 24px rgb(0 0 0 / 0.5);
+	color-scheme: dark;
+}
