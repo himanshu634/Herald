@@ -4,6 +4,8 @@ import time
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
+import pytest
 from sqlmodel import Session, col, select
 
 from herald_server.connectors.base import (
@@ -204,6 +206,31 @@ async def test_callback_with_bad_code_is_rejected(app, client, fake_connector):
 
     assert redirect_query(response) == {"mailbox_error": ["authorization_failed"]}
     assert mailboxes_of(app, ws) == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.HTTPStatusError(
+            "leak-me-xyz",
+            request=httpx.Request("GET", "https://provider.example/profile"),
+            response=httpx.Response(403),
+        ),
+        httpx.ConnectError("leak-me-xyz"),
+        RuntimeError("leak-me-xyz"),
+    ],
+)
+async def test_callback_provider_error_redirects(app, client, fake_connector, caplog, error):
+    ws = await demo_workspace(client)
+    fake_connector.raise_on_authorize = error
+    state = await start_connect(client, ws)
+
+    response = await callback(client, code="c", state=state)
+
+    assert redirect_query(response) == {"mailbox_error": ["provider_error"]}
+    assert mailboxes_of(app, ws) == []
+    assert type(error).__name__ in caplog.text
+    assert "leak-me-xyz" not in caplog.text
 
 
 async def test_callback_for_unconfigured_provider_redirects(app, client):

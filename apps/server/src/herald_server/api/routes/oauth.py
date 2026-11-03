@@ -87,6 +87,13 @@ async def oauth_callback(
         # An invalid, expired or reused code: the provider refuses the exchange.
         log.info("oauth callback for %s: code exchange refused", provider)
         return _back_to_web(services, mailbox_error="authorization_failed")
+    except Exception as exc:
+        # Anything else from the provider (an account without the mail service, a scope the
+        # owner deselected, a rate limit, a network error). The owner's browser is on this
+        # route, so answer with a redirect, never a 500. Only the type name: str() of an HTTP
+        # error can carry provider responses.
+        log.warning("oauth callback for %s: %s", provider, type(exc).__name__)
+        return _back_to_web(services, mailbox_error="provider_error")
 
     # The first sync backfills recent mail; a reconnect continues from the kept cursor.
     await queue.enqueue_sync(mailbox.id)
