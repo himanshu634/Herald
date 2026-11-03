@@ -48,6 +48,9 @@ class FakeGoogle:
         # only records after startHistoryId, HISTORY_PAGE_SIZE records per page.
         self.history_records: list[tuple[int, list[str]]] | None = None
         self.history_id_now = "5000"
+        # When set, history also lists the record equal to startHistoryId (Gmail documents
+        # "after", but the connector must not rely on it).
+        self.history_start_inclusive = False
         # Page tokens (None is the first page) whose history request answers 404.
         self.expired_pages: set[str | None] = set()
         self.listed_ids: list[str] = []
@@ -109,7 +112,8 @@ class FakeGoogle:
 
     def _records_page(self, start: int, page_token: str | None) -> dict:
         assert self.history_records is not None
-        after = [r for r in self.history_records if r[0] > start]
+        inclusive = self.history_start_inclusive
+        after = [r for r in self.history_records if r[0] > start or (inclusive and r[0] == start)]
         offset = int(page_token or 0)
         chunk = after[offset : offset + HISTORY_PAGE_SIZE]
         page: dict = {
@@ -314,6 +318,30 @@ async def test_single_record_larger_than_cap_is_taken_whole(connector, google):
     second = await connector.fetch_changes(CREDS, first.cursor)
     assert [m.provider_message_id for m in second.messages] == ["m1"]
     assert (second.cursor, second.has_more) == ("5000", False)
+
+
+async def test_capped_history_always_advances_even_if_start_record_is_included(connector, google):
+    google.history_start_inclusive = True
+    big = [f"b{n}" for n in range(150)]
+    google.history_records = [(1001, big), (1002, ["m1"]), (1003, ["m2"])]
+    for message_id in [*big, "m1", "m2"]:
+        google.add_message(message_id)
+
+    cursor, fetched = "1000", []
+    for _ in range(5):
+        result = await connector.fetch_changes(CREDS, cursor)
+        fetched += [m.provider_message_id for m in result.messages]
+        # Never the same cursor back with more to read: that would sync the mailbox forever.
+        assert int(result.cursor) > int(cursor)
+        cursor = result.cursor
+        if not result.has_more:
+            break
+    else:
+        pytest.fail("the capped history never finished")
+
+    assert cursor == "5000"
+    # The start record is not read again: its mail came with the batch that ended on it.
+    assert fetched == [*big, "m1", "m2"]
 
 
 @pytest.mark.parametrize("status", [400, 410])

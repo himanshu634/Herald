@@ -183,15 +183,23 @@ class GmailConnector(MailConnector):
         # snapshot, records added mid-paging would sit before that cursor without being
         # returned, and be skipped forever.
         first_page_history_id = page.history_id
+        start = int(cursor)
         last_taken: str | None = None
         while True:
             for record in page.records:
+                # Gmail documents records AFTER startHistoryId, but do not bet the mailbox on
+                # it: if the start record came back, a batch that ends on a big record would
+                # return that same record as its cursor, and every fetch would read it again
+                # forever. Skipping it is loss-free: the batch that ended on it took its mail.
+                # Ids are integers, so compare them as such ("999" > "1000" as strings).
+                if int(record.id) <= start:
+                    continue
                 new = [i for i in record.message_ids if i not in ids]
                 # Stop before a record that would pass the cap, never inside one: the cursor
-                # can only name a whole record. Gmail lists records AFTER startHistoryId, so
-                # the last record taken is a loss-free start for the next fetch. The first
-                # record is taken whole, however big: stopping before it would leave the
-                # cursor where it is and loop on it forever.
+                # can only name a whole record, and the last record taken is a loss-free start
+                # for the next fetch. The first record is taken whole, however big: stopping
+                # before it would return the start cursor with has_more and loop on it forever.
+                # With the skip above, a cursor returned with has_more is always past the start.
                 if last_taken is not None and len(ids) + len(new) > MAX_MESSAGES_PER_FETCH:
                     return list(ids), last_taken, True
                 ids.update(dict.fromkeys(new))
