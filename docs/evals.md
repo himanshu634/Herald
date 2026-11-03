@@ -10,6 +10,7 @@ make eval ARGS="--repeats 3"                # three runs each; the report lists 
 make eval ARGS="--case sue-is-a-name"       # one case while you fix it
 make eval ARGS="--tag safety_floor"         # one slice
 make eval ARGS="--compare packages/evals/results/<earlier>.json"
+make eval ARGS="--rescore packages/evals/results/<earlier>.json"   # new labels or checks, no model calls
 uv run herald-evals --model fake            # offline smoke run of the harness itself
 ```
 
@@ -33,7 +34,8 @@ The report also shows:
 - **Rules**: per rule, how often it said yes when it should not, and no when it should.
 - **Slices**: the share of fully right cases per tag (`calm_urgent`, `sarcasm`, `trick`, `word_miss`, `word_false_positive`, …).
 - **Routes**: label against what Herald did.
-- **Quotes**: quotes must be lines from the email (whitespace and case ignored), never from the history.
+- **Quotes**: quotes must be lines from the `<email>` block (whitespace and case ignored), never from the history.
+- **Summaries free of rule talk**: the summary is what the owner reads, so "the travel-soon rule does not match" is noise. This is reported on its own and does not fail a case.
 - **Failing cases**: for each, the failed checks, the notes, the summary, the quotes and the rule verdicts.
 
 A model error (rate limit, outage, bad structured output) is left out of every quality number and counted on its own line. The graph sends such an email to "Needs a look", and counting that as the AI being unsure would hide an outage.
@@ -78,7 +80,7 @@ Rules for labels:
 ## Fixing an issue
 
 1. Run `make eval ARGS="--repeats 3"` and read the failing cases. Group them by cause (the word check, a rule's wording, the prompt, the decide order, a wrong label).
-2. Fix the label first if the label is wrong.
+2. Fix the label first if the label is wrong, then `--rescore` the same run to see the new numbers without new model calls.
 3. Change the prompt (`triage.md`), a rule, the word check or `decide`, then run the slice that failed (`--tag`, `--case`).
 4. Run everything again with `--compare` on the earlier JSON. The report lists cases now right and now wrong more often. Keep the fix only if nothing important broke.
 5. Add a case for every new failure you find in real mail.
