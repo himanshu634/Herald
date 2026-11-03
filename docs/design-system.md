@@ -176,7 +176,8 @@ The mark is three emails on a tile, with one pulled out of the pile and lit char
 - **The side panel** explains the open email: the safety floor callout first if there is one, then why Herald put it there, then the email with the proof highlighted (`bg-accent-tint` with an olive underline), then the notes, then the actions at the bottom.
 - **The safety floor callout** is a `bg-floor-bg text-floor-fg` block with the `shield` icon and one sentence: "Safety floor: legal threat. This always alerts you, whatever your rules say."
 - **What Herald handled** is always one line, never hidden: "Also today: 18 in the inbox, 2 in progress, 40 closed quietly." with a way to see them.
-- **Live** is the `live` dot with "Live". Nothing else animates on its own.
+- **Live** is the `live` dot with "Live". Nothing else in the app animates on its own.
+- **The error page** (`routes/+error.svelte`) is the one playful screen: the logo's lit row has floated out of the pile and a magnifying glass hunts for it (`lib/shell/LostMail.svelte`, animations in `tokens.css`). It names the problem in plain words and always offers the way back to the inbox.
 - **Empty states** tell the owner what happens next: "Nothing needs you. Urgent emails will show up here first."
 
 ## Copy

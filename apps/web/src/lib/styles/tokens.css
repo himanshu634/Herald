@@ -118,6 +118,70 @@
 
 	/* Motion */
 	--ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+	/*
+	 * The error page's scene (lib/shell/LostMail.svelte) is the only thing besides the Live dot
+	 * that moves on its own. drift and shadow share a duration so the shadow shrinks as the row
+	 * rises; change them together. Reduced motion stops all of these (app.css).
+	 */
+	--animate-drift: drift 3.2s ease-in-out infinite;
+	--animate-shadow: shadow 3.2s ease-in-out infinite;
+	--animate-search: search 5s ease-in-out infinite;
+	--animate-wonder: wonder 2.4s ease-out infinite;
+	--animate-march: march 1.2s linear infinite;
+
+	@keyframes drift {
+		0%,
+		100% {
+			transform: translateY(0) rotate(-12deg);
+		}
+		50% {
+			transform: translateY(-10px) rotate(-4deg);
+		}
+	}
+	@keyframes shadow {
+		0%,
+		100% {
+			transform: scaleX(1);
+			opacity: 0.18;
+		}
+		50% {
+			transform: scaleX(0.7);
+			opacity: 0.08;
+		}
+	}
+	@keyframes search {
+		0%,
+		100% {
+			transform: translate(0, 0) rotate(0deg);
+		}
+		25% {
+			transform: translate(-22px, -14px) rotate(-10deg);
+		}
+		50% {
+			transform: translate(-6px, 16px) rotate(6deg);
+		}
+		75% {
+			transform: translate(16px, -4px) rotate(-4deg);
+		}
+	}
+	@keyframes wonder {
+		0%,
+		100% {
+			transform: translateY(4px);
+			opacity: 0;
+		}
+		30%,
+		70% {
+			transform: translateY(0);
+			opacity: 1;
+		}
+	}
+	@keyframes march {
+		to {
+			stroke-dashoffset: -14;
+		}
+	}
 }
 
 /* Not utilities: the press button's depth */
