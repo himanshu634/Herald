@@ -139,9 +139,9 @@ async def test_saved_guidance_reaches_the_notes_model(app, client):
     seen = []
 
     class RecordingModel(FakeModel):
-        async def write_notes(self, email, business_name, config):
+        async def write_notes(self, email, business_name, config, history=None):
             seen.append((business_name, config.guidance))
-            return await super().write_notes(email, business_name, config)
+            return await super().write_notes(email, business_name, config, history=history)
 
     workspace = (await start(client))["workspace"]
     ws = workspace["id"]
