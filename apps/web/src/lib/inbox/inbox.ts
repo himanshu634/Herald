@@ -120,6 +120,24 @@ export function actionsFor(status: EmailStatus): Action[] {
 	}
 }
 
+/**
+ * Normalise line endings, drop trailing spaces and cap blank lines at one.
+ * The server does this when it reads mail; this also tidies emails stored
+ * before it did, whose HTML was flattened with all its source whitespace.
+ */
+export function tidyBody(body: string): string {
+	return (
+		body
+			// Mail re-encoded more than once can end lines with "\r\r\n"; that is one break.
+			.replace(/\r*\n|\r/g, '\n')
+			.split('\n')
+			.map((line) => line.trimEnd())
+			.join('\n')
+			.replace(/\n{3,}/g, '\n\n')
+			.trim()
+	);
+}
+
 /** Split the body so the lines Herald quoted as proof can be highlighted. */
 export function highlight(body: string, quotes: string[]): { text: string; quoted: boolean }[] {
 	const ranges: [number, number][] = [];

@@ -3,6 +3,7 @@
 import base64
 import email
 import email.policy
+import re
 from email.utils import parseaddr
 from html.parser import HTMLParser
 from typing import NamedTuple
@@ -16,32 +17,90 @@ class ParsedMessage(NamedTuple):
     body: str
 
 
+# Tags that end a line, and tags that end a paragraph (a blank line after).
+_LINE_TAGS = {"div", "tr", "td", "th", "li", "dt", "dd", "section", "article", "header", "footer"}
+_PARAGRAPH_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol", "blockquote"}
+_SKIP_TAGS = {"script", "style", "title"}
+_SPACE_RUN = re.compile(r"\s+")
+_BLANK_RUN = re.compile(r"\n{3,}")
+# Mail re-encoded more than once can end lines with "\r\r\n"; that is one break.
+_LINE_END = re.compile(r"\r*\n|\r")
+
+
 class _TextExtractor(HTMLParser):
-    """Collects text nodes, ignoring tags and the content of script and style."""
+    """Reads HTML the way a browser lays it out, as text.
+
+    Whitespace in the source is collapsed to one space, as a browser does, and
+    block tags break lines. Newsletters nest layout tables many levels deep, so
+    a block tag only asks for a break and the break is written once, before the
+    next text. Writing a newline per tag would leave runs of blank lines.
+    """
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self._skip = 0
+        self._pending = 0  # 0 none, 1 new line, 2 blank line
+
+    def _break(self, level: int) -> None:
+        self._pending = max(self._pending, level)
 
     def handle_starttag(self, tag: str, attrs) -> None:
-        if tag in ("script", "style"):
+        if tag in _SKIP_TAGS:
             self._skip += 1
+        elif tag in ("br", "hr"):
+            # The default handle_startendtag calls both start and end handlers,
+            # so <br/> is handled here only, or it would break twice.
+            self.parts.append("\n")
+            self._pending = 0
+        elif tag in _PARAGRAPH_TAGS:
+            self._break(2)
+        elif tag in _LINE_TAGS:
+            self._break(1)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in ("script", "style") and self._skip:
-            self._skip -= 1
+        if tag in _SKIP_TAGS:
+            if self._skip:
+                self._skip -= 1
+        elif tag in _PARAGRAPH_TAGS:
+            self._break(2)
+        elif tag in _LINE_TAGS:
+            self._break(1)
 
     def handle_data(self, data: str) -> None:
-        if not self._skip:
-            self.parts.append(data)
+        if self._skip:
+            return
+        text = _SPACE_RUN.sub(" ", data)
+        if not text.strip():
+            # Whitespace between tags only separates words on the same line.
+            if self.parts and not self._pending and not self.parts[-1].endswith((" ", "\n")):
+                self.parts.append(" ")
+            return
+        if self._pending:
+            if self.parts:
+                self.parts.append("\n" * self._pending)
+            self._pending = 0
+            text = text.lstrip()
+        elif not self.parts or self.parts[-1].endswith("\n"):
+            text = text.lstrip()
+        self.parts.append(text)
 
 
 def _html_to_text(html: str) -> str:
     parser = _TextExtractor()
     parser.feed(html)
     parser.close()
-    return "".join(parser.parts).strip()
+    return _tidy("".join(parser.parts))
+
+
+def _tidy(text: str) -> str:
+    """Normalise line endings, drop trailing spaces and cap blank lines at one.
+
+    Leading spaces stay: quoted replies in plain-text mail use them.
+    """
+    text = _LINE_END.sub("\n", text)
+    text = "\n".join(line.rstrip() for line in text.split("\n"))
+    return _BLANK_RUN.sub("\n\n", text).strip()
 
 
 def parse_raw_message(raw: str) -> ParsedMessage:
@@ -74,5 +133,5 @@ def _body_text(msg: email.message.Message, preference: tuple[str, ...]) -> str:
     # Only reduce to text when we fell back to HTML. A plain part is used as is,
     # because stripping "tags" from plain text would eat literal "<...>" content.
     if part.get_content_type() == "text/html":
-        content = _html_to_text(content)
-    return content.strip()  # drop the newline mail clients append
+        return _html_to_text(content)
+    return _tidy(content)
