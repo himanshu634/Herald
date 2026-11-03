@@ -17,7 +17,6 @@ def settings(tmp_path) -> Settings:
         bus="memory",
         queue="inline",
         model_provider="fake",
-        ntfy_topic=None,
         token_key=Fernet.generate_key().decode(),
     )
 

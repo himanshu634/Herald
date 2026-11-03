@@ -23,7 +23,6 @@ sequenceDiagram
     participant W as Worker
     participant DB as Postgres
     participant Bus as Redis pub/sub
-    participant Phone as ntfy
 
     Web->>API: POST /api/workspaces/{id}/emails
     API->>DB: save email + event email.received
@@ -33,7 +32,8 @@ sequenceDiagram
     W->>W: LangGraph: word check ∥ notes → rules → decide
     W->>DB: save notes, decision, status + event email.noted
     W->>Bus: publish email.noted
-    W-->>Phone: alert (only when the decision is "alert")
+    W->>DB: event alert.sent (only when the decision is "alert")
+    W->>Bus: publish alert.sent
     Bus-->>API: events for workspace {id}
     API-->>Web: SSE /api/workspaces/{id}/events
 ```
@@ -216,7 +216,6 @@ Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscri
 | Interface | Where | Built-in implementations |
 | --- | --- | --- |
 | `TriageModel` | `herald_core.model` | `AnthropicModel` (Claude, structured outputs), `FakeModel` (offline keyword heuristics) |
-| `Notifier` | `herald_core.adapters` | `NtfyNotifier`, `LogNotifier` |
 | `MailConnector` | `herald_server.connectors` | `GmailConnector`; `FakeConnector` in tests. The test-email box still posts to the API. |
 | `EventBus` | `herald_server.bus` | `RedisEventBus`, `InMemoryEventBus` |
 | `JobQueue` | `herald_server.queue` | `ArqQueue`, `InlineQueue` |
@@ -231,7 +230,6 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 | `HERALD_BUS` | `redis` | `memory` |
 | `HERALD_QUEUE` | `arq` | `inline` |
 | `HERALD_MODEL_PROVIDER` | `fake` | `fake` |
-| `HERALD_NTFY_TOPIC` | unset (alerts are logged) | unset |
 | `HERALD_TOKEN_KEY` | unset (Gmail off: it needs this, the Google client id and secret, and the topic) | unset |
 | `HERALD_PUBLIC_API_URL` | `http://localhost:8000` | same |
 | `HERALD_WEB_URL` | `http://localhost:5173` | same |

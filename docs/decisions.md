@@ -12,7 +12,7 @@ Herald ships as a multi-tenant framework, and the demo shows one business: Tripf
 | 2026-11-03 | **One kind of rule.** "When" is plain text the AI judges, answering yes or no with a quote. "Then" is one of three actions: alert me, set urgency, close quietly. | Drops the split between exact checks and judgement checks, and with it a rule parser. Facts about senders go in Important contacts. |
 | 2026-11-03 | **The decide step is plain Python, with no AI.** Order: safety floor, then the owner's rules, then the defaults. | "The AI suggests, rules decide" is enforced in the code. The notes type has no status field. |
 | 2026-11-03 | **A safety floor no rule can switch off.** It covers safety, a hacked account or data leak, and legal threats. A word check runs beside the AI. | One AI mistake, or an email written to trick it, cannot bury a real threat. |
-| 2026-11-03 | **One push channel first: ntfy.** SSE reaches only an open tab, so alerts also need a push to the phone. | Least work for a real phone buzz. Notifier is an interface, so Web Push or Slack can be added later. |
+| 2026-11-03 | **Alerts stay in the app.** An alerted email goes to the top of the inbox and SSE sends `alert.sent` to open tabs. Nothing is pushed to a phone or any outside service. | The owner does not want alerts sent outside the app. This replaces the earlier plan to push alerts to the phone first. |
 | 2026-11-03 | **Notes are trimmed.** Repeat contact and "going public" / "abusive" flags are cut for now. | Repeat contact needs customer identity and threads. |
 | 2026-11-03 | **Stack: SvelteKit (Svelte 5) + FastAPI + LangGraph, with Postgres and Redis.** FastAPI streams events to the browser over SSE. Details in [architecture.md](architecture.md). | Chosen by the owner of this repo. |
 | 2026-11-03 | **Mail connectors are provider-neutral; Gmail is the first.** One `Mailbox` table and one sync job serve every provider; provider details live in the connector and its opaque cursor. | Outlook and IMAP can be added later without changing tables or routes. |
@@ -31,7 +31,7 @@ Herald ships as a multi-tenant framework, and the demo shows one business: Tripf
 | --- | --- | --- |
 | Businesses | Tripfold only, as seed data | A second business and starter templates |
 | Rules | Plain-text "when" + three actions, tested on past emails | Exact checks, "set topic" and "mark important" actions |
-| Alerts | ntfy push with summary, quote and rule; actions in the web app | Answering from the phone, quiet hours, reminders, morning summary |
+| Alerts | In the web app only: summary, quote and rule on the alerted email, with its actions | Phone or other outside alerts, quiet hours, reminders, morning summary |
 | Notes | Topic, urgency, anger, floor flags + about to cancel, summary with quotes, sure or unsure | Repeat contact, going public, abusive |
 | Quality | About 30 hand-checked test emails and one score report | 50–70 emails per business across three businesses |
 | Differentiators | At most one: past corrections fed back to the AI as examples | Rule suggestions, overview, thread awareness |

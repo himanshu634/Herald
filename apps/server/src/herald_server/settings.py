@@ -21,8 +21,6 @@ class Settings(BaseSettings):
     model_provider: Literal["anthropic", "fake"] = "fake"
     model_name: str = DEFAULT_MODEL
 
-    ntfy_url: str = "https://ntfy.sh"
-    ntfy_topic: str | None = None
     web_url: str = "http://localhost:5173"
 
     # Fernet key that encrypts mailbox credentials and signs OAuth state.

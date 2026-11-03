@@ -1,9 +1,4 @@
-"""Plug-in points that each deployment implements: where alerts go.
-
-The AI provider plug-in point is `herald_core.model.TriageModel`.
-"""
-
-from typing import Protocol
+"""The alert an email raises when `decide` routes it to "alert". SSE sends it as `alert.sent`."""
 
 from pydantic import BaseModel
 
@@ -16,7 +11,3 @@ class Alert(BaseModel):
     reason: str
     quote: str | None = None
     link: str | None = None
-
-
-class Notifier(Protocol):
-    async def send(self, alert: Alert) -> None: ...
