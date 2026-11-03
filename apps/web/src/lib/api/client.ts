@@ -13,6 +13,7 @@ export type DraftOut = components['schemas']['DraftOut'];
 export type Mailbox = components['schemas']['MailboxOut'];
 export type MailboxStatus = components['schemas']['MailboxStatus'];
 export type ConnectOut = components['schemas']['ConnectOut'];
+export type TryOut = components['schemas']['TryOut'];
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	const response = await fetch(`/api${path}`, {
@@ -54,6 +55,12 @@ export const api = {
 	/** Triage the email again with the current facts and rules. The result arrives as email.noted. */
 	reread: (workspaceId: string, emailId: string) =>
 		request<Email>(`/workspaces/${workspaceId}/emails/${emailId}/reread`, { method: 'POST' }),
+	/** What Herald would do with the email under an unsaved config. Saves nothing. */
+	tryConfig: (workspaceId: string, emailId: string, config: WorkspaceConfig) =>
+		request<TryOut>(`/workspaces/${workspaceId}/emails/${emailId}/try`, {
+			method: 'POST',
+			body: JSON.stringify({ config })
+		}),
 	/** Mail providers this server can connect, like ['gmail']. Empty when none is set up. */
 	listProviders: () => request<string[]>('/providers'),
 	listMailboxes: (workspaceId: string) =>

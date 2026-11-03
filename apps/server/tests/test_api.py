@@ -235,6 +235,50 @@ async def test_unsure_mail_a_close_rule_won_can_be_marked_done(app, client):
         assert session.exec(select(Correction)).all() == []
 
 
+async def test_try_reads_the_email_with_a_draft_and_saves_nothing(app, client):
+    from sqlmodel import Session, select
+
+    from herald_server.models import Event
+
+    ws = await demo_workspace(client)
+    other = await demo_workspace(client)
+    email = await send(app, client, ws, "Engraving", "Can you engrave my initials on the tag?")
+    assert email["status"] == "needs_a_look"
+    workspace = (await client.get(f"/api/workspaces/{ws}")).json()
+    url = f"/api/workspaces/{ws}/emails/{email['id']}/try"
+    with Session(app.state.services.engine) as session:
+        events_before = len(session.exec(select(Event)).all())
+
+    rule = {"id": "initials", "name": "Initials", "when": "Asks about initials", "action": "alert"}
+    draft = workspace["config"] | {"rules": [*workspace["config"]["rules"], rule]}
+    tried = await client.post(url, json={"config": draft})
+    assert tried.status_code == 200
+    body = tried.json()
+    assert body["status"] == "alerted"
+    assert body["decision"]["fired_rule_ids"] == ["initials"]
+
+    fact = workspace["config"] | {
+        "facts": [*workspace["config"]["facts"], "Engraving initials on a tag is free."]
+    }
+    sure = (await client.post(url, json={"config": fact})).json()
+    assert (sure["status"], sure["notes"]["sure"]) == ("inbox", True)
+
+    # Nothing changed: not the email, not the config, and no event was published.
+    again = (await client.get(f"/api/workspaces/{ws}/emails/{email['id']}")).json()
+    assert again["status"] == "needs_a_look" and again["notes"] == email["notes"]
+    saved = (await client.get(f"/api/workspaces/{ws}")).json()
+    assert saved["config"] == workspace["config"]
+    with Session(app.state.services.engine) as session:
+        assert len(session.exec(select(Event)).all()) == events_before
+
+    cross = await client.post(
+        f"/api/workspaces/{other}/emails/{email['id']}/try", json={"config": draft}
+    )
+    assert cross.status_code == 404
+    too_many = workspace["config"] | {"facts": [f"Fact {n}" for n in range(11)]}
+    assert (await client.post(url, json={"config": too_many})).status_code == 422
+
+
 async def test_reread_is_409_after_the_owner_moved_it(app, client):
     ws = await demo_workspace(client)
     email = await send(

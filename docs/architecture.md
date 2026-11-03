@@ -110,7 +110,7 @@ The AI writes notes and never sets status. Status changes in two places only: th
 | Done | any | `done` | — |
 | Re-read | `alerted`, `needs_a_look`, `inbox` or `closed` | whatever decide says | The email goes through triage again with the current setup |
 
-Re-read (`POST .../emails/{id}/reread`, 202) is how an answered question settles: the owner saves a fact, then asks Herald to read the email again. It is refused (409) once the owner has taken the email (in progress or done) or moved it by hand (a route correction exists), so decide never moves an email the owner has already placed.
+Re-read (`POST .../emails/{id}/reread`, 202) is how an answered question settles: the owner saves a fact or rule change, then asks Herald to read the email again. Before saving, the question dialog can try the change: `POST .../emails/{id}/try` (200) runs triage in the request with the unsaved config the owner sends and returns the status, notes and decision Herald would give. It writes nothing and publishes no event, so the email, its status and the saved config stay as they were. Each try is one more AI call. It is refused (409) once the owner has taken the email (in progress or done) or moved it by hand (a route correction exists), so decide never moves an email the owner has already placed.
 
 ## Live events (SSE)
 

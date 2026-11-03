@@ -75,18 +75,44 @@ def _record_alert(services: Services, email: Email, alert: Alert) -> BusEvent:
         return to_bus(event)
 
 
-async def process_email(services: Services, email_id: str) -> Decision:
-    email, name, config, received_at = await asyncify(_load)(services, email_id)
+async def _run(
+    services: Services, email: Email, name: str, config: WorkspaceConfig, received_at: datetime
+) -> tuple[Notes | None, Decision, EmailContext, int]:
     tools = build_toolbox(services.engine, email.workspace_id, email.id, received_at)
-    log.info("email %s triage started in workspace %s", email.id, email.workspace_id)
     started = time.perf_counter()
     state = await triage(services.graph, email.to_core(), config, business_name=name, tools=tools)
     total_ms = round((time.perf_counter() - started) * 1000)
-    notes, decision = state.get("notes"), state["decision"]
     # Copy the toolbox's list and dict so nothing that runs later can change what we save.
     context = EmailContext.from_run(
         state.get("history") or History(), list(tools.failed), dict(tools.ms) | {"triage": total_ms}
     )
+    return state.get("notes"), state["decision"], context, total_ms
+
+
+async def trial_read(
+    services: Services, email_id: str, config: WorkspaceConfig
+) -> tuple[Notes | None, Decision]:
+    """What Herald would make of this email with a draft config. Writes and publishes nothing.
+
+    The owner tries a fact or rule change on one email before keeping it, so this must leave
+    the email, its events and the saved config exactly as they were.
+    """
+    email, name, _saved, received_at = await asyncify(_load)(services, email_id)
+    notes, decision, _context, total_ms = await _run(services, email, name, config, received_at)
+    log.info(
+        "email %s trial read in %d ms: route=%s rules=%s",
+        email.id,
+        total_ms,
+        decision.route,
+        ",".join(decision.fired_rule_ids) or "none",
+    )
+    return notes, decision
+
+
+async def process_email(services: Services, email_id: str) -> Decision:
+    email, name, config, received_at = await asyncify(_load)(services, email_id)
+    log.info("email %s triage started in workspace %s", email.id, email.workspace_id)
+    notes, decision, context, total_ms = await _run(services, email, name, config, received_at)
     log.info(
         "email %s triaged in %d ms: route=%s urgency=%s rules=%s floor=%s notes=%s failed tools=%s",
         email.id,
@@ -96,7 +122,7 @@ async def process_email(services: Services, email_id: str) -> Decision:
         ",".join(decision.fired_rule_ids) or "none",
         ",".join(decision.floor_flags) or "none",
         "yes" if notes else "no",
-        ",".join(tools.failed) or "none",
+        ",".join(context.failed) or "none",
     )
 
     email, event = await asyncify(_save)(services, email_id, notes, decision, context)
