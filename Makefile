@@ -1,6 +1,9 @@
 # Herald monorepo tasks. Written for GNU Make 3.81 (macOS default): no .ONESHELL.
 SERVER := cd apps/server &&
 LITE := HERALD_DATABASE_URL=sqlite:///./herald-dev.db HERALD_BUS=memory HERALD_QUEUE=inline
+# Run from apps/server. Watch core too: the API imports it, so its edits need a reload.
+UVICORN := uv run uvicorn herald_server.api.main:app --port 8000 \
+	--reload --reload-dir src --reload-dir ../../packages/core/src
 
 .PHONY: help install infra infra-down dev api worker web lite docker-dev docker-prod docker-prod-down \
 	test lint format gen-api
@@ -31,7 +34,7 @@ dev: ## Start Postgres and Redis (Docker), then the API, worker and web app toge
 	$(MAKE) -j3 api worker web
 
 api: ## Run the API on :8000 (needs make infra)
-	$(SERVER) uv run fastapi dev --port 8000
+	$(SERVER) $(UVICORN)
 
 worker: ## Run the pipeline worker (needs make infra)
 	$(SERVER) uv run arq herald_server.worker.main.WorkerSettings
@@ -40,7 +43,7 @@ web: ## Run the web app on :5173 (proxies /api to :8000)
 	pnpm -C apps/web dev
 
 lite: ## Run the API with no Docker: SQLite, in-memory bus, inline pipeline
-	$(SERVER) $(LITE) uv run fastapi dev --port 8000
+	$(SERVER) $(LITE) $(UVICORN)
 
 docker-dev: ## Run the full stack in Docker with hot reload (web :5173, API :8000)
 	docker compose -f infra/docker-compose.dev.yml up --build
