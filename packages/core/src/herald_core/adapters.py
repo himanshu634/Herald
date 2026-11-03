@@ -1,14 +1,11 @@
-"""Plug-in points that each deployment implements: where emails come from, where alerts go.
+"""Plug-in points that each deployment implements: where alerts go.
 
 The AI provider plug-in point is `herald_core.model.TriageModel`.
 """
 
-from collections.abc import AsyncIterator
 from typing import Protocol
 
 from pydantic import BaseModel
-
-from herald_core.schema import Email
 
 
 class Alert(BaseModel):
@@ -23,9 +20,3 @@ class Alert(BaseModel):
 
 class Notifier(Protocol):
     async def send(self, alert: Alert) -> None: ...
-
-
-class EmailSource(Protocol):
-    """A real inbox (Gmail, Outlook) later; the test-email box needs no source."""
-
-    def poll(self, workspace_id: str) -> AsyncIterator[Email]: ...

@@ -11,6 +11,7 @@ EMAIL_RECEIVED = "email.received"
 EMAIL_NOTED = "email.noted"
 EMAIL_STATUS = "email.status"
 ALERT_SENT = "alert.sent"
+MAILBOX_STATUS = "mailbox.status"
 
 
 def add_event(session: Session, workspace_id: str, type_: str, data: dict[str, Any]) -> Event:

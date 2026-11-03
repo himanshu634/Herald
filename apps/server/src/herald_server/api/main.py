@@ -25,6 +25,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         await queue.close()
         await services.bus.close()
+        await services.http.aclose()
         services.engine.dispose()
 
     app = FastAPI(title="Herald", lifespan=lifespan)

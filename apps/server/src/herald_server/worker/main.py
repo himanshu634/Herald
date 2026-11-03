@@ -23,6 +23,7 @@ async def startup(ctx: dict[str, Any]) -> None:
 async def shutdown(ctx: dict[str, Any]) -> None:
     services = ctx["services"]
     await services.bus.close()
+    await services.http.aclose()
     services.engine.dispose()
 
 
