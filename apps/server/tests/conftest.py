@@ -19,6 +19,8 @@ def settings(tmp_path) -> Settings:
         queue="inline",
         model_provider="fake",
         token_key=Fernet.generate_key().decode(),
+        # Set here so a token in .env or the shell cannot leak into the tests.
+        internal_token=None,
     )
 
 
