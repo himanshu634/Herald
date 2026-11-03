@@ -29,8 +29,8 @@ sequenceDiagram
     API->>Bus: publish email.received
     API->>Q: enqueue process_email
     Q->>W: process_email(email_id)
-    W->>W: LangGraph: word check ∥ notes → rules → decide
-    W->>DB: save notes, decision, status + event email.noted
+    W->>W: LangGraph: word check ∥ (history → notes) → rules → decide
+    W->>DB: save notes, decision, status, context + event email.noted
     W->>Bus: publish email.noted
     W->>DB: event alert.sent (only when the decision is "alert")
     W->>Bus: publish alert.sent
@@ -43,7 +43,8 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     S((start)) --> WC[word_check<br/>regex safety terms]
-    S --> N[write_notes<br/>AI: topic, urgency, anger, flags, quotes]
+    S --> G[gather_context<br/>history tools, no AI]
+    G --> N[write_notes<br/>AI: topic, urgency, anger, flags, quotes]
     WC --> R[judge_rules<br/>AI: yes or no per owner rule]
     N --> R
     R --> D[decide<br/>plain Python]
@@ -52,8 +53,20 @@ flowchart LR
 
 - The graph is compiled once and shared by all tenants. Each run carries its workspace's config in the state.
 - `word_check` and `write_notes` run in parallel and write different state keys.
+- `write_notes` waits on `gather_context`. `word_check` does not.
 - If the AI fails (outage, refusal, bad output), the notes are empty and the email goes to "Needs a look". A safety-floor match from the word check still alerts.
 - `decide` order, first match wins: safety floor → owner rules (alert beats close) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
+
+## History
+
+Before the model reads an email, `gather_context` runs three tools in code: `sender_history` (recent emails from the same sender), `thread` (earlier messages in the thread) and `recent_corrections` (emails the owner moved from alert to inbox). This is a pre-fetch, not a model loop. The tools read Herald's own database, never the mail provider.
+
+- The workspace is bound when the toolbox is built. No tool input has a workspace or email id.
+- A tool sees only emails received before the current one.
+- A tool that fails or takes over 2 s gives nothing, and its name goes into `email.context.failed`. Triage goes on.
+- `word_check` never waits on the tools. A slow tool can delay the alert by at most the tool timeout (2 s).
+- History goes into the user message inside a fenced `<history>` block. Its text is untrusted, so Herald strips `<history>`, `<message>`, `<email>` and `<business>` tags from it.
+- `email.context` saves what the model saw: repeat counts, the ids it was shown, failed tools and timings.
 
 ## The prompt
 
@@ -63,7 +76,7 @@ Claude gets one system prompt for each business and one user message for each em
 | --- | --- | --- |
 | Herald: role, scales, flag definitions, fences | A Herald release | System prompt, first, from `triage.md` |
 | Brand: name, profile, topics, facts, guidance, rules | The owner edits setup | System prompt, in `<business>` |
-| Learned: past corrections | Later spec | — |
+| History: sender history, thread, past corrections | Every email | User message, in `<history>`, before `<email>` |
 | Email: sender, important marker, subject, body | Every email | User message, in `<email>` |
 
 Building rules:
@@ -219,6 +232,7 @@ Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscri
 | `MailConnector` | `herald_server.connectors` | `GmailConnector`; `FakeConnector` in tests. The test-email box still posts to the API. |
 | `EventBus` | `herald_server.bus` | `RedisEventBus`, `InMemoryEventBus` |
 | `JobQueue` | `herald_server.queue` | `ArqQueue`, `InlineQueue` |
+| `Tool` / `Toolbox` | `herald_core.tools` (types), `herald_server.tools` (database tools) | `SenderHistoryTool`, `ThreadTool`, `CorrectionsTool` |
 
 ## Configuration
 
@@ -239,13 +253,14 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 
 ### Upgrading an existing dev database
 
-There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. A `mailbox` table made before the one-business-per-mailbox rule also lacks the index `uq_mailbox_live_address` (startup does not add indexes to a table that exists); the connect check still applies, but a racing connect is not caught. Start from an empty database:
+There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. The same happens to a database made before the history tools, which added `email.thread_id`, `email.context` and the sender index. A `mailbox` table made before the one-business-per-mailbox rule also lacks the index `uq_mailbox_live_address` (startup does not add indexes to a table that exists); the connect check still applies, but a racing connect is not caught. Start from an empty database:
 
 - Lite mode: delete `apps/server/herald-dev.db`.
 - Postgres: run `docker compose down -v`, then `make infra`.
 
 ## Not built yet
 
+- Model-driven tool calls and business-system tools
 - Alembic migrations (tables are created on startup for now; see "Upgrading an existing dev database")
 - Auth and per-workspace limits
 - A settings page for editing a workspace after setup (`PUT /config` is ready for it)

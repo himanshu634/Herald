@@ -163,6 +163,7 @@ class Email(BaseModel):
     sender: str
     subject: str
     body: str
+    thread_id: str | None = None
 
 
 class Quote(BaseModel):

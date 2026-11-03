@@ -13,6 +13,7 @@ class InboundMessage(BaseModel):
     subject: str
     body: str  # plain text, at most 50_000 chars
     received_at: datetime
+    thread_id: str | None = None  # the provider's conversation id, if it has one
 
 
 class FetchResult(BaseModel):

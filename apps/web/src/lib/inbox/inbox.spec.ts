@@ -19,9 +19,11 @@ function email(id: string, over: Partial<Email> = {}): Email {
 		sender: `${id}@customer.in`,
 		subject: `Subject ${id}`,
 		body: 'Body',
+		thread_id: null,
 		status: 'inbox',
 		notes: null,
 		decision: null,
+		context: null,
 		received_at: '2026-11-03T09:00:00Z',
 		...over
 	};

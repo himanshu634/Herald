@@ -33,7 +33,11 @@ def _store_received(
     services: Services, workspace_id: str, data: EmailIn
 ) -> tuple[EmailOut, BusEvent]:
     with Session(services.engine) as session:
-        email = Email(workspace_id=workspace_id, **data.model_dump())
+        # History matches senders by exact string, so store them in one canonical form.
+        email = Email(
+            workspace_id=workspace_id,
+            **{**data.model_dump(), "sender": data.sender.strip().lower()},
+        )
         session.add(email)
         event = add_event(
             session,
