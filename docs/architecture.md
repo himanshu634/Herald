@@ -77,7 +77,10 @@ The AI writes notes and never sets status. Status changes in two places only: th
 ## Multi-tenancy
 
 - Every tenant-owned row has `workspace_id`, and every query filters on it. A test checks that one workspace cannot read another's emails.
-- Each business is a `WorkspaceConfig`: profile, topics, important contacts and rules. Tripfold is seed data in `herald_server/seed.py`.
+- Each business is a `WorkspaceConfig`: profile, topics, important contacts, owner guidance and rules. Tripfold is seed data in `herald_server/seed.py`.
+- A business is added in one of two ways. One is the setup flow: `POST /api/workspaces/setup` takes a name and description, and the AI drafts topics, guidance and rules (`herald_server/setup.py`). The owner edits the draft and saves it with `PUT /api/workspaces/{id}/config`. The other is a full config posted to `POST /api/workspaces`.
+- A workspace stays a draft (`setup_done = false`) until its setup is saved. A draft workspace refuses email with `409`, because its config is the AI's unchecked guess.
+- Owner guidance goes into the notes prompt, after the static instructions. It shapes topic, urgency and anger only. The prompt says it cannot silence the safety floor, and the word check runs regardless. Routing stays with rules.
 - Planned: per-workspace caps on AI calls and emails per day.
 
 ## Plug-in points
@@ -106,5 +109,6 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 
 - Alembic migrations (tables are created on startup for now)
 - Auth and per-workspace limits
+- A settings page for editing a workspace after setup (`PUT /config` is ready for it)
 - The rule test, the score report and the test-email set
 - Refusal fallbacks for the Claude model (a refusal currently routes the email to "Needs a look")

@@ -20,6 +20,7 @@ class Services:
     engine: Engine
     bus: EventBus
     notifier: Notifier
+    model: TriageModel
     graph: CompiledStateGraph
 
 
@@ -45,5 +46,10 @@ def build_services(settings: Settings) -> Services:
         else FakeModel()
     )
     return Services(
-        settings=settings, engine=engine, bus=bus, notifier=notifier, graph=build_graph(model)
+        settings=settings,
+        engine=engine,
+        bus=bus,
+        notifier=notifier,
+        model=model,
+        graph=build_graph(model),
     )
