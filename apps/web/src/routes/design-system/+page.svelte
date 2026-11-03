@@ -34,7 +34,8 @@
 		['text-xl font-extrabold', 'Panel title 18', 'Refund still not received'],
 		['text-lg font-bold', 'Row title 16', 'Flight on Thursday, still no bag'],
 		['text-md', 'Body 14', 'Herald read every email and sorted it for you.'],
-		['text-sm', 'Table 13', 'Orders and delivery'],
+		['text-sm', 'Table 13', 'Refund of ₹6,499, 09:47'],
+		['font-mono text-sm', 'Mono 13', 'TF-20418, riya@customer.in'],
 		['text-xs font-semibold', 'Tag 12', 'Needs a look']
 	] as const;
 
@@ -105,7 +106,7 @@
 			</div>
 		</Panel>
 
-		<Panel title="Type, Albert Sans">
+		<Panel title="Type, Schibsted Grotesk">
 			<div class="flex flex-col gap-3">
 				{#each type as [classes, name, sample] (name)}
 					<div class="grid grid-cols-[7rem_1fr] items-baseline gap-3">

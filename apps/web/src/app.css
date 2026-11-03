@@ -1,5 +1,6 @@
 @import 'tailwindcss';
-@import '@fontsource-variable/albert-sans';
+@import '@fontsource-variable/schibsted-grotesk';
+@import '@fontsource-variable/jetbrains-mono';
 @import './lib/styles/tokens.css';
 
 /* Page basics. Components style themselves with utilities. */
@@ -15,7 +16,6 @@
 		min-height: 100vh;
 		font-size: var(--text-md);
 		line-height: var(--text-md--line-height);
-		font-variant-numeric: tabular-nums;
 	}
 
 	h1,
