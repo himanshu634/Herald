@@ -1,0 +1,50 @@
+# Herald monorepo tasks. Written for GNU Make 3.81 (macOS default): no .ONESHELL.
+SERVER := cd apps/server &&
+LITE := HERALD_DATABASE_URL=sqlite:///./herald-dev.db HERALD_BUS=memory HERALD_QUEUE=inline
+
+.PHONY: help install infra infra-down api worker web lite test lint format gen-api
+
+help: ## List tasks
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-11s %s\n", $$1, $$2}'
+
+install: ## Install Python and JS dependencies
+	uv sync
+	pnpm install
+
+infra: ## Start Postgres and Redis (Docker)
+	docker compose up -d
+
+infra-down: ## Stop Postgres and Redis
+	docker compose down
+
+api: ## Run the API on :8000 (needs make infra)
+	$(SERVER) uv run fastapi dev --port 8000
+
+worker: ## Run the pipeline worker (needs make infra)
+	$(SERVER) uv run arq herald_server.worker.main.WorkerSettings
+
+web: ## Run the web app on :5173 (proxies /api to :8000)
+	pnpm -C apps/web dev
+
+lite: ## Run the API with no Docker: SQLite, in-memory bus, inline pipeline
+	$(SERVER) $(LITE) uv run fastapi dev --port 8000
+
+test: ## Run all tests
+	uv run pytest
+	pnpm -C apps/web test
+
+lint: ## Lint, format-check and type-check everything
+	uv run ruff check .
+	uv run ruff format --check .
+	pnpm -C apps/web lint
+	pnpm -C apps/web check
+
+format: ## Format everything
+	uv run ruff format .
+	uv run ruff check --fix .
+	pnpm -C apps/web format
+
+gen-api: ## Regenerate web API types from the FastAPI schema
+	uv run python -c "import json; from herald_server.api.main import app; print(json.dumps(app.openapi()))" > apps/web/src/lib/api/openapi.json
+	pnpm -C apps/web exec openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts
+	rm apps/web/src/lib/api/openapi.json

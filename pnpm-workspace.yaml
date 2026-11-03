@@ -1,0 +1,8 @@
+packages:
+  - apps/web
+
+engineStrict: true
+
+# pnpm 11 blocks dependency build scripts unless they are allowed here.
+allowBuilds:
+  esbuild: true
