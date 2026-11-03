@@ -15,7 +15,32 @@ class WorkspaceOut(BaseModel):
     id: str
     name: str
     config: WorkspaceConfig
+    setup_done: bool
     created_at: datetime
+
+
+class SetupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=2000)
+
+
+class SetupOut(BaseModel):
+    workspace: WorkspaceOut
+    drafted: bool = Field(description="False when the AI failed and a plain fallback was used.")
+
+
+class SuggestIn(BaseModel):
+    description: str = Field(min_length=1, max_length=2000)
+
+
+class DraftOut(BaseModel):
+    config: WorkspaceConfig
+    drafted: bool = Field(description="False when the AI failed and a plain fallback was used.")
+
+
+class ConfigIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    config: WorkspaceConfig
 
 
 class EmailIn(BaseModel):
