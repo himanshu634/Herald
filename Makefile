@@ -5,8 +5,11 @@ LITE := HERALD_DATABASE_URL=sqlite:///./herald-dev.db HERALD_BUS=memory HERALD_Q
 # make api and make worker agree without setup. Set HERALD_INTERNAL_TOKEN to use your own.
 DEV_TOKEN := HERALD_INTERNAL_TOKEN=$${HERALD_INTERNAL_TOKEN:-herald-dev-internal-token-not-secret}
 # Run from apps/server. Watch core too: the API imports it, so its edits need a reload.
+# A reload waits for open connections to close, and the inbox's SSE stream never closes on
+# its own. Without the timeout the API hangs after the first edit. After 2 s the stream is cut
+# and the browser reconnects with Last-Event-ID.
 UVICORN := uv run uvicorn herald_server.api.main:app --port 8000 \
-	--reload --reload-dir src --reload-dir ../../packages/core/src
+	--reload --reload-dir src --reload-dir ../../packages/core/src --timeout-graceful-shutdown 2
 
 .PHONY: help install infra infra-down dev api worker web lite docker-dev docker-prod docker-prod-down \
 	test eval lint format gen-api

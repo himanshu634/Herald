@@ -63,8 +63,11 @@ COPY apps/server/src apps/server/src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --all-packages
 EXPOSE 8000
+# The timeout cuts open SSE streams on reload. Without it a reload waits for them forever and
+# the API hangs (see UVICORN in the Makefile).
 CMD ["uvicorn", "herald_server.api.main:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--reload", "--reload-dir", "apps/server/src", "--reload-dir", "packages/core/src"]
+     "--reload", "--reload-dir", "apps/server/src", "--reload-dir", "packages/core/src", \
+     "--timeout-graceful-shutdown", "2"]
 
 # ---------- Web ----------
 
