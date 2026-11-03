@@ -7,7 +7,6 @@ from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy import Engine
 from sqlmodel import Session, SQLModel, col, create_engine, select
 
-from herald_core.adapters import Notifier
 from herald_core.graph import build_graph
 from herald_core.model import AnthropicModel, FakeModel, TriageModel
 from herald_server.bus import EventBus, InMemoryEventBus, RedisEventBus
@@ -15,7 +14,6 @@ from herald_server.connectors import build_connectors
 from herald_server.connectors.base import MailConnector
 from herald_server.crypto import BadSecret, SecretBox
 from herald_server.models import Mailbox, MailboxStatus
-from herald_server.notifier import LogNotifier, NtfyNotifier
 from herald_server.settings import Settings
 
 
@@ -24,7 +22,6 @@ class Services:
     settings: Settings
     engine: Engine
     bus: EventBus
-    notifier: Notifier
     model: TriageModel
     graph: CompiledStateGraph
     http: httpx.AsyncClient
@@ -74,11 +71,6 @@ def build_services(settings: Settings) -> Services:
     bus: EventBus = (
         RedisEventBus(settings.redis_url) if settings.bus == "redis" else InMemoryEventBus()
     )
-    notifier: Notifier = (
-        NtfyNotifier(settings.ntfy_url, settings.ntfy_topic)
-        if settings.ntfy_topic
-        else LogNotifier()
-    )
     model: TriageModel = (
         AnthropicModel(model=settings.model_name)
         if settings.model_provider == "anthropic"
@@ -89,7 +81,6 @@ def build_services(settings: Settings) -> Services:
         settings=settings,
         engine=engine,
         bus=bus,
-        notifier=notifier,
         model=model,
         graph=build_graph(model),
         http=http,

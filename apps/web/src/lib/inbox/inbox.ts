@@ -25,7 +25,7 @@ export const VIEWS: {
 ];
 
 export const EMPTY: Record<ViewId, string> = {
-	'needs-you': 'Nothing needs you. Herald will buzz your phone if something urgent arrives.',
+	'needs-you': 'Nothing needs you. Urgent emails will show up here first.',
 	inbox: 'Your inbox is clear.',
 	'in-progress': 'Nothing in progress. Press On it on an email to start it.',
 	done: 'Nothing done yet today.',

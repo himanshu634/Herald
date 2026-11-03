@@ -9,7 +9,7 @@ It is free, MIT-licensed and runs on your own machine or server.
 ## What it does for you
 
 - **Reads every email and writes notes on it.** Topic, urgency, how angry the customer is, risk flags and a one-line summary. Each note quotes the lines from the email that back it up, so you can check the AI's reasoning at a glance.
-- **Buzzes your phone only when it should.** An alert goes out when the email is urgent, the customer is furious, or one of your own rules says so. The alert carries the summary, the quote and the rule that fired, so you can decide from your phone.
+- **Alerts you only when it should.** An email is alerted when it is urgent, the customer is furious, or one of your own rules says so. It goes to the top of your inbox with the summary, the quote and the rule that fired, so you can decide at a glance.
 - **Sorts the rest.** Your inbox opens with the most urgent emails first, then by anger, then newest first. One click marks an email "On it", "Not urgent" or "Done".
 - **Says when it isn't sure.** An email the AI can't read, or isn't confident about, goes to "Needs a look". Nothing slips quietly into the normal pile.
 - **Updates live.** New emails and their notes appear in the open inbox without a refresh.
@@ -36,7 +36,7 @@ A rule can alert you, raise or lower an email's urgency, or close it quietly (co
 
 ## Where it is today
 
-Herald is early. Today it has the inbox, AI notes, rules, the safety floor, phone alerts through [ntfy](https://ntfy.sh) and a demo business you can open in one click. Emails come in through the API or the "Send test email" box.
+Herald is early. Today it has the inbox, AI notes, rules, the safety floor, in-app alerts and a demo business you can open in one click. Emails come in through the API or the "Send test email" box.
 
 Coming next:
 
@@ -67,7 +67,7 @@ make web
 
 Open http://localhost:5173 and click **New demo workspace**. This runs with no Docker and an offline model, so it needs no API key.
 
-To use Claude, copy `.env.example` to `.env` and set `HERALD_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`. To get phone alerts, install the ntfy app, pick a topic name and set `HERALD_NTFY_TOPIC`.
+To use Claude, copy `.env.example` to `.env` and set `HERALD_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`.
 
 ## For developers
 

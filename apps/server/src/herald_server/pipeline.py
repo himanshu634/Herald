@@ -1,7 +1,5 @@
 """Run one email through the triage graph and act on the decision."""
 
-import logging
-
 from asyncer import asyncify
 from sqlmodel import Session
 
@@ -12,8 +10,6 @@ from herald_server.bus import BusEvent
 from herald_server.events import ALERT_SENT, EMAIL_NOTED, add_event, to_bus
 from herald_server.models import STATUS_FOR_ROUTE, Email, Workspace
 from herald_server.services import Services
-
-log = logging.getLogger(__name__)
 
 
 def _load(services: Services, email_id: str) -> tuple[Email, str, WorkspaceConfig]:
@@ -79,12 +75,6 @@ async def process_email(services: Services, email_id: str) -> Decision:
             quote=notes.quotes[0].text if notes and notes.quotes else None,
             link=f"{services.settings.web_url}/emails/{email.id}",
         )
-        try:
-            await services.notifier.send(alert)
-        except Exception:
-            # The email is already "alerted" in the inbox; a failed push must not lose it.
-            log.exception("notifier failed for email %s", email.id)
-        else:
-            for event in await asyncify(_record_alert)(services, email, alert):
-                await services.bus.publish(event)
+        for event in await asyncify(_record_alert)(services, email, alert):
+            await services.bus.publish(event)
     return decision

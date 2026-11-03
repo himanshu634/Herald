@@ -169,7 +169,7 @@ The mark is three emails on a tile, with one pulled out of the pile and lit char
 - **The safety floor callout** is a `bg-floor-bg text-floor-fg` block with the `shield` icon and one sentence: "Safety floor: legal threat. This always alerts you, whatever your rules say."
 - **What Herald handled** is always one line, never hidden: "Also today: 18 in the inbox, 2 in progress, 40 closed quietly." with a way to see them.
 - **Live** is the `live` dot with "Live". Nothing else animates on its own.
-- **Empty states** tell the owner what happens next: "Nothing needs you. Herald will buzz your phone if something urgent arrives."
+- **Empty states** tell the owner what happens next: "Nothing needs you. Urgent emails will show up here first."
 
 ## Copy
 
