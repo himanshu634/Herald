@@ -591,9 +591,10 @@ tags = ["word_false_positive"]
 sender = "aarav.malik@gmail.com"
 subject = "Love it"
 body = "Honestly this duffel is the bomb. Fits everything for a week. Do you make it in olive?"
+note = "Praise plus a real product question, so normal urgency is as right as low."
 [cases.expect]
 route = "inbox"
-urgency = "low"
+urgency = ["low", "normal"]
 no_flags = ["safety"]
 
 # ---------------------------------------------------------------- closed
