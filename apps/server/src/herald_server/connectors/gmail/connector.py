@@ -21,6 +21,7 @@ from herald_server.connectors.gmail.client import (
     GmailClient,
     HistoryExpired,
     MessageGone,
+    is_inbox_mail,
 )
 from herald_server.connectors.gmail.mime import parse_raw_message
 
@@ -111,8 +112,10 @@ class GmailConnector(MailConnector):
                 raw = await self._client.get_raw_message(access, message_id)
             except MessageGone:
                 continue  # deleted between the listing and now
-            if "INBOX" not in raw.label_ids:
-                continue  # archived, or moved out of the inbox, since it was listed
+            if not is_inbox_mail(raw.label_ids):
+                # Archived since it was listed, or the owner's own mail: the backfill query
+                # in:inbox also matches mail the owner sent to themselves.
+                continue
             try:
                 parsed = parse_raw_message(raw.raw)
             except Exception as exc:
@@ -147,18 +150,19 @@ class GmailConnector(MailConnector):
     async def _history(self, access: str, cursor: str) -> tuple[list[str], str]:
         """Inbox message ids added since the cursor, across every page, and the next cursor."""
         ids: dict[str, None] = {}  # insertion-ordered set: a message can show up on two pages
-        page_token: str | None = None
+        page = await self._client.list_history(access, cursor)
+        # The cursor is the FIRST page's historyId. Every history record up to it is enumerated
+        # by the pages, so this is loss-safe whether Gmail pages a snapshot or a live list.
+        # Records added mid-paging are simply re-read on the next sync, and dedupe absorbs them.
+        # The last page's id would be newer: if paging is a snapshot, records added mid-paging
+        # would sit before that cursor without being returned, and be skipped forever.
+        new_cursor = page.history_id
         while True:
-            page = await self._client.list_history(access, cursor, page_token)
             ids.update(dict.fromkeys(page.message_ids))
             if page.next_page_token is None:
                 break
-            page_token = page.next_page_token
-        # The cursor is the last page's historyId. Each page reports the mailbox's current
-        # historyId when it was served, so the last page's is the newest, and we only reach it
-        # after every page is read. An earlier page's id is older, so the next sync would read
-        # again what these pages already returned (dedupe absorbs that, but it is wasted work).
-        return list(ids), page.history_id
+            page = await self._client.list_history(access, cursor, page.next_page_token)
+        return list(ids), new_cursor
 
     async def parse_push(self, headers: Mapping[str, str], body: bytes) -> PushNotice:
         # Task 7 replaces this with Pub/Sub token verification. Until then every push is

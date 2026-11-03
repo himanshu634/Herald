@@ -180,7 +180,8 @@ async def test_fetch_follows_every_history_page(connector, google):
     result = await connector.fetch_changes(CREDS, "400")
 
     assert [m.provider_message_id for m in result.messages] == ["m1", "m2"]
-    assert result.cursor == "700"
+    # Ruling R8: the first page's historyId, not the last page's.
+    assert result.cursor == "600"
     assert google.calls.count("token") == 1
 
 
@@ -223,6 +224,16 @@ async def test_message_deleted_between_list_and_get_is_skipped(connector, google
 async def test_message_without_inbox_label_is_skipped(connector, google):
     google.listed_ids = ["archived", "m1"]
     google.add_message("archived", labels=("CATEGORY_UPDATES",))
+    google.add_message("m1")
+
+    result = await connector.fetch_changes(CREDS, None)
+
+    assert [m.provider_message_id for m in result.messages] == ["m1"]
+
+
+async def test_backfill_skips_mail_the_owner_sent(connector, google):
+    google.listed_ids = ["own", "m1"]
+    google.add_message("own", labels=("INBOX", "SENT"))
     google.add_message("m1")
 
     result = await connector.fetch_changes(CREDS, None)

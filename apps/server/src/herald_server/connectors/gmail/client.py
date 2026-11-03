@@ -62,6 +62,12 @@ class RawMessage(NamedTuple):
     internal_date: datetime
 
 
+def is_inbox_mail(label_ids: list[str]) -> bool:
+    # Herald triages mail the owner received, not the owner's own sent mail or drafts
+    # (mail sent to yourself carries both INBOX and SENT).
+    return "INBOX" in label_ids and "SENT" not in label_ids and "DRAFT" not in label_ids
+
+
 def _json(response: httpx.Response) -> dict[str, Any]:
     try:
         data = response.json()
@@ -201,9 +207,7 @@ class GmailClient:
         for record in data.get("history", []):
             for added in record.get("messagesAdded", []):
                 message = added["message"]
-                labels = message.get("labelIds", [])
-                # Keep inbox mail only: our own sent mail and drafts also appear in history.
-                if "INBOX" in labels and "DRAFT" not in labels and "SENT" not in labels:
+                if is_inbox_mail(message.get("labelIds", [])):
                     ids.append(message["id"])
         return HistoryPage(ids, str(data["historyId"]), data.get("nextPageToken"))
 
