@@ -284,6 +284,20 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 | `HERALD_GOOGLE_CLIENT_ID`, `HERALD_GOOGLE_CLIENT_SECRET` | unset (Gmail off, as above) | unset |
 | `HERALD_GMAIL_TOPIC` | unset (Gmail off: no mailbox can be connected) | unset |
 | `HERALD_GMAIL_PUSH_AUDIENCE`, `HERALD_GMAIL_PUSH_SERVICE_ACCOUNT` | unset (every push is rejected) | unset |
+| `HERALD_LANGFUSE_PUBLIC_KEY`, `HERALD_LANGFUSE_SECRET_KEY` | unset (tracing off; it needs both) | unset (off unless you set them) |
+| `HERALD_LANGFUSE_BASE_URL` | `http://localhost:3000` (`make docker-dev` sets `http://host.docker.internal:3000`) | same |
+
+## Tracing (dev)
+
+Tracing is for development only. It sends each triage run to a Langfuse that runs on your machine, so you can see what the model was asked and what it said. The Langfuse packages are in the dev dependency group, so the production image cannot trace. Traces hold customer emails, so they never leave your machine.
+
+- `make langfuse` starts Langfuse on `http://localhost:3000` (Docker). Log in with `dev@herald.test`. The dev keys are in `.env.example`. `make langfuse-down` stops it and keeps its data.
+- Put the two keys in `.env` and restart the API and worker. Tracing turns on only when both keys are set and Langfuse accepts them. If it is down, Herald logs a warning and runs without tracing. Tracing never changes a triage result.
+- A live email is one trace named `triage`, with the email id as the session. A Try run (`trial-read`) is a trace of its own. An eval trial is a trace named `eval`, and all trials of one `herald-evals` run share a session, which the run record keeps as `langfuse_session`.
+- Under the trace root, the model-call spans (`model.write_notes`, `model.judge_rules`) sit beside the LangGraph node spans.
+- Each trace gets four outcome scores: `route`, `floor` (a safety-floor word matched), `unsure` and `ai_failed`. An eval trace also gets `passed`, set after the labels are checked. Use them to filter runs.
+- Real generations (prompts and replies, tokens, cost) show up only with `HERALD_MODEL_PROVIDER=anthropic`. The fake model makes no API call, so you see the spans and scores only.
+- Setup drafts are not traced as runs. Their Claude calls may show up as stray traces.
 
 ### Upgrading an existing dev database
 

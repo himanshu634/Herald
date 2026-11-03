@@ -1,5 +1,6 @@
 """Checks on the eval harness itself. No scores are asserted: those come from a real model."""
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from herald_evals.report import markdown
 from herald_evals.runner import Trial, run_all
 from herald_evals.score import check, grounded, rule_talk, score_trials, summarise
 from herald_server.seed import TRIPFOLD
+from herald_server.tracing import Run
 
 
 @pytest.mark.parametrize("name", ds.builtin_names())
@@ -217,3 +219,40 @@ def test_report_names_unreviewed_cases():
     }
     text = markdown(meta, score_trials(cases, [_trial()]))
     assert "1 of 1 cases are not hand-checked yet" in text
+
+
+class RecordingTracing:
+    """A Tracing that records run() calls and scores. Copied from the server tests."""
+
+    enabled = True
+
+    def __init__(self) -> None:
+        self.runs: list[tuple[str, dict]] = []
+        self.scores: list[tuple[str | None, str, object]] = []
+
+    def wrap_model(self, model):
+        return model
+
+    @contextmanager
+    def run(self, name, **kwargs):
+        self.runs.append((name, kwargs))
+        yield Run("trace-1", [])
+
+    def score(self, trace_id, name, value) -> None:
+        self.scores.append((trace_id, name, value))
+
+    def shutdown(self) -> None:
+        pass
+
+
+async def test_run_all_traces_each_trial():
+    tracing = RecordingTracing()
+    data = ds.load_named("tripfold")
+    trials = await run_all(
+        FakeModel(), [(data, data.cases[0])], repeats=2, tracing=tracing, session="eval-test"
+    )
+    assert [r[0] for r in tracing.runs] == ["eval", "eval"]
+    kw = tracing.runs[0][1]
+    assert kw["session_id"] == "eval-test" and kw["tags"] == ["eval", "tripfold"]
+    assert all(t.trace_id == "trace-1" for t in trials)  # the stub's fixed id
+    assert {s[1] for s in tracing.scores} == {"route", "floor", "unsure", "ai_failed"}

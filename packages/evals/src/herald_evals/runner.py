@@ -27,6 +27,7 @@ from herald_core.model import ModelError, TriageModel
 from herald_core.schema import Decision, Email, Notes, RiskFlag, RuleVerdict, WorkspaceConfig
 from herald_core.tools import Toolbox
 from herald_evals.dataset import Case, Dataset
+from herald_server.tracing import NO_TRACING, Tracing, record_outcome
 
 
 class Trial(BaseModel):
@@ -41,6 +42,8 @@ class Trial(BaseModel):
     decision: Decision
     errors: list[str] = Field(default_factory=list)
     ms: int
+    # Set when the run was traced; the CLI scores the trace with `passed` once labels are checked.
+    trace_id: str | None = None
 
 
 class RecordingModel:
@@ -100,18 +103,38 @@ def _toolbox(history: History) -> Toolbox:
 
 
 async def run_case(
-    model: TriageModel, dataset: Dataset, case: Case, run: int, now: datetime
+    model: TriageModel,
+    dataset: Dataset,
+    case: Case,
+    run: int,
+    now: datetime,
+    tracing: Tracing = NO_TRACING,
+    session: str = "",
 ) -> Trial:
     recorder = RecordingModel(model)
     # Compiling is cheap, and a graph per trial keeps each trial's errors on its own recorder.
-    graph = build_graph(recorder)
+    # The tracing wraps the recorder, so a ModelError still reaches the recorder first.
+    graph = build_graph(tracing.wrap_model(recorder))
     email: Email = case.email(workspace_id=f"eval-{dataset.name}")
     history = case.history.build(case.id, now) if case.history else History()
     config: WorkspaceConfig = dataset.config
     started = time.perf_counter()
-    state = await triage(
-        graph, email, config, business_name=dataset.business, tools=_toolbox(history)
-    )
+    with tracing.run(
+        "eval",
+        user_id=f"eval-{dataset.name}",
+        session_id=session,
+        tags=["eval", dataset.name],
+        metadata={"case": case.id, "run": str(run)},
+    ) as traced:
+        state = await triage(
+            graph,
+            email,
+            config,
+            business_name=dataset.business,
+            tools=_toolbox(history),
+            callbacks=traced.callbacks,
+        )
+        record_outcome(tracing, traced, state["decision"], state.get("notes"))
     return Trial(
         dataset=dataset.name,
         case_id=case.id,
@@ -122,6 +145,7 @@ async def run_case(
         decision=state["decision"],
         errors=recorder.errors,
         ms=round((time.perf_counter() - started) * 1000),
+        trace_id=traced.trace_id,
     )
 
 
@@ -132,6 +156,8 @@ async def run_all(
     repeats: int = 1,
     concurrency: int = 4,
     progress: Callable[[str], None] | None = None,
+    tracing: Tracing = NO_TRACING,
+    session: str = "",
 ) -> list[Trial]:
     # A small cap keeps a run under the API's rate limits; the client retries what slips past.
     gate = asyncio.Semaphore(concurrency)
@@ -142,7 +168,7 @@ async def run_all(
     async def one(dataset: Dataset, case: Case, run: int) -> Trial:
         nonlocal done
         async with gate:
-            trial = await run_case(model, dataset, case, run, now)
+            trial = await run_case(model, dataset, case, run, now, tracing, session)
         done += 1
         if progress:
             mark = "!" if trial.errors else "."
