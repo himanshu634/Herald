@@ -9,5 +9,6 @@ export { default as Panel } from './Panel.svelte';
 export { default as StatusTag } from './StatusTag.svelte';
 export { default as Tabs, type TabItem } from './Tabs.svelte';
 export { default as Tag } from './Tag.svelte';
+export { default as ThemeSwitch } from './ThemeSwitch.svelte';
 export { default as Toast } from './Toast.svelte';
 export * from './tones';

@@ -8,6 +8,7 @@
 	import EmailPanel from '#lib/inbox/EmailPanel.svelte';
 	import EmailTable from '#lib/inbox/EmailTable.svelte';
 	import SendTestEmail from '#lib/inbox/SendTestEmail.svelte';
+	import Rail from '#lib/shell/Rail.svelte';
 	import {
 		ACTIONS,
 		EMPTY,
@@ -19,7 +20,7 @@
 		type Filters,
 		type ViewId
 	} from '#lib/inbox/inbox.js';
-	import { Button, FilterChip, Icon, Logo, Tabs, Toast, type TabItem } from '#lib/ui/index.js';
+	import { Button, FilterChip, Tabs, Toast, type TabItem } from '#lib/ui/index.js';
 
 	let workspaces = $state.raw<Workspace[]>([]);
 	let workspaceId = $state<string | null>(null);
@@ -160,29 +161,7 @@
 <svelte:head><title>Inbox · Herald</title></svelte:head>
 
 <div class="flex min-h-screen">
-	<nav
-		aria-label="Main"
-		class="flex w-rail flex-none flex-col items-center gap-1.5 border-r border-line bg-sunken py-3"
-	>
-		<span class="mb-2.5"><Logo size={34} label="Herald" /></span>
-		<a
-			href={resolve('/')}
-			aria-current="page"
-			aria-label="Inbox"
-			class="flex size-control-lg items-center justify-center rounded-md border border-line bg-surface"
-			><Icon name="inbox" /></a
-		>
-		{#each [['rules', 'Rules'], ['business', 'Business profile'], ['chart', 'Score report']] as const as [icon, name] (icon)}
-			<button
-				type="button"
-				disabled
-				aria-label={`${name}, coming soon`}
-				title={`${name}, coming soon`}
-				class="flex size-control-lg cursor-not-allowed items-center justify-center rounded-md text-muted"
-				><Icon name={icon} /></button
-			>
-		{/each}
-	</nav>
+	<Rail />
 
 	<div class="flex min-w-0 flex-1 flex-col">
 		<header
