@@ -5,7 +5,6 @@ import {
 	REPLY_COPY,
 	failedCopy,
 	keepsKey,
-	recipient,
 	replyNotice,
 	replyState,
 	replySubject,
@@ -21,6 +20,7 @@ function email(over: Partial<Email> = {}): Email {
 		mailbox_id: 'm1',
 		sender: 'arjun.mehta@outlook.com',
 		reply_to: null,
+		reply_address: 'arjun.mehta@outlook.com',
 		subject: 'Refund still not received',
 		body: 'Body',
 		thread_id: null,
@@ -77,6 +77,19 @@ describe('replyState', () => {
 
 	it('lets an active mailbox that can send reply', () => {
 		expect(replyState(email(), [mailbox('active')])).toBe('ok');
+	});
+
+	it('says it cannot tell who to reply to when the server has no address', () => {
+		expect(replyState(email({ reply_address: '' }), [mailbox('active')])).toBe('no_recipient');
+	});
+
+	it('will not reply to the shop’s own mailbox', () => {
+		const own = email({ sender: 'Meera@Tripfold.in', reply_address: 'Meera@Tripfold.in' });
+		expect(replyState(own, [mailbox('active')])).toBe('no_recipient');
+	});
+
+	it('names a mailbox problem before a missing recipient, as the server does', () => {
+		expect(replyState(email({ reply_address: '' }), [mailbox('active', false)])).toBe('reconnect');
 	});
 });
 
@@ -139,50 +152,31 @@ describe('the words for the states the panel shows', () => {
 		expect(REPLY_COPY.reconnect).toBe(
 			"Herald can read this mailbox but can't send from it yet. Reconnect Gmail and allow sending."
 		);
+		expect(REPLY_COPY.no_recipient).toBe("Herald can't tell who to reply to for this email.");
 	});
 });
 
-describe('recipient and the To line', () => {
-	it('replies to the sender when there is no Reply-To', () => {
-		expect(recipient(email())).toBe('arjun.mehta@outlook.com');
+describe('the To line', () => {
+	it('names the server’s reply_address when it is the sender', () => {
 		expect(toLine(email())).toBe('To: arjun.mehta@outlook.com');
 	});
 
-	it('replies to Reply-To, and says so, when the email asked for it', () => {
-		const form = email({ sender: 'forms@tripfold.in', reply_to: 'neha.kapoor@yahoo.in' });
-		expect(recipient(form)).toBe('neha.kapoor@yahoo.in');
+	it('says so when the reply goes somewhere other than the sender', () => {
+		const form = email({ sender: 'forms@tripfold.in', reply_address: 'neha.kapoor@yahoo.in' });
 		expect(toLine(form)).toBe(
 			'To: neha.kapoor@yahoo.in (the email asked for replies here; it came from forms@tripfold.in)'
 		);
 	});
 
-	it('accepts the plain addresses the server accepts', () => {
-		for (const good of ['neha+tag@yahoo.in', '"neha"@yahoo.in']) {
-			expect(recipient(email({ reply_to: good }))).toBe(good);
-		}
-	});
-
-	it('shows the plain line when Reply-To is the sender', () => {
-		const same = email({ reply_to: 'arjun.mehta@outlook.com' });
-		expect(toLine(same)).toBe('To: arjun.mehta@outlook.com');
-	});
-
-	it('falls back to the sender for a Reply-To the server would not use', () => {
-		// The same rule as _recipient in replies.py: one plain address, or the sender.
-		for (const bad of [
-			'a@x.in, b@y.in',
-			'Neha <neha@yahoo.in>',
-			'neha@yahoo.in\r\nBcc: x@y.in',
-			'no-at-sign',
-			'@yahoo.in',
-			'neha@',
-			'a@b@c.in',
-			'a:b@c.in',
-			'a;b@c.in',
-			'a@[1.2.3.4]'
-		]) {
-			expect(recipient(email({ reply_to: bad }))).toBe('arjun.mehta@outlook.com');
-		}
+	it('follows reply_address, not reply_to: the server decides where the mail goes', () => {
+		// The server sends to a quoted local part with a comma; the line must show it too.
+		const quoted = email({ reply_to: '"a,b"@yahoo.in', reply_address: '"a,b"@yahoo.in' });
+		expect(toLine(quoted)).toBe(
+			'To: "a,b"@yahoo.in (the email asked for replies here; it came from arjun.mehta@outlook.com)'
+		);
+		// A Reply-To the server will not use leaves reply_address on the sender.
+		const list = email({ reply_to: 'a@x.in, b@y.in' });
+		expect(toLine(list)).toBe('To: arjun.mehta@outlook.com');
 	});
 });
 
@@ -228,6 +222,7 @@ describe('failedCopy', () => {
 		expect(failedCopy(refusal('already_sending'))).toBe(REPLY_COPY.already_sending);
 		expect(failedCopy(refusal('no_mailbox'))).toBe(REPLY_COPY.no_mailbox);
 		expect(failedCopy(refusal('send_not_allowed'))).toBe(REPLY_COPY.reconnect);
+		expect(failedCopy(refusal('no_recipient'))).toBe(REPLY_COPY.no_recipient);
 		expect(failedCopy(refusal('mailbox_inactive'))).toBe(REPLY_COPY.refused);
 	});
 });
@@ -239,7 +234,7 @@ describe('spendsKey', () => {
 		}
 	});
 
-	it('keeps it while the reply is still sending: only that key can expire the row', () => {
+	it('keeps it while the reply is still sending: a press must get that row back', () => {
 		expect(spendsKey(reply({ status: 'sending', sent_at: null }))).toBe(false);
 	});
 });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Email, Reply } from '#lib/api/client.js';
+import { ApiError, type Email, type Reply } from '#lib/api/client.js';
 
 const api = vi.hoisted(() => ({ reply: vi.fn(), replies: vi.fn() }));
 vi.mock('#lib/api/client.js', async (actual) => ({
@@ -7,7 +7,7 @@ vi.mock('#lib/api/client.js', async (actual) => ({
 	api
 }));
 
-const { ReplyDesk } = await import('./replies.svelte');
+const { ReplyDesk, locked } = await import('./replies.svelte');
 
 const email = (id: string) => ({ id, workspace_id: 'w1' }) as Email;
 
@@ -32,12 +32,23 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-function make() {
+/** sessionStorage's three calls, over a Map. */
+function fakeStore() {
+	const items = new Map<string, string>();
+	return {
+		items,
+		getItem: (k: string) => items.get(k) ?? null,
+		setItem: (k: string, v: string) => void items.set(k, v),
+		removeItem: (k: string) => void items.delete(k)
+	};
+}
+
+function make(store: ReturnType<typeof fakeStore> | null = fakeStore()) {
 	const hooks = { onsent: vi.fn(), onmailbox: vi.fn(), onerror: vi.fn() };
-	const desk = new ReplyDesk(hooks);
-	desk.open('a');
-	desk.drafts.a.body = 'Hi';
-	return { desk, hooks };
+	const desk = new ReplyDesk(hooks, store);
+	desk.open(email('a'));
+	desk.setBody(email('a'), 'Hi');
+	return { desk, hooks, store };
 }
 
 beforeEach(() => {
@@ -97,7 +108,7 @@ describe('ReplyDesk.send', () => {
 		api.reply.mockResolvedValue(reply({ status: 'sending', sent_at: null }));
 		await desk.send(email('a'), false);
 
-		desk.discard('a');
+		desk.discard(email('a'));
 
 		expect(desk.drafts.a).toBeUndefined();
 	});
@@ -137,8 +148,190 @@ describe('ReplyDesk.send', () => {
 
 		await desk.send(email('a'), true);
 
-		expect(hooks.onsent).toHaveBeenCalledWith('Sent to arjun@outlook.com and marked done', 'a');
+		expect(hooks.onsent).toHaveBeenCalledWith(
+			'Sent to arjun@outlook.com and marked done',
+			'a',
+			false
+		);
 		expect(desk.drafts.a).toBeUndefined();
 		expect(desk.composingId).toBeNull();
+	});
+});
+
+describe('ReplyDesk pinning a sent email', () => {
+	it('says the panel shows the email when the answer comes back', async () => {
+		const { desk, hooks } = make();
+		await desk.load(email('a'));
+		api.reply.mockResolvedValue(reply());
+
+		await desk.send(email('a'), true);
+
+		expect(hooks.onsent).toHaveBeenCalledWith(expect.any(String), 'a', true);
+	});
+
+	it('says it does not once the owner moved on while the POST was out', async () => {
+		const { desk, hooks } = make();
+		await desk.load(email('a'));
+		const answer = deferred<Reply>();
+		api.reply.mockReturnValue(answer.promise);
+
+		const sending = desk.send(email('a'), true);
+		await desk.load(email('b'));
+		answer.resolve(reply());
+		await sending;
+
+		expect(hooks.onsent).toHaveBeenCalledWith(expect.any(String), 'a', false);
+	});
+});
+
+describe('ReplyDesk locking the body while the key is unsettled', () => {
+	it('locks it when no answer came back, and keeps the key', async () => {
+		const { desk } = make();
+		const key = desk.drafts.a.key;
+		api.reply.mockRejectedValue(new TypeError('Failed to fetch'));
+
+		await desk.send(email('a'), false);
+
+		expect(locked(desk.drafts.a)).toBe(true);
+		expect(desk.drafts.a.key).toBe(key);
+		desk.setBody(email('a'), 'Hi, edited');
+		expect(desk.drafts.a.body).toBe('Hi');
+	});
+
+	it('locks it after a 5xx', async () => {
+		const { desk } = make();
+		api.reply.mockRejectedValue(new ApiError(502, 'Bad Gateway'));
+
+		await desk.send(email('a'), false);
+
+		expect(locked(desk.drafts.a)).toBe(true);
+	});
+
+	it('locks it while the server says the reply is sending', async () => {
+		const { desk } = make();
+		api.reply.mockResolvedValue(reply({ status: 'sending', sent_at: null }));
+
+		await desk.send(email('a'), false);
+
+		expect(locked(desk.drafts.a)).toBe(true);
+	});
+
+	it('leaves it open after a refusal: nothing was saved under the key', async () => {
+		const { desk } = make();
+		api.reply.mockRejectedValue(new ApiError(409, '{"detail":"already_sending"}'));
+
+		await desk.send(email('a'), false);
+
+		expect(locked(desk.drafts.a)).toBe(false);
+		desk.setBody(email('a'), 'Hi, edited');
+		expect(desk.drafts.a.body).toBe('Hi, edited');
+	});
+
+	it('unlocks it once a resend gets a final status', async () => {
+		for (const status of ['not_sent', 'unknown'] as const) {
+			const { desk } = make();
+			api.reply.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+			await desk.send(email('a'), false);
+			expect(locked(desk.drafts.a)).toBe(true);
+
+			api.reply.mockResolvedValueOnce(reply({ status, error: 'unknown', sent_at: null }));
+			await desk.send(email('a'), false);
+
+			expect(locked(desk.drafts.a), status).toBe(false);
+		}
+	});
+
+	it('unlocks it when a reload finds the waited-on reply settled', async () => {
+		const { desk } = make();
+		api.reply.mockResolvedValue(reply({ status: 'sending', sent_at: null }));
+		await desk.send(email('a'), false);
+		await new Promise((r) => setTimeout(r));
+
+		api.replies.mockResolvedValue([reply({ status: 'unknown', error: 'unknown', sent_at: null })]);
+		await desk.load(email('a'));
+
+		expect(locked(desk.drafts.a)).toBe(false);
+	});
+});
+
+describe('ReplyDesk saving drafts across a page load', () => {
+	it('restores the body, the key and the wait in a new page', async () => {
+		const { desk, store } = make();
+		api.reply.mockResolvedValue(reply({ status: 'sending', sent_at: null }));
+		await desk.send(email('a'), false);
+		const { key } = desk.drafts.a;
+
+		// The page went to Google and back: a new desk over the same storage.
+		const after = new ReplyDesk({ onsent: vi.fn(), onmailbox: vi.fn(), onerror: vi.fn() }, store);
+		after.restore('w1');
+
+		expect(after.drafts.a).toMatchObject({ body: 'Hi', key, waiting: 'r1', sending: false });
+		expect(locked(after.drafts.a)).toBe(true);
+	});
+
+	it('keeps a draft locked after no answer, so a reload cannot unlock it', async () => {
+		const { desk, store } = make();
+		api.reply.mockRejectedValue(new TypeError('Failed to fetch'));
+		await desk.send(email('a'), false);
+
+		const after = new ReplyDesk({ onsent: vi.fn(), onmailbox: vi.fn(), onerror: vi.fn() }, store);
+		after.restore('w1');
+
+		expect(after.drafts.a.key).toBe(desk.drafts.a.key);
+		expect(locked(after.drafts.a)).toBe(true);
+	});
+
+	it('saves each edit, under the workspace', () => {
+		const { desk, store } = make();
+		desk.setBody(email('a'), 'Hi Arjun');
+
+		expect(JSON.parse(store!.items.get('herald:drafts:w1')!).a.body).toBe('Hi Arjun');
+	});
+
+	it('forgets a draft once it is sent or discarded', async () => {
+		const { desk, store } = make();
+		desk.open(email('b'));
+		desk.setBody(email('b'), 'Hello');
+		api.reply.mockResolvedValue(reply());
+
+		await desk.send(email('a'), false);
+		expect(Object.keys(JSON.parse(store!.items.get('herald:drafts:w1')!))).toEqual(['b']);
+
+		desk.discard(email('b'));
+		expect(store!.items.has('herald:drafts:w1')).toBe(false);
+	});
+
+	it('drops stored entries that are not drafts', () => {
+		const store = fakeStore();
+		store.setItem('herald:drafts:w1', JSON.stringify({ a: { body: 'Hi' }, b: 'junk' }));
+		const desk = new ReplyDesk({ onsent: vi.fn(), onmailbox: vi.fn(), onerror: vi.fn() }, store);
+
+		desk.restore('w1');
+
+		expect(desk.drafts).toEqual({});
+	});
+
+	it('keeps drafts in memory when storage throws', async () => {
+		const broken = {
+			getItem: () => {
+				throw new Error('SecurityError');
+			},
+			setItem: () => {
+				throw new Error('QuotaExceededError');
+			},
+			removeItem: () => {
+				throw new Error('SecurityError');
+			}
+		};
+		const hooks = { onsent: vi.fn(), onmailbox: vi.fn(), onerror: vi.fn() };
+		const desk = new ReplyDesk(hooks, broken);
+		desk.restore('w1');
+		desk.open(email('a'));
+		desk.setBody(email('a'), 'Hi');
+		api.reply.mockResolvedValue(reply());
+
+		expect(desk.drafts.a.body).toBe('Hi');
+		await desk.send(email('a'), false);
+		expect(hooks.onsent).toHaveBeenCalled();
 	});
 });

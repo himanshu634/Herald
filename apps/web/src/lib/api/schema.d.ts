@@ -527,6 +527,11 @@ export interface components {
             sender: string;
             /** Reply To */
             reply_to: string | null;
+            /**
+             * Reply Address
+             * @description Where a reply goes: Reply-To when it is one plain address, else the sender. Empty when there is no usable address.
+             */
+            reply_address: string;
             /** Subject */
             subject: string;
             /** Body */

@@ -11,7 +11,7 @@
 	import QuestionDialog from '#lib/inbox/QuestionDialog.svelte';
 	import QuestionStrip from '#lib/inbox/QuestionStrip.svelte';
 	import ReplyBox from '#lib/inbox/ReplyBox.svelte';
-	import { ReplyDesk } from '#lib/inbox/replies.svelte.js';
+	import { ReplyDesk, locked } from '#lib/inbox/replies.svelte.js';
 	import { replyMailbox, replyState } from '#lib/inbox/reply.js';
 	import ConnectGmail from '#lib/mailbox/ConnectGmail.svelte';
 	import MailboxMenu from '#lib/mailbox/MailboxMenu.svelte';
@@ -101,9 +101,11 @@
 	);
 
 	const replies = new ReplyDesk({
-		onsent: (message, emailId) => {
+		onsent: (message, emailId, shown) => {
 			toast = message;
-			pinnedId = emailId;
+			// Only if the panel still shows it: the owner may have moved on while the POST
+			// was out, and pinning would pull the panel back to the answered email.
+			if (shown) pinnedId = emailId;
 			if (workspaceId) refresh(workspaceId);
 		},
 		onmailbox: () => workspaceId && refreshMailboxes(workspaceId),
@@ -150,6 +152,9 @@
 		const id = workspaceId;
 		refresh(id);
 		refreshMailboxes(id);
+		// Drafts saved before a reload, or before the trip to Google on Reconnect. Untracked:
+		// restore reads the drafts, and this effect must not rerun when one changes.
+		untrack(() => replies.restore(id));
 		live.connect(id);
 		const stop = live.onEvent((event) => {
 			if (event.type === 'mailbox.status') return refreshMailboxes(id);
@@ -343,7 +348,7 @@
 	function openReply() {
 		if (!current || canReply !== 'ok') return;
 		if (replies.composingId === current.id) document.getElementById('reply-body')?.focus();
-		else replies.open(current.id);
+		else replies.open(current);
 	}
 
 	// Owner shortcuts, from docs/design-system.md. Never while typing or in a dialog.
@@ -476,15 +481,18 @@
 							email={composing}
 							from={replyMailbox(composing, mailboxes)?.email_address}
 							state={canReply}
-							bind:body={draft.body}
+							bind:body={
+								() => draft?.body ?? '', (body) => composing && replies.setBody(composing, body)
+							}
 							sending={draft.sending}
 							waiting={!!draft.waiting}
+							locked={locked(draft)}
 							last={draft.last}
 							problem={draft.problem}
 							{connecting}
 							onsend={(markDone) => composing && replies.send(composing, markDone)}
 							onclose={() => replies.close()}
-							ondiscard={() => composing && replies.discard(composing.id)}
+							ondiscard={() => composing && replies.discard(composing)}
 							onreconnect={connectGmail}
 						/>
 					{:else}

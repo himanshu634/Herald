@@ -5,7 +5,8 @@ import type { IconName } from '#lib/ui/Icon.svelte';
 import type { Tone } from '#lib/ui/tones.js';
 import { formatTime } from './inbox';
 
-export type ReplyState = 'ok' | 'no_mailbox' | 'paused' | 'disconnected' | 'reconnect';
+export type ReplyState =
+	'ok' | 'no_mailbox' | 'paused' | 'disconnected' | 'reconnect' | 'no_recipient';
 type ReplyError = NonNullable<Reply['error']>;
 
 export const REPLY_COPY = {
@@ -14,6 +15,7 @@ export const REPLY_COPY = {
 	disconnected: 'This mailbox is disconnected. Connect Gmail again to reply.',
 	reconnect:
 		"Herald can read this mailbox but can't send from it yet. Reconnect Gmail and allow sending.",
+	no_recipient: "Herald can't tell who to reply to for this email.",
 	to: (to: string) => `To: ${to}`,
 	toReplyTo: (replyTo: string, sender: string) =>
 		`To: ${replyTo} (the email asked for replies here; it came from ${sender})`,
@@ -33,12 +35,16 @@ export const REPLY_COPY = {
 	already_sending: 'Another reply to this email is still sending. Wait for it, then try again.',
 	no_answer:
 		'Herald’s server didn’t answer. Your draft is kept; sending it again can’t send twice.',
-	refused: 'Herald couldn’t send this reply. Your draft is kept.'
+	refused: 'Herald couldn’t send this reply. Your draft is kept.',
+	// The draft's key went out and no answer settled it. An edit now could be dropped: the
+	// next press may only return the reply that was saved with the old words.
+	locked: 'Herald is checking whether this was sent. You can edit it once that’s settled.'
 } as const;
 
 /**
  * Whether the owner can reply from the mailbox the email came in on. The list from
  * GET /mailboxes includes disconnected rows, so a missing row means the mailbox is gone.
+ * The checks run in the server's order, so the panel names the reason a POST would get.
  */
 export function replyState(email: Email, mailboxes: Mailbox[]): ReplyState {
 	const mailbox = mailboxes.find((m) => m.id === email.mailbox_id);
@@ -46,6 +52,9 @@ export function replyState(email: Email, mailboxes: Mailbox[]): ReplyState {
 	if (mailbox.status === 'paused') return 'paused';
 	if (mailbox.status === 'disconnected') return 'disconnected';
 	if (mailbox.status === 'needs_reauth' || !mailbox.can_send) return 'reconnect';
+	// No address the server could use, or the shop's own: the reply would mail the owner.
+	const to = email.reply_address.toLowerCase();
+	if (!to || to === mailbox.email_address.toLowerCase()) return 'no_recipient';
 	return 'ok';
 }
 
@@ -59,7 +68,8 @@ export const STATE_LOOK: Record<Exclude<ReplyState, 'ok'>, Look> = {
 	no_mailbox: { tone: 'neutral', icon: 'link' },
 	paused: { tone: 'neutral', icon: 'link' },
 	disconnected: { tone: 'neutral', icon: 'link' },
-	reconnect: { tone: 'warning', icon: 'link' }
+	reconnect: { tone: 'warning', icon: 'link' },
+	no_recipient: { tone: 'neutral', icon: 'info' }
 };
 
 export const STATUS_LOOK: Record<Reply['status'], Look> = {
@@ -75,20 +85,11 @@ export function replyMailbox(email: Email, mailboxes: Mailbox[]): Mailbox | unde
 }
 
 /**
- * Where the server will send the reply. Mirrors `_recipient` in replies.py: Reply-To only when
- * it is one plain address, else the sender. If the two drift apart, the To line shows one
- * address while the mail goes to another, so change both together.
+ * "To: …", saying so when Reply-To sends the reply somewhere other than the sender. The
+ * address is the server's `reply_address`, the one the send uses, never worked out here.
  */
-export function recipient(email: Email): string {
-	const replyTo = email.reply_to;
-	if (!replyTo || /[\s\p{C}<>,;:()[\]]/u.test(replyTo)) return email.sender;
-	const [local, domain, ...rest] = replyTo.split('@');
-	return local && domain && !rest.length ? replyTo : email.sender;
-}
-
-/** "To: …", saying so when Reply-To sends the reply somewhere other than the sender. */
 export function toLine(email: Email): string {
-	const to = recipient(email);
+	const to = email.reply_address;
 	return to === email.sender ? REPLY_COPY.to(to) : REPLY_COPY.toReplyTo(to, email.sender);
 }
 
@@ -131,8 +132,10 @@ export function keepsKey(error: unknown): boolean {
 
 /**
  * Whether a 200 answer spends the draft's client_key. A settled reply does: the next press is
- * a new send. A `sending` one does not: it may belong to a process that died mid-send, and the
- * server expires such a row (as unknown) only on a POST with the same key.
+ * a new send. A `sending` one does not: that reply may still go out, so the next press must
+ * name the same key and get that row back, never send a second email. If its process died,
+ * the server turns the row unknown on the next POST for this email, with this key or a new
+ * one, and reads report it as unknown once it is stale.
  */
 export function spendsKey(reply: Reply): boolean {
 	return reply.status !== 'sending';
@@ -145,5 +148,6 @@ export function failedCopy(error: unknown): string {
 	if (detail === 'already_sending') return REPLY_COPY.already_sending;
 	if (detail === 'no_mailbox') return REPLY_COPY.no_mailbox;
 	if (detail === 'send_not_allowed') return REPLY_COPY.reconnect;
+	if (detail === 'no_recipient') return REPLY_COPY.no_recipient;
 	return REPLY_COPY.refused;
 }

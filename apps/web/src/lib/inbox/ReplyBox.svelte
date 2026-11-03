@@ -7,7 +7,6 @@
 		REPLY_COPY,
 		STATE_LOOK,
 		STATUS_LOOK,
-		recipient,
 		replyNotice,
 		replySubject,
 		toLine,
@@ -22,6 +21,7 @@
 		body = $bindable(),
 		sending,
 		waiting,
+		locked,
 		last,
 		problem,
 		connecting,
@@ -39,6 +39,8 @@
 		sending: boolean;
 		/** The server said the reply is still sending. Shown, but the buttons stay on. */
 		waiting: boolean;
+		/** The draft's key is unsettled: the body can't change, but Send and Discard can run. */
+		locked: boolean;
 		/** The last outcome that kept the draft here: not sent, or not confirmed. */
 		last: Reply | null;
 		/** A send that saved no reply: refused, or no answer. */
@@ -50,7 +52,8 @@
 		onreconnect: () => void;
 	} = $props();
 
-	const to = $derived(recipient(email));
+	// The server's address for the reply, so the box names whoever the mail really goes to.
+	const to = $derived(email.reply_address);
 	const name = $derived(senderName(to) || to);
 	const can = $derived(state === 'ok' && !sending && !!body.trim());
 	// After an unknown outcome the customer may have the email. A second send is a deliberate
@@ -107,11 +110,15 @@
 			id="reply-body"
 			bind:value={body}
 			{@attach focus}
-			readonly={sending}
+			readonly={sending || locked}
+			aria-describedby={locked && !sending ? 'reply-locked' : undefined}
 			maxlength={20000}
 			rows="9"
 			class="field-sizing-content min-h-48 flex-1 resize-none rounded-sm border border-control bg-surface px-2.5 py-2 text-md leading-snug focus:border-ink"
 		></textarea>
+		{#if locked && !sending}
+			<p id="reply-locked" class="text-xs text-muted">{REPLY_COPY.locked}</p>
+		{/if}
 		{#if from}
 			<p class="text-xs text-muted">
 				Plain text. It goes from {from} into {name}'s Gmail thread.

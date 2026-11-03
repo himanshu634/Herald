@@ -23,6 +23,7 @@ function email(id: string, over: Partial<Email> = {}): Email {
 		mailbox_id: null,
 		sender: `${id}@customer.in`,
 		reply_to: null,
+		reply_address: `${id}@customer.in`,
 		subject: `Subject ${id}`,
 		body: 'Body',
 		thread_id: null,
