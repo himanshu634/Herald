@@ -6,7 +6,12 @@ from asyncer import asyncify
 from sqlmodel import Session, select
 
 from herald_server.bus import BusEvent
-from herald_server.connectors.base import ConnectedAccount, MailConnector, Subscription
+from herald_server.connectors.base import (
+    AuthRevoked,
+    ConnectedAccount,
+    MailConnector,
+    Subscription,
+)
 from herald_server.crypto import BadSecret
 from herald_server.events import MAILBOX_STATUS, add_event, to_bus
 from herald_server.models import Event, Mailbox, MailboxStatus
@@ -68,6 +73,18 @@ def set_status(
         session.commit()
         session.refresh(event)
         return to_bus(event)
+
+
+async def mark_needs_reauth(services: Services, mailbox_id: str) -> None:
+    """Mark the mailbox needs_reauth and publish the status, if it is still ACTIVE."""
+    # Only from ACTIVE: the owner may have paused or disconnected the mailbox while the
+    # provider call was in flight. Overwriting that with NEEDS_REAUTH would undo their choice
+    # and publish a false status event.
+    event = await asyncify(set_status)(
+        services, mailbox_id, MailboxStatus.NEEDS_REAUTH, only_from=MailboxStatus.ACTIVE
+    )
+    if event is not None:
+        await services.bus.publish(event)
 
 
 def active_mailbox_ids_for_address(
@@ -171,6 +188,43 @@ async def subscribe_mailbox(services: Services, mailbox: Mailbox) -> None:
         log.warning("%s on subscribe of mailbox %s", type(exc).__name__, mailbox.id)
         return
     await asyncify(_save_subscription)(services, mailbox.id, subscription)
+
+
+async def renew_subscriptions(services: Services) -> int:
+    """Renew push for every ACTIVE mailbox. Returns how many were renewed.
+
+    A push subscription expires (Gmail's watch after 7 days). Without renewal, new mail
+    would arrive only through the 15-minute catch-up sync.
+    """
+    # Cross-tenant by design (cron): the daily renewal covers every workspace.
+    renewed = 0
+    for mailbox_id in await asyncify(active_mailbox_ids)(services):
+        # Load each row just before its call: an earlier provider call may have been slow, and
+        # the owner may have paused or disconnected this mailbox in the meantime.
+        mailbox = await asyncify(get_mailbox)(services, mailbox_id)
+        if mailbox is None or mailbox.status != MailboxStatus.ACTIVE:
+            continue
+        connector = services.connectors.get(mailbox.provider)
+        if connector is None or mailbox.credentials_enc is None or services.secrets is None:
+            continue
+        try:
+            # BadSecret: the credentials no longer decrypt (e.g. token_key changed), so only
+            # a reconnect can fix this mailbox, the same as a revoke.
+            credentials = services.secrets.open(mailbox.credentials_enc)
+            subscription = await connector.subscribe(credentials, mailbox.provider_state)
+            await asyncify(_save_subscription)(services, mailbox_id, subscription)
+        except (AuthRevoked, BadSecret) as exc:
+            # Only the type and id: provider errors can carry request headers with tokens.
+            log.warning("%s on renewal of mailbox %s", type(exc).__name__, mailbox_id)
+            await mark_needs_reauth(services, mailbox_id)
+            continue
+        except Exception as exc:
+            # One failing mailbox must not stop the renewal of the others. It stays ACTIVE:
+            # tomorrow's run tries again, and the catch-up sync fetches its mail until then.
+            log.warning("%s on renewal of mailbox %s", type(exc).__name__, mailbox_id)
+            continue
+        renewed += 1
+    return renewed
 
 
 async def _unsubscribe(

@@ -23,6 +23,7 @@ class FakeConnector:
         self.raise_on_fetch: Exception | None = None
         self.raise_on_authorize: Exception | None = None
         self.raise_on_subscribe: Exception | None = None
+        self.subscription = Subscription(expires_at=None, provider_state={})
         self.calls: list[str] = []
         self.account = ConnectedAccount(email_address="owner@shop.in", credentials={"token": "t"})
 
@@ -42,7 +43,7 @@ class FakeConnector:
         self.calls.append("subscribe")
         if self.raise_on_subscribe is not None:
             raise self.raise_on_subscribe
-        return Subscription(expires_at=None, provider_state={})
+        return self.subscription
 
     async def unsubscribe(
         self, credentials: dict[str, str], provider_state: dict[str, Any]
