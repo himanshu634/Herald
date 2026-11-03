@@ -25,6 +25,21 @@ class Settings(BaseSettings):
     ntfy_topic: str | None = None
     web_url: str = "http://localhost:5173"
 
+    # Fernet key that encrypts mailbox credentials and signs OAuth state.
+    # Generate one with Fernet.generate_key() from the cryptography package.
+    token_key: str | None = None
+    # Public base URL of this API, used to build OAuth redirect and webhook URLs.
+    public_api_url: str = "http://localhost:8000"
+
+    # Google OAuth client for the Gmail connector.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    # Pub/Sub topic Gmail publishes to, like projects/<project>/topics/herald-gmail.
+    gmail_topic: str | None = None
+    # Audience and service account email expected in the Pub/Sub push JWT.
+    gmail_push_audience: str | None = None
+    gmail_push_service_account: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
