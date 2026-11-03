@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto, replaceState } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { api, type Email, type Mailbox, type Workspace } from '#lib/api/client.js';
@@ -19,13 +19,22 @@
 		countByView,
 		visibleEmails,
 		type Action,
-		type Filters,
-		type ViewId
+		type Filters
 	} from '#lib/inbox/inbox.js';
+	import { inboxParams, viewFrom, withoutCallback } from '#lib/inbox/url.js';
 	import { Button, FilterChip, Tabs, Toast, type TabItem } from '#lib/ui/index.js';
+	import { useSearchParams } from 'runed/kit';
+
+	// Business, view, filters and the open email live on the URL. Replace, not push: picking
+	// emails with j/k must not fill the back button. The debounce batches typing in search into
+	// one URL change; reads still update at once. noScroll keeps runed from jumping to the top.
+	const params = useSearchParams(inboxParams, {
+		pushHistory: false,
+		debounce: 250,
+		noScroll: true
+	});
 
 	let workspaces = $state.raw<Workspace[]>([]);
-	let workspaceId = $state<string | null>(null);
 	let emails = $state.raw<Email[]>([]);
 	let loaded = $state(false);
 	let error = $state<string | null>(null);
@@ -40,9 +49,16 @@
 	let notice = $state<Notice | null>(null);
 	let connecting = $state(false);
 
-	let view = $state<ViewId>('needs-you');
-	let filters = $state<Filters>({ query: '', urgentOnly: false, angry: false, unsure: false });
-	let chosenId = $state<string | null>(null);
+	const view = $derived(viewFrom(params.view));
+	// Search keeps its own copy. runed copies the URL back over its values whenever the URL
+	// changes, so a key typed while an earlier URL update lands would be lost from the box.
+	let query = $state(params.q);
+	const filters = $derived<Filters>({
+		query,
+		urgentOnly: params.urgent,
+		angry: params.angry,
+		unsure: params.unsure
+	});
 	// The email the owner opened in full. Keyed by id, so picking another email folds it again.
 	let fullId = $state<string | null>(null);
 
@@ -52,7 +68,9 @@
 	// Only a saved setup takes email; drafts wait in the business menu.
 	const ready = $derived(workspaces.filter((w) => w.setup_done));
 	const firstDraft = $derived(workspaces.find((w) => !w.setup_done));
-	const workspace = $derived(ready.find((w) => w.id === workspaceId));
+	// An unknown or stale id on the URL falls back to the first business.
+	const workspace = $derived(ready.find((w) => w.id === params.workspace) ?? ready[0]);
+	const workspaceId = $derived(workspace?.id ?? null);
 	const checked = $derived(!!workspace && mailboxesFor === workspace.id);
 	// A business with no mailbox stays closed: the connect screen is all it shows.
 	const gated = $derived(!!workspace && checked && needsMailbox(workspace, mailboxes));
@@ -61,7 +79,7 @@
 	const counts = $derived(countByView(emails));
 	const visible = $derived(visibleEmails(emails, view, filters));
 	// Keep the owner's choice while it is in view; otherwise open the top email.
-	const selected = $derived(visible.find((e) => e.id === chosenId) ?? visible[0] ?? null);
+	const selected = $derived(visible.find((e) => e.id === params.email) ?? visible[0] ?? null);
 	const tabs = $derived<TabItem[]>(
 		VIEWS.map((v) => ({ id: v.id, label: v.label, count: counts[v.id], countTone: v.countTone }))
 	);
@@ -74,11 +92,12 @@
 			// sends the owner here with the saved workspace in the page state.
 			const back = readReturn(page.url.searchParams);
 			notice = back.notice;
-			const asked = back.workspace ?? page.state.workspace;
-			// Drop the callback's query so a reload doesn't show the same notice again.
-			if (page.url.search) replaceState(resolve('/'), {});
-			const usable = list.filter((w) => w.setup_done);
-			workspaceId = (usable.find((w) => w.id === asked) ?? usable[0])?.id ?? null;
+			const rest = withoutCallback(page.url.search);
+			// The path is resolve('/'); the rule can't see through the added query.
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			if (rest !== null) goto(`${resolve('/')}${rest}`, { replace: true, reset: false });
+			// The callback already put its business on the URL as `workspace`.
+			if (!back.workspace && page.state.workspace) params.workspace = page.state.workspace;
 			loaded = true;
 		})
 		.catch(fail);
@@ -175,7 +194,7 @@
 		try {
 			const created = await api.createDemoWorkspace();
 			workspaces = [...workspaces, created];
-			workspaceId = created.id;
+			chooseWorkspace(created.id);
 		} catch (e) {
 			fail(e);
 		}
@@ -195,10 +214,19 @@
 		}
 	}
 
+	// Another business's email id means nothing here, so switching drops it.
+	function chooseWorkspace(id: string | null) {
+		params.update({ workspace: id ?? '', email: '' });
+	}
+
+	function chooseView(id: string) {
+		params.view = id;
+	}
+
 	function move(step: number) {
 		if (!visible.length) return;
 		const index = selected ? visible.indexOf(selected) : -1;
-		chosenId = visible[Math.min(visible.length - 1, Math.max(0, index + step))].id;
+		params.email = visible[Math.min(visible.length - 1, Math.max(0, index + step))].id;
 	}
 
 	function toggleFull() {
@@ -242,7 +270,7 @@
 			class="flex flex-wrap items-end justify-between gap-3 border-b border-line px-4 pt-2.5 lg:border-b-0"
 		>
 			{#if open}
-				<Tabs items={tabs} bind:selected={view} label="Inbox views" />
+				<Tabs items={tabs} bind:selected={() => view, chooseView} label="Inbox views" />
 			{:else}
 				<p class="pb-2 text-2xl font-extrabold">{workspace?.name ?? 'Herald'}</p>
 			{/if}
@@ -275,7 +303,7 @@
 					/>
 				{/if}
 				{#if workspaces.length}
-					<BusinessMenu {workspaces} bind:selected={workspaceId} />
+					<BusinessMenu {workspaces} bind:selected={() => workspaceId, chooseWorkspace} />
 				{/if}
 			</div>
 		</header>
@@ -334,21 +362,22 @@
 						<input
 							id="search"
 							bind:this={search}
-							bind:value={filters.query}
+							bind:value={query}
+							oninput={() => (params.q = query)}
 							type="search"
 							placeholder="Search mail  /"
 							class="h-control-md w-56 rounded-sm border border-control bg-surface px-2.5 text-sm"
 						/>
-						<FilterChip bind:pressed={filters.urgentOnly}>Urgent</FilterChip>
-						<FilterChip bind:pressed={filters.angry}>Anger 4+</FilterChip>
-						<FilterChip bind:pressed={filters.unsure}>Herald unsure</FilterChip>
+						<FilterChip bind:pressed={params.urgent}>Urgent</FilterChip>
+						<FilterChip bind:pressed={params.angry}>Anger 4+</FilterChip>
+						<FilterChip bind:pressed={params.unsure}>Herald unsure</FilterChip>
 					</div>
 
 					{#if visible.length}
 						<EmailTable
 							emails={visible}
 							selectedId={selected?.id ?? null}
-							onselect={(id) => (chosenId = id)}
+							onselect={(id) => (params.email = id)}
 						/>
 					{:else}
 						<div
@@ -369,7 +398,7 @@
 							<button
 								type="button"
 								class="cursor-pointer font-bold text-ink underline underline-offset-2"
-								onclick={() => (view = 'all')}>Show all {counts.all}</button
+								onclick={() => chooseView('all')}>Show all {counts.all}</button
 							>
 						{/if}
 					</p>
