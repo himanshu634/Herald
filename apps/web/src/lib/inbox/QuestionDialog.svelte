@@ -5,7 +5,7 @@
 		ACTIONS,
 		MAX_FACTS,
 		MAX_FACT_LENGTH,
-		actionsFor,
+		questionActionsFor,
 		formatTime,
 		highlight,
 		nextFacts,
@@ -44,7 +44,7 @@
 	const atCap = $derived(facts.length >= MAX_FACTS);
 	const result = $derived(nextFacts(edits, draft, replace));
 	const changed = $derived(JSON.stringify(result.facts) !== JSON.stringify(facts));
-	const actions = $derived(actionsFor(email.status));
+	const actions = $derived(questionActionsFor(email.status));
 
 	function pickReplace(index: number) {
 		replace = replace === index ? null : index;

@@ -156,6 +156,17 @@ async def reread(
         raise HTTPException(
             status_code=409, detail=f"Email is {email.status}; Herald re-reads only new mail"
         )
+    # The owner already moved this email by hand (Not urgent, Move to Inbox). Decide would
+    # run again and could put it straight back where they moved it from.
+    corrected = session.exec(
+        select(Correction.id).where(
+            Correction.workspace_id == workspace.id,
+            Correction.email_id == email.id,
+            Correction.field == "route",
+        )
+    ).first()
+    if corrected is not None:
+        raise HTTPException(status_code=409, detail="You moved this email yourself")
     await queue.enqueue_email(email.id)
     return _out(email)
 

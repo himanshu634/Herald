@@ -195,3 +195,30 @@ async def test_reread_is_409_once_the_owner_took_it(app, client):
     ).status_code == 200
     response = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/reread")
     assert response.status_code == 409
+
+
+async def test_unsure_mail_a_close_rule_won_can_be_marked_done(app, client):
+    from sqlmodel import Session, select
+
+    from herald_server.models import Correction
+
+    ws = await demo_workspace(client)
+    email = await send(
+        app, client, ws, "Courier pickup slot", "Can our courier collect from your warehouse at 9?"
+    )
+    assert (email["status"], email["notes"]["sure"]) == ("closed", False)
+    done = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/done")
+    assert done.json()["status"] == "done"
+    with Session(app.state.services.engine) as session:
+        assert session.exec(select(Correction)).all() == []
+
+
+async def test_reread_is_409_after_the_owner_moved_it(app, client):
+    ws = await demo_workspace(client)
+    email = await send(
+        app, client, ws, "Courier pickup slot", "Can our courier collect from your warehouse at 9?"
+    )
+    moved = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/to-inbox")
+    assert moved.json()["status"] == "inbox"
+    response = await client.post(f"/api/workspaces/{ws}/emails/{email['id']}/reread")
+    assert response.status_code == 409

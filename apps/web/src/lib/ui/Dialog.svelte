@@ -21,6 +21,9 @@
 	} = $props();
 
 	let dialog = $state<HTMLDialogElement>();
+	// Where the last press started. A text selection dragged from a field out onto the backdrop
+	// ends with a click on the dialog element, which must not close it and lose the typing.
+	let pressedOn: EventTarget | null = null;
 
 	// showModal() is what makes it modal: focus moves in and stays, the page behind goes inert,
 	// and Esc fires "close". Only the DOM can do that, so this effect syncs `open` to it.
@@ -31,13 +34,14 @@
 	});
 </script>
 
-<!-- 80% of the window, full screen on a phone. A click lands on the dialog element itself
+<!-- 80% of the window, full screen on a phone. A press lands on the dialog element itself
 	only on its backdrop, since the content fills it edge to edge. -->
 <dialog
 	bind:this={dialog}
 	aria-label={label}
 	{onclose}
-	onclick={(event) => event.target === dialog && onclose()}
+	onpointerdown={(event) => (pressedOn = event.target)}
+	onclick={(event) => event.target === dialog && pressedOn === dialog && onclose()}
 	class="m-auto h-[80vh] max-h-none w-[80vw] max-w-none flex-col overflow-hidden rounded-xl border border-line-strong bg-surface p-0 text-ink shadow-popover backdrop:bg-[rgb(0_0_0/0.5)] open:flex max-md:h-dvh max-md:w-screen max-md:rounded-none"
 >
 	<header

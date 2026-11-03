@@ -176,6 +176,16 @@ export function actionsFor(status: EmailStatus): Action[] {
 }
 
 /**
+ * What the owner can do from the question dialog: the status's own actions, plus Done from
+ * any status. Done is the honest way to clear a question about mail a close rule sent to
+ * Closed quietly; Move to Inbox would save a correction the owner never meant.
+ */
+export function questionActionsFor(status: EmailStatus): Action[] {
+	const actions = actionsFor(status);
+	return actions.includes('done') ? actions : [...actions, 'done'];
+}
+
+/**
  * Normalise line endings, drop trailing spaces and cap blank lines at one.
  * The server does this when it reads mail; this also tidies emails stored
  * before it did, whose HTML was flattened with all its source whitespace.

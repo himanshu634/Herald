@@ -6,6 +6,7 @@ import {
 	floorLabel,
 	highlight,
 	nextFacts,
+	questionActionsFor,
 	questionsFor,
 	senderName,
 	tidyBody,
@@ -182,5 +183,13 @@ describe('tidyBody', () => {
 	it('leaves a tidy body as it is', () => {
 		const body = 'Hi,\n\nWhere is my order?';
 		expect(tidyBody(tidyBody(body))).toBe(body);
+	});
+});
+
+describe('questionActionsFor', () => {
+	it('adds Done to every status, so a closed question clears without a correction', () => {
+		expect(questionActionsFor('closed')).toEqual(['to-inbox', 'done']);
+		expect(questionActionsFor('needs_a_look')).toEqual(['on-it', 'done']);
+		expect(questionActionsFor('alerted')).toEqual(['on-it', 'not-urgent', 'done']);
 	});
 });

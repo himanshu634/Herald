@@ -19,6 +19,7 @@
 		VIEWS,
 		actionsFor,
 		countByView,
+		questionActionsFor,
 		questionsFor,
 		senderName,
 		visibleEmails,
@@ -197,8 +198,12 @@
 		}
 	}
 
-	async function act(action: Action, email: Email | null = selected) {
-		if (!email || busy || !actionsFor(email.status).includes(action)) return;
+	async function act(
+		action: Action,
+		email: Email | null = selected,
+		allowed: (status: Email['status']) => Action[] = actionsFor
+	) {
+		if (!email || busy || !allowed(email.status).includes(action)) return;
 		busy = true;
 		try {
 			const updated = await api.act(email.workspace_id, email.id, action);
@@ -228,8 +233,14 @@
 			toast = `Facts saved. Herald is re-reading ${rereading.sender}’s email.`;
 			await api.reread(email.workspace_id, email.id);
 		} catch (e) {
+			const moved = rereading && e instanceof Error && e.message.startsWith('409');
 			rereading = null;
-			fail(e);
+			// The facts are saved; only the re-read was refused, because the owner already
+			// moved this email by hand. Say so instead of showing an error.
+			if (moved)
+				toast =
+					'Facts saved. You moved this email yourself, so Herald leaves it there. Mark it Done or On it to clear the question.';
+			else fail(e);
 		} finally {
 			busy = false;
 		}
@@ -510,7 +521,7 @@
 			facts={workspace.config.facts ?? []}
 			{busy}
 			onsave={(facts) => asking && answer(asking, facts)}
-			onact={(action) => act(action, asking)}
+			onact={(action) => act(action, asking, questionActionsFor)}
 			onclose={() => (askingId = null)}
 		/>
 	{/key}
