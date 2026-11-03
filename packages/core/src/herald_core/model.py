@@ -58,9 +58,9 @@ class FakeModel:
     async def write_notes(self, email: Email, config: WorkspaceConfig) -> Notes:
         text = f"{email.subject}\n{email.body}"
         lower = text.lower()
-        topic = next((t for t in config.topics if t.lower() in lower), None)
+        topic = next((t.name for t in config.topics if t.name.lower() in lower), None)
         if topic is None:
-            topic = SPAM_TOPIC if "unsubscribe" in lower else config.topics[0]
+            topic = SPAM_TOPIC if "unsubscribe" in lower else config.topics[0].name
         letters = [c for c in text if c.isalpha()]
         caps = sum(c.isupper() for c in letters) / max(len(letters), 1)
         anger = 5 if caps > 0.6 else 3 if text.count("!") >= 3 else 1
@@ -133,7 +133,7 @@ def notes_system_prompt(config: WorkspaceConfig) -> str:
     """The static instructions, then this business. Owner guidance is left out when empty."""
     parts = [
         f"Profile:\n{config.business_profile}",
-        "Topics:\n" + "\n".join(f"- {t}" for t in config.topics),
+        "Topics:\n" + "\n".join(f"- {t}" for t in config.topic_names()),
     ]
     if config.guidance:
         parts.append("Owner guidance:\n" + "\n".join(f"- {g}" for g in config.guidance))

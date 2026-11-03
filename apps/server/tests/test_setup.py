@@ -14,12 +14,12 @@ def test_clean_draft_tidies_topics():
     draft = SetupDraft(
         topics=[" Orders ", "orders", SPAM_TOPIC, "", "Allergies"], guidance=[], rules=[]
     )
-    assert clean_draft(draft, DESCRIPTION).topics == ["Orders", "Allergies"]
+    assert [t.name for t in clean_draft(draft, DESCRIPTION).topics] == ["Orders", "Allergies"]
 
 
 def test_clean_draft_falls_back_when_no_topics_are_left():
     draft = SetupDraft(topics=[SPAM_TOPIC, "  "], guidance=[], rules=[])
-    assert clean_draft(draft, DESCRIPTION).topics == FALLBACK_TOPICS
+    assert [t.name for t in clean_draft(draft, DESCRIPTION).topics] == FALLBACK_TOPICS
 
 
 def test_clean_draft_caps_counts():
@@ -62,7 +62,7 @@ async def test_setup_creates_a_draft_workspace(client):
     assert body["drafted"] is True
     assert workspace["setup_done"] is False
     assert workspace["config"]["business_profile"] == DESCRIPTION
-    assert "Orders and delivery" in workspace["config"]["topics"]
+    assert "Orders and delivery" in [t["name"] for t in workspace["config"]["topics"]]
 
 
 async def test_setup_falls_back_when_the_ai_fails(app, client):
@@ -73,7 +73,7 @@ async def test_setup_falls_back_when_the_ai_fails(app, client):
     app.state.services.model = BrokenModel()
     body = await start(client)
     assert body["drafted"] is False
-    assert body["workspace"]["config"]["topics"] == FALLBACK_TOPICS
+    assert [t["name"] for t in body["workspace"]["config"]["topics"]] == FALLBACK_TOPICS
 
 
 async def test_draft_workspace_takes_no_email_until_saved(app, client):
@@ -129,7 +129,7 @@ async def test_suggest_saves_nothing(client):
         json={"description": "We sell software subscriptions."},
     )
     assert response.status_code == 200
-    assert "Accounts and subscriptions" in response.json()["config"]["topics"]
+    assert "Accounts and subscriptions" in [t["name"] for t in response.json()["config"]["topics"]]
     stored = (await client.get(f"/api/workspaces/{ws}")).json()
     assert stored["config"] == workspace["config"]
 
@@ -144,7 +144,7 @@ async def test_setup_routes_are_scoped_to_their_workspace(client):
     config = a["config"] | {"topics": ["Only A"]}
     await client.put(f"/api/workspaces/{a['id']}/config", json={"name": "A", "config": config})
     stored_b = (await client.get(f"/api/workspaces/{b['id']}")).json()
-    assert stored_b["config"]["topics"] != ["Only A"]
+    assert [t["name"] for t in stored_b["config"]["topics"]] != ["Only A"]
     assert stored_b["setup_done"] is False
     missing = await client.put("/api/workspaces/nope/config", json={"name": "A", "config": config})
     assert missing.status_code == 404

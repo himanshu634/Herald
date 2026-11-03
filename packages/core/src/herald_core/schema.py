@@ -8,7 +8,7 @@ owner's own actions move an email's status.
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 SPAM_TOPIC = "Spam or not for me"
 
@@ -40,10 +40,22 @@ class RuleAction(StrEnum):
     CLOSE = "close"
 
 
-Topic = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+TopicName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+TopicMeaning = Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]
+FactLine = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 GuidanceLine = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)
 ]
+
+
+class Topic(BaseModel):
+    name: TopicName
+    meaning: TopicMeaning | None = None
+
+    @field_validator("meaning")
+    @classmethod
+    def _blank_meaning_is_none(cls, value: str | None) -> str | None:
+        return value or None
 
 
 class Rule(BaseModel):
@@ -67,6 +79,9 @@ class WorkspaceConfig(BaseModel):
     business_profile: str = Field(min_length=1, max_length=2000)
     # At least one: the fake model and the notes prompt both fall back to the first topic.
     topics: list[Topic] = Field(min_length=1, max_length=12)
+    facts: list[FactLine] = Field(
+        default_factory=list, max_length=10, description="Short facts about the brand."
+    )
     important_contacts: list[str] = Field(
         default_factory=list, description="Email addresses or domains such as bigclient.com."
     )
@@ -77,6 +92,23 @@ class WorkspaceConfig(BaseModel):
     )
     rules: list[Rule] = Field(default_factory=list, max_length=20)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _plain_string_topics(cls, data):
+        # Keeps configs saved before topic meanings loading, with no migration.
+        if isinstance(data, dict) and isinstance(data.get("topics"), list):
+            data = data | {
+                "topics": [{"name": t} if isinstance(t, str) else t for t in data["topics"]]
+            }
+        return data
+
+    @model_validator(mode="after")
+    def _unique_topic_names(self) -> "WorkspaceConfig":
+        names = [t.name.lower() for t in self.topics]
+        if len(names) != len(set(names)):
+            raise ValueError("Topic names must be unique")
+        return self
+
     @model_validator(mode="after")
     def _unique_rule_ids(self) -> "WorkspaceConfig":
         # Verdicts are matched to rules by id; two rules with one id would share a verdict.
@@ -84,6 +116,9 @@ class WorkspaceConfig(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("Rule ids must be unique")
         return self
+
+    def topic_names(self) -> list[str]:
+        return [t.name for t in self.topics]
 
     def is_important(self, sender: str) -> bool:
         sender = sender.lower()
