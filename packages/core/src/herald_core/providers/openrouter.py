@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from openai import APIError, AsyncOpenAI
+from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel, ValidationError
 
 from herald_core.history import History
@@ -35,7 +36,7 @@ EXTRA_BODY: dict[str, Any] = {
 
 
 def _function_tool(tool: ModelTool) -> dict[str, Any]:
-    """The tool in the OpenAI shape. `parse()` rejects function tools that are not strict."""
+    """The tool in the OpenAI shape, strict so the model keeps to the input schema."""
     definition = tool.definition
     return {
         "type": "function",
@@ -86,49 +87,71 @@ class OpenRouterModel:
             last = bool(tools) and round_ == MAX_TOOL_ROUNDS
             choice = {"tool_choice": "none"} if last else {}
             try:
-                response = await self._client.chat.completions.parse(
+                response = await self._client.chat.completions.create(
                     model=self._model,
-                    # A copy: the list grows after the call, and a test client keeps the kwargs.
+                    # A copy: the list grows after the call.
                     messages=list(messages),
-                    response_format=output,
+                    # `create`, not `parse`: `parse` runs json.loads on tool arguments inside the
+                    # SDK, so broken arguments would fail the call instead of reaching `_run`.
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": output.__name__,
+                            "schema": to_strict_json_schema(output),
+                            "strict": True,
+                        },
+                    },
                     extra_body=EXTRA_BODY,
                     **offered,
                     **choice,
                 )
-            except (APIError, ValidationError) as exc:
+            except APIError as exc:
                 raise ModelError(str(exc)) from exc
+            except Exception as exc:
+                # An error body inside a 200, or a null `choices`, fails in the SDK's parsing.
+                raise ModelError(f"Bad response: {exc}") from exc
             if not response.choices:
                 raise ModelError("No choices in the response")
             picked = response.choices[0]
             message = picked.message
-            if picked.finish_reason != "tool_calls" or not message.tool_calls:
+            if picked.finish_reason in ("length", "content_filter"):
+                raise ModelError(f"The model stopped early (finish_reason={picked.finish_reason})")
+            if not message.tool_calls:
                 break
             if last:
                 raise ModelError("The model asked for a tool on the last round")
+            assistant: dict[str, Any] = {
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": [
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.function.name,
+                            "arguments": call.function.arguments,
+                        },
+                    }
+                    for call in message.tool_calls
+                ],
+            }
+            # Reasoning models keep their chain across the tool round only if the reasoning
+            # they returned goes back with the assistant turn.
+            extra = message.model_extra or {}
+            for key in ("reasoning", "reasoning_details"):
+                if extra.get(key) is not None:
+                    assistant[key] = extra[key]
+            messages.append(assistant)
             # Every call gets its result, or the API rejects the next turn.
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": [
-                        {
-                            "id": call.id,
-                            "type": "function",
-                            "function": {
-                                "name": call.function.name,
-                                "arguments": call.function.arguments,
-                            },
-                        }
-                        for call in message.tool_calls
-                    ],
-                }
-            )
             for call in message.tool_calls:
                 result = await _run(by_name, call.function.name, call.function.arguments)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
-        if message.refusal or message.parsed is None:
+        if message.refusal or not message.content:
             raise ModelError(f"No structured output (finish_reason={picked.finish_reason})")
-        return message.parsed
+        try:
+            return output.model_validate_json(message.content)
+        except ValidationError as exc:
+            raise ModelError(str(exc)) from exc
 
     async def write_notes(
         self,

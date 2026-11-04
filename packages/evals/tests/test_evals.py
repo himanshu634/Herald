@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from herald_core.model import ModelError
 from herald_core.schema import Decision, Notes, Quote, Route, RuleVerdict, Urgency
+from herald_evals import cli
 from herald_evals import dataset as ds
 from herald_evals.cli import main
 from herald_evals.report import markdown
@@ -198,10 +199,12 @@ def test_run_writes_a_report(scripted_cli, tmp_path, capsys):
     assert "# Herald score report" in capsys.readouterr().out
 
 
-def test_rescore_reads_an_earlier_run_without_a_model(scripted_cli, tmp_path, capsys):
+def test_rescore_reads_an_earlier_run_without_a_model(scripted_cli, tmp_path, capsys, monkeypatch):
     main(["--dataset", "ledgerly", "--out", str(tmp_path / "first")])
     first = next((tmp_path / "first").glob("*.json"))
     capsys.readouterr()
+    # A rescore re-reads the record; it must neither build a model nor need a key.
+    monkeypatch.setattr("herald_evals.cli._model", lambda *a: pytest.fail("rescore built a model"))
     main(["--rescore", str(first), "--out", str(tmp_path / "again")])
     again = next((tmp_path / "again").glob("*.json"))
     assert again.name.endswith("-rescored.json")
@@ -280,3 +283,39 @@ def test_report_file_name_has_no_slash(scripted_cli, tmp_path):
     main(["--dataset", "ledgerly", "--model-name", "openai/gpt-oss-20b", "--out", str(tmp_path)])
     assert all("/" not in p.name for p in tmp_path.iterdir())
     assert any(p.name.endswith("-openai-gpt-oss-20b.json") for p in tmp_path.iterdir())
+
+
+class _StubProvider:
+    api_key_env = "STUB_API_KEY"
+
+    def __init__(self):
+        self.built: list[tuple] = []
+
+    def build(self, model, api_key, max_retries=2):
+        self.built.append((model, api_key, max_retries))
+        return ScriptedModel()
+
+
+def test_cli_model_needs_the_providers_key(monkeypatch):
+    stub = _StubProvider()
+    monkeypatch.setattr(cli, "load_provider", lambda name: stub)
+    monkeypatch.setattr(cli, "get_settings", lambda: type("S", (), {"secret": lambda s, n: ""})())
+    with pytest.raises(SystemExit, match="STUB_API_KEY"):
+        cli._model("stub", "m")
+    assert stub.built == []
+
+
+def test_cli_model_builds_with_the_key_and_more_retries(monkeypatch):
+    stub = _StubProvider()
+    asked: list[str] = []
+
+    class _Settings:
+        def secret(self, name):
+            asked.append(name)
+            return "sk-stub"
+
+    monkeypatch.setattr(cli, "load_provider", lambda name: stub)
+    monkeypatch.setattr(cli, "get_settings", lambda: _Settings())
+    assert isinstance(cli._model("stub", "m"), ScriptedModel)
+    assert asked == ["STUB_API_KEY"]
+    assert stub.built == [("m", "sk-stub", 6)]

@@ -17,7 +17,7 @@ make migrate        # bring the database to the latest schema (make api / lite /
 make migration m="…"  # write a migration from model changes, then read it
 make infra && make api && make worker   # full stack: Postgres + Redis, separate arq worker (each in its own terminal)
 make test           # pytest (core + evals + server) and vitest
-make eval           # triage evals on Claude -> score report in packages/evals/results (see docs/evals.md)
+make eval           # triage evals on the default provider (OpenRouter; `--model anthropic` for Claude direct) -> score report in packages/evals/results (see docs/evals.md)
 make lint           # ruff check, ruff format --check, prettier + eslint, svelte-check
 make format
 make gen-api        # regenerate apps/web/src/lib/api/schema.d.ts from FastAPI's OpenAPI

@@ -320,7 +320,7 @@ A provider is a `ModelProvider` object: `name`, `default_model`, `api_key_env` a
 myprovider = "my_package.provider:provider"
 ```
 
-The server, worker, evals and tracing pick a provider with `HERALD_MODEL_PROVIDER`. A provider reads only its own key variable (`api_key_env`), from the process environment first and then the `.env` files, so a key for another provider is never sent to it. Core ships `openrouter` and `anthropic`.
+The server, worker and tracing pick a provider with `HERALD_MODEL_PROVIDER`. The evals take `--model` (default `openrouter`) and `--model-name`, and read only `HERALD_MODEL_NAME` from the settings. A provider reads only its own key variable (`api_key_env`), from the process environment first and then the `.env` files, so a key for another provider is never sent to it. Core ships `openrouter` and `anthropic`.
 
 ## Configuration
 

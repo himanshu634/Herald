@@ -11,6 +11,8 @@ def no_keys(monkeypatch, tmp_path):
     # Nothing from the shell or a real .env may reach these tests.
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("HERALD_MODEL_PROVIDER", raising=False)
+    monkeypatch.delenv("HERALD_MODEL_NAME", raising=False)
     monkeypatch.chdir(tmp_path)
 
 
