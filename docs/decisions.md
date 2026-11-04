@@ -57,5 +57,5 @@ Herald ships as a multi-tenant framework, and the demo shows one business: Tripf
 
 - [ ] Time budget and deadline. The plan assumes about 5 days.
 - [ ] Hosted platform or a library that developers install? The build assumes hosted.
-- [ ] Which AI providers are allowed, and is there a cost ceiling? The build defaults to Claude, with an offline fake model.
+- [ ] Which AI providers are allowed, and is there a cost ceiling? The build defaults to OpenRouter (`openai/gpt-oss-20b`), with Claude direct as an option. There is no offline fake model.
 - [ ] Is a hosted demo expected, or a repo the reviewers run locally?

@@ -74,7 +74,7 @@ class WorkspaceConfig(BaseModel):
     """Everything Herald knows about one business."""
 
     business_profile: str = Field(min_length=1, max_length=2000)
-    # At least one: the fake model and the notes prompt both fall back to the first topic.
+    # At least one: every email is filed under a topic.
     topics: list[Topic] = Field(min_length=1, max_length=12)
     facts: list[FactLine] = Field(
         default_factory=list, max_length=10, description="Short facts about the brand."

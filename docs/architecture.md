@@ -107,7 +107,7 @@ The model may call a tool while it writes notes or judges rules. `herald_core/mo
 - Its answer is the sender section, cleaned and fenced in `<history>` like the history block. A new sender gets "No earlier emails from this sender." A failed fetch goes back as an error result, so the model answers without it.
 - `write_notes` and `judge_rules` both offer it, with the same tool list, so the tools never change a workspace's prompt prefix.
 - The model gets one round of tool calls (`MAX_TOOL_ROUNDS`). The next request sends `tool_choice: none`, so the structured answer comes back. Every call in a round gets its result, in one user message, and the assistant turn goes back unchanged, thinking blocks included.
-- A tool round is one more model call before `decide`, so it delays every route, the safety floor's alerts included. `FakeModel` never calls a tool.
+- A tool round is one more model call before `decide`, so it delays every route, the safety floor's alerts included.
 
 ## The prompt
 
@@ -304,12 +304,23 @@ Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscri
 
 | Interface | Where | Built-in implementations |
 | --- | --- | --- |
-| `TriageModel` | `herald_core.model` | `AnthropicModel` (Claude, structured outputs), `FakeModel` (offline keyword heuristics) |
+| `TriageModel` | `herald_core.model` | Found through `ModelProvider` plug-ins (entry-point group `herald.model_providers`): `openrouter` (`OpenRouterModel`, the default) and `anthropic` (`AnthropicModel`). Tests use `ScriptedModel` from `tests_support/`. |
 | `MailConnector` | `herald_server.connectors` | `GmailConnector`; `FakeConnector` in tests. The test-email box still posts to the API. |
 | `EventBus` | `herald_server.bus` | `RedisEventBus`, `InMemoryEventBus` |
 | `JobQueue` | `herald_server.queue` | `ArqQueue`, `InlineQueue` |
 | `Tool` / `Toolbox` | `herald_core.tools` (types), `herald_server.tools` (tools that call the internal routes) | `SenderHistoryTool`, `ThreadTool`, `CorrectionsTool` |
 | `ModelTool` | `herald_core.model_tools` | `SenderLookup` (the model's `sender_history`) |
+
+## Model providers
+
+A provider is a `ModelProvider` object: `name`, `default_model`, `api_key_env` and `build(model, api_key, max_retries)`, which returns a `TriageModel`. Herald finds providers by name in the `herald.model_providers` entry-point group, so a plug-in package adds one without a change to Herald. It registers the object in its own `pyproject.toml`:
+
+```toml
+[project.entry-points."herald.model_providers"]
+myprovider = "my_package.provider:provider"
+```
+
+The server, worker, evals and tracing pick a provider with `HERALD_MODEL_PROVIDER`. A provider reads only its own key variable (`api_key_env`), from the process environment first and then the `.env` files, so a key for another provider is never sent to it. Core ships `openrouter` and `anthropic`.
 
 ## Configuration
 
@@ -320,7 +331,8 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 | `HERALD_DATABASE_URL` | Postgres on localhost | SQLite file |
 | `HERALD_BUS` | `redis` | `memory` |
 | `HERALD_QUEUE` | `arq` | `inline` |
-| `HERALD_MODEL_PROVIDER` | `fake` | `fake` |
+| `HERALD_MODEL_PROVIDER` | `openrouter` (`anthropic` for Claude direct). Needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` to match. Startup fails on an unknown name or a missing key. | same |
+| `HERALD_MODEL_NAME` | unset: the provider's default (`openai/gpt-oss-20b`, `claude-haiku-5-5`) | same |
 | `HERALD_LOG_LEVEL` | `INFO` (one line per email arrival and pipeline step, in the API or worker terminal) | same |
 | `HERALD_TOKEN_KEY` | unset (Gmail off: it needs this, the Google client id and secret, and the topic) | unset |
 | `HERALD_PUBLIC_API_URL` | `http://localhost:8000` | same |
@@ -343,7 +355,7 @@ Tracing is for development only. It sends each triage run to a Langfuse that run
 - A live email is one trace named `triage`, with the email id as the session. A Try run (`trial-read`) is a trace of its own. An eval trial is a trace named `eval`, and all trials of one `herald-evals` run share a session, which the run record keeps as `langfuse_session`.
 - Under the trace root, the model-call spans (`model.write_notes`, `model.judge_rules`) sit beside the LangGraph node spans.
 - Each trace gets four outcome scores: `route`, `floor` (a safety-floor word matched), `unsure` and `ai_failed`. An eval trace also gets `passed`, set after the labels are checked. Use them to filter runs.
-- Real generations (prompts and replies, tokens, cost) show up only with `HERALD_MODEL_PROVIDER=anthropic`. The fake model makes no API call, so you see the spans and scores only.
+- Real generations (prompts and replies, tokens, cost) show up with either provider, when its OpenInference instrumentor is installed (both are in the dev group). Runs are tagged `<provider>/<model>`.
 - Setup drafts are not traced as runs. Their Claude calls may show up as stray traces.
 
 ## Database migrations
