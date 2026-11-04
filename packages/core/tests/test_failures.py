@@ -20,6 +20,7 @@ from herald_core.graph import build_graph, triage
 from herald_core.model import (
     REQUEST_RETRIES,
     REQUEST_TIMEOUT,
+    SETUP_TIMEOUT,
     AnthropicModel,
     FakeModel,
     ModelError,
@@ -83,6 +84,22 @@ def test_client_fits_inside_the_job_timeout():
     client = AnthropicModel(api_key="test")._client
     assert client.max_retries == REQUEST_RETRIES
     assert client.timeout.read == REQUEST_TIMEOUT
+
+
+async def test_setup_draft_gets_longer_than_triage():
+    calls = []
+
+    async def parse(**kwargs):
+        calls.append(kwargs)
+        raise status_error(OverloadedError, 529)
+
+    model = AnthropicModel(client=SimpleNamespace(messages=SimpleNamespace(parse=parse)))  # type: ignore[arg-type]
+    with pytest.raises(ModelError):
+        await model.suggest_setup("Tripfold", "Luggage")
+    with pytest.raises(ModelError):
+        await model.write_notes(email(), "Tripfold", CONFIG)
+    assert calls[0]["timeout"] == SETUP_TIMEOUT
+    assert "timeout" not in calls[1]
 
 
 async def test_parse_says_an_overload_is_worth_retrying():

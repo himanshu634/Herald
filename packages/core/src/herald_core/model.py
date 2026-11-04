@@ -59,6 +59,9 @@ REQUEST_RETRIES = 1
 # Seconds for one model node, tool round and retry included. It also cuts short a long
 # retry-after the SDK would otherwise sleep through, and keeps the job well inside 300 s.
 MODEL_DEADLINE = 90.0
+# Seconds per request for the setup draft. It runs in the owner's request, not a worker job,
+# and writes a whole setup, so it gets longer than triage before falling back.
+SETUP_TIMEOUT = 120.0
 
 
 class ModelError(Exception):
@@ -315,7 +318,12 @@ class AnthropicModel:
         self._model = model
 
     async def _parse[T: BaseModel](
-        self, system: str, content: str, output: type[T], tools: Sequence[ModelTool] = ()
+        self,
+        system: str,
+        content: str,
+        output: type[T],
+        tools: Sequence[ModelTool] = (),
+        request_timeout: float | None = None,
     ) -> T:
         by_name = {tool.name: tool for tool in tools}
         # The same tool list for the notes and rules calls, so tools never change a workspace's
@@ -338,6 +346,7 @@ class AnthropicModel:
                     # A copy: the list grows after the call, and a test client keeps the kwargs.
                     messages=list(messages),
                     output_format=output,
+                    **({"timeout": request_timeout} if request_timeout else {}),
                     **offered,
                     **choice,
                 )
@@ -384,4 +393,6 @@ class AnthropicModel:
 
     async def suggest_setup(self, name: str, description: str) -> SetupDraft:
         content = f"<business>\nName: {name}\n\n{description}\n</business>"
-        return await self._parse(_SETUP_INSTRUCTIONS, content, SetupDraft)
+        return await self._parse(
+            _SETUP_INSTRUCTIONS, content, SetupDraft, request_timeout=SETUP_TIMEOUT
+        )
