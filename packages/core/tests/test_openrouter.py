@@ -247,6 +247,54 @@ async def test_two_empty_replies_are_unavailable():
     assert len(calls) == 2
 
 
+NO_ENDPOINTS_BODY = {
+    "error": {
+        "code": 404,
+        "message": "No endpoints found that can handle the requested parameters. To learn more "
+        "about provider routing, visit: https://openrouter.ai/docs/provider-routing",
+    }
+}
+
+
+def stub_responses(*replies: tuple[int, dict]) -> tuple[OpenRouterModel, list[dict]]:
+    """Like stub_model, with a status per reply."""
+    requests: list[dict] = []
+    queue = list(replies)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(json.loads(request.content))
+        status, body = queue.pop(0)
+        return httpx2.Response(status, json=body)
+
+    client = AsyncOpenAI(
+        base_url=BASE_URL,
+        api_key="sk-test",
+        max_retries=0,
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
+    )
+    return OpenRouterModel(client=client), requests
+
+
+async def test_a_model_without_reasoning_is_asked_again_without_it():
+    ok = (200, answer(NOTES))
+    model, calls = stub_responses((404, NO_ENDPOINTS_BODY), ok, ok)
+    assert await model.write_notes(EMAIL, "Tripfold", CONFIG) == NOTES
+    assert calls[0]["reasoning"] == {"effort": "low"}
+    assert "reasoning" not in calls[1]
+    assert calls[1]["provider"] == {"require_parameters": True}
+    # Remembered: the next call does not try reasoning again.
+    await model.write_notes(EMAIL, "Tripfold", CONFIG)
+    assert "reasoning" not in calls[2]
+
+
+async def test_no_endpoints_without_reasoning_raises():
+    model, calls = stub_responses((404, NO_ENDPOINTS_BODY), (404, NO_ENDPOINTS_BODY))
+    with pytest.raises(ModelError) as raised:
+        await model.write_notes(EMAIL, "Tripfold", CONFIG)
+    assert raised.value.kind is FailureKind.SETUP
+    assert len(calls) == 2
+
+
 async def test_http_error_raises_model_error():
     model, _ = stub_model({"error": {"message": "Bad key"}}, status=401)
     with pytest.raises(ModelError):

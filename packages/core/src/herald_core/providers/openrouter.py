@@ -5,7 +5,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI, Timeout
+from openai import (
+    APIConnectionError,
+    APIError,
+    APIStatusError,
+    AsyncOpenAI,
+    NotFoundError,
+    Timeout,
+)
 from openai.lib._pydantic import to_strict_json_schema
 from openai.types.chat.chat_completion import Choice
 from pydantic import BaseModel, ValidationError
@@ -32,12 +39,14 @@ DEFAULT_MODEL = "openai/gpt-oss-20b"
 BASE_URL = "https://openrouter.ai/api/v1"
 
 # require_parameters: route only to endpoints that support the schema and the tools. Without
-# it a request can land on an endpoint that ignores the schema. Models that do not reason
-# ignore the effort setting.
+# it a request can land on an endpoint that ignores the schema.
 EXTRA_BODY: dict[str, Any] = {
     "provider": {"require_parameters": True},
     "reasoning": {"effort": "low"},
 }
+# OpenRouter's 404 when no host supports every parameter sent. With require_parameters on, a
+# model that cannot take `reasoning` (most models that do not reason) gets this for every call.
+NO_ENDPOINTS = "No endpoints found that can handle the requested parameters"
 
 
 def error_kind(exc: APIError) -> FailureKind:
@@ -99,6 +108,8 @@ class OpenRouterModel:
             default_headers={"X-Title": "Herald"},
         )
         self._model = model
+        # Turned off for good the first time the model's hosts reject `reasoning`.
+        self._reasoning = True
 
     async def _parse[T: BaseModel](
         self,
@@ -185,34 +196,44 @@ class OpenRouterModel:
     ) -> tuple[Choice, str | None]:
         """One request: the first choice and the host that served it. Every failure, and a
         reply that stopped early, raises ModelError."""
-        extra_body = EXTRA_BODY
+        provider: dict[str, Any] = dict(EXTRA_BODY["provider"])
         if ignore:
-            extra_body = {**EXTRA_BODY, "provider": {**EXTRA_BODY["provider"], "ignore": ignore}}
-        try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                # A copy: the list grows after the call.
-                messages=list(messages),
-                # `create`, not `parse`: `parse` runs json.loads on tool arguments inside the
-                # SDK, so broken arguments would fail the call instead of reaching `_run`.
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": output.__name__,
-                        "schema": to_strict_json_schema(output),
-                        "strict": True,
+            provider["ignore"] = ignore
+        for _ in range(2):
+            extra_body = {**EXTRA_BODY, "provider": provider}
+            if not self._reasoning:
+                del extra_body["reasoning"]
+            try:
+                response = await self._client.chat.completions.create(
+                    model=self._model,
+                    # A copy: the list grows after the call.
+                    messages=list(messages),
+                    # `create`, not `parse`: `parse` runs json.loads on tool arguments inside the
+                    # SDK, so broken arguments would fail the call instead of reaching `_run`.
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": output.__name__,
+                            "schema": to_strict_json_schema(output),
+                            "strict": True,
+                        },
                     },
-                },
-                extra_body=extra_body,
-                **({"timeout": request_timeout} if request_timeout else {}),
-                **offered,
-                **choice,
-            )
-        except APIError as exc:
-            raise ModelError(str(exc), error_kind(exc)) from exc
-        except Exception as exc:
-            # An error body inside a 200, or a null `choices`, fails in the SDK's parsing.
-            raise ModelError(f"Bad response: {exc}") from exc
+                    extra_body=extra_body,
+                    **({"timeout": request_timeout} if request_timeout else {}),
+                    **offered,
+                    **choice,
+                )
+            except NotFoundError as exc:
+                if self._reasoning and NO_ENDPOINTS in str(exc):
+                    self._reasoning = False
+                    continue
+                raise ModelError(str(exc), error_kind(exc)) from exc
+            except APIError as exc:
+                raise ModelError(str(exc), error_kind(exc)) from exc
+            except Exception as exc:
+                # An error body inside a 200, or a null `choices`, fails in the SDK's parsing.
+                raise ModelError(f"Bad response: {exc}") from exc
+            break
         if not response.choices:
             raise ModelError("No choices in the response")
         picked = response.choices[0]
