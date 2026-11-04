@@ -9,47 +9,60 @@ It is free, MIT-licensed and runs on your own machine or server.
 ## What it does for you
 
 - **Reads every email and writes notes on it.** Topic, urgency, how angry the customer is, risk flags and a one-line summary. Each note quotes the lines from the email that back it up, so you can check the AI's reasoning at a glance.
-- **Alerts you only when it should.** An email is alerted when it is urgent, the customer is furious, or one of your own rules says so. It goes to the top of your inbox with the summary, the quote and the rule that fired, so you can decide at a glance.
-- **Sorts the rest.** Your inbox opens with the most urgent emails first, then by anger, then newest first. One click marks an email "On it", "Not urgent" or "Done".
-- **Says when it isn't sure.** An email the AI can't read, or isn't confident about, goes to "Needs a look". Nothing slips quietly into the normal pile.
-- **Updates live.** New emails and their notes appear in the open inbox without a refresh.
+- **Alerts you only when it should.** An email is alerted when it is urgent, the customer is furious, one of your own rules says so, or it is the third email from the same customer about the same thing in a week. Alerts have their own desk, and the app opens on it: worst first, each with its summary, the quote and the rule that fired.
+- **Sorts the rest.** Your inbox lists the most urgent emails first, then by anger, then newest first. One click marks an email "On it", "Not urgent" or "Done".
+- **Says when it isn't sure.** An email the AI can't read, or isn't confident about, goes to "Needs a look". When it is unsure, it asks you one question. You answer by adding or fixing a fact or a rule, and Herald reads the email again. The answer helps with the next email of that kind too.
+- **Lets you reply where the notes are.** Write a reply in the email's panel and press Send. It goes out from your own Gmail, in the customer's thread.
+- **Updates live.** New emails and their notes appear in the open app without a refresh.
 
 ## Your business, in your words
 
-Herald knows nothing about your business until you tell it. You give it four things, all in plain words:
+Herald knows nothing about your business until you tell it. Describe the business in a few lines and Herald drafts the rest. You check and edit the draft before it goes live. All of it is in plain words:
 
-| You give it | Example: Tripfold, an online luggage brand |
+| Part | Example: Tripfold, an online luggage brand |
 | --- | --- |
-| A few lines about the business | "We sell luggage, backpacks and travel accessories online across India. A bad day is a customer at the airport with a broken bag." |
+| A few lines about the business | "We sell cabin and check-in luggage, backpacks and travel accessories online across India. A bad day is a customer at the airport with a broken bag, or a trip tomorrow and no delivery." |
 | The topics customers write about | Orders and delivery, Returns and exchanges, Damaged or defective, Corporate gifting, and a few more |
-| Contacts who always matter | `corporate-gifts@bigcorp.example` |
+| Facts | "Returns are accepted within 7 days of delivery, unused and with tags." |
+| Guidance on how to judge | None in the demo. A wedding caterer might write "Wedding orders are always urgent." |
+| Contacts who always matter (set through the API for now) | `corporate-gifts@bigcorp.example` |
 | Rules: "when …, then …" | When the customer is travelling in the next 48 hours and the order has not arrived, **alert me** |
 
 A rule can alert you, raise or lower an email's urgency, or close it quietly (courier newsletters, for example). The AI answers each rule's "when" with yes or no and quotes the line that decided it. A bakery, a freelance developer and a small software company each write their own rules. Herald's code stays the same.
 
 ## What it will never do
 
-- **It never replies on its own.** You write and send every reply.
+- **It never replies on its own.** You write and send every reply. No AI step can send mail.
 - **It never makes money decisions.** Refunds, credits and cancellations stay with you.
 - **The AI never decides what happens to an email.** It writes notes. Your rules and your clicks move an email between "needs you now", "in progress" and "done", and you can always see which rule fired.
-- **No rule can silence a real threat.** A safety floor sits under every rule and can't be switched off. It catches threats of violence or self-harm, a hacked account or data leak, and legal threats. A simple word check runs beside the AI, so an email written to trick the AI still alerts you.
+- **No rule can silence a real threat.** A safety floor sits under every rule and can't be switched off. It catches threats of violence or self-harm, a hacked account or data leak, and legal threats. A word check runs beside the AI, so an email written to trick the AI still alerts you.
+- **Alerts stay in the app.** Nothing is pushed to your phone or any outside service.
 
 ## Where it is today
 
-Herald is early. Today it has the inbox, AI notes, rules, the safety floor, in-app alerts and a demo business you can open in one click. Emails come in through the API or the "Send test email" box.
+Herald is early. Today it has:
+
+- Gmail connect, with live push and a 15-minute catch-up. You can choose to have it read your Spam folder too.
+- AI notes, your rules, the safety floor and the alert desk
+- AI-drafted setup with an editor for the profile, topics, facts, guidance and rules
+- The "unsure" question, and a way to rerun Herald on an email after you change a fact or rule
+- Replies written by you and sent from Herald
+- A demo business, Tripfold, that you can open in one click
 
 Coming next:
 
-- Connect a real Gmail or Outlook inbox
-- Write and edit rules in the app, and test a rule on past emails before it goes live
+- Sign-in, and a settings page to change a business after setup
+- Testing a rule on past emails before it goes live
+- Outlook and IMAP
 - Quiet hours, one reminder for an unopened alert, and a morning summary
-- Corrections that teach the AI your business
 
-**About your data:** Herald stores your email on your own server. The text of each email is sent to the AI provider you choose (OpenRouter by default, or Anthropic) to write its notes.
+**About your data:** Herald stores your email on your own server. The text of each email is sent to the AI provider you choose (OpenRouter by default, or Anthropic) to write its notes. The only mail that leaves Herald is a reply you write and send, through your own Gmail.
 
 ## Try it
 
-Needs [uv](https://docs.astral.sh/uv/), [pnpm](https://pnpm.io) and Node 22+.
+Needs [uv](https://docs.astral.sh/uv/), [pnpm](https://pnpm.io) 11 and Node 22+. No Docker.
+
+Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`. To use Claude directly instead, set `HERALD_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`.
 
 ```bash
 make install
@@ -65,76 +78,46 @@ In a second terminal:
 make web
 ```
 
-Open http://localhost:5173 and click **New demo workspace**. This runs with no Docker. The AI model is OpenRouter by default, so copy `.env.example` to `.env` and set `OPENROUTER_API_KEY` first.
+Open http://localhost:5173 and click **Open the Tripfold demo**.
 
-To use Claude directly, set `HERALD_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`.
+To connect a real Gmail inbox, you need a Google Cloud project first. See [Gmail on your machine](docs/development.md#gmail-on-your-machine).
 
-## For developers
+## Run it on your server
 
-Herald is multi-tenant: each business is a workspace, and its profile, topics, contacts and rules are data. A LangGraph pipeline writes the notes; a plain Python step applies the safety floor and the rules.
+Production runs nginx (serving the web app and proxying `/api`), the API, the worker, Postgres and Redis, all in Docker. Copy `.env.example` to `.env` and set:
 
-**Stack:** SvelteKit (Svelte 5) · FastAPI with SSE · LangGraph · Postgres · Redis (arq + pub/sub). See [docs/](docs/README.md) for the scope, decisions and architecture.
+- `POSTGRES_PASSWORD`
+- `ANTHROPIC_API_KEY`. Production uses Claude unless `HERALD_MODEL_PROVIDER` says otherwise.
+- `HERALD_WEB_URL`, the public URL of the web app, and `HERALD_PUBLIC_API_URL`, the public URL of its API. Gmail sign-in and push are built from it.
+- `HERALD_INTERNAL_TOKEN`, the secret the worker sends to the API. Make one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+- The Gmail settings, if you connect Gmail (see [Gmail on your machine](docs/development.md#gmail-on-your-machine))
 
-```
-apps/web        SvelteKit single-page app
-apps/server     FastAPI API + arq pipeline worker (herald_server)
-packages/core   LangGraph pipeline, decide step, safety floor (herald_core)
-docs            scope, decisions, architecture
-```
-
-Full stack, with Postgres and Redis in Docker and the API, worker and web app on your machine, in one terminal (Ctrl-C stops them; `make infra-down` stops the containers):
-
-```bash
-make dev
-```
-
-Or run each piece in its own terminal:
-
-```bash
-make infra
-```
-
-```bash
-make api
-```
-
-```bash
-make worker
-```
-
-```bash
-make web
-```
-
-After pulling changes, `make migrate` brings your database to the latest schema (`make api`, `make lite` and `make dev` run it for you). The API and worker refuse to start until it has run. See "Database migrations" in `docs/architecture.md`.
-
-Or run the whole stack in Docker, with hot reload for the API, worker and web app (web on :5173, API on :8000):
-
-```bash
-make docker-dev
-```
-
-Production runs nginx (serving the web app and proxying `/api`), the API, the worker, Postgres and Redis. Copy `.env.example` to `.env`, set `POSTGRES_PASSWORD`, `ANTHROPIC_API_KEY` (production uses Claude unless `HERALD_MODEL_PROVIDER` says otherwise), `HERALD_WEB_URL` and `HERALD_INTERNAL_TOKEN` (the secret the worker sends to the API; `python -c "import secrets; print(secrets.token_urlsafe(32))"`), then:
+Then:
 
 ```bash
 make docker-prod
 ```
 
-It listens on `HERALD_PORT` (default 8080); put TLS in front of it. Stop it with `make docker-prod-down`.
+It listens on `HERALD_PORT` (default 8080). Put TLS in front of it. Stop it with `make docker-prod-down`. There is no sign-in yet: anyone who can reach it can read your mail. Keep it behind a VPN or a sign-in proxy. Google's push must still reach `/api/webhooks/gmail`; without it, new mail arrives only on the 15-minute catch-up.
 
-Checks:
+## Contributing
 
-```bash
-make test
+Herald is multi-tenant: each business is a workspace, and its setup is data. A LangGraph pipeline writes the notes. A plain Python step applies the safety floor and the rules.
+
+**Stack:** SvelteKit (Svelte 5) · FastAPI with SSE · LangGraph · Postgres · Redis (arq + pub/sub).
+
+```
+apps/web         SvelteKit single-page app
+apps/server      FastAPI API + arq pipeline worker (herald_server)
+packages/core    LangGraph pipeline, decide step, safety floor, model providers (herald_core)
+packages/evals   labelled test emails and the score report (herald_evals)
+tests_support    the scripted model the tests use
+docs             scope, decisions, architecture, design system, evals
 ```
 
-```bash
-make lint
-```
-
-To see what the model was asked and what it said, run `make langfuse` (Langfuse on :3000, dev only), and restart the API and worker (`.env.example` already has the dev keys). `make langfuse-down` stops it. See "Tracing (dev)" in `docs/architecture.md`.
-
-Run `make gen-api` after changing API schemas to regenerate the web app's types.
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to propose a change
+- [docs/development.md](docs/development.md): set up, run, test and debug Herald
+- [docs/](docs/README.md): scope, decisions, architecture, design system and evals
 
 ## License
 

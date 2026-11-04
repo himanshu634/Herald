@@ -6,3 +6,7 @@
 | [decisions.md](decisions.md) | What was decided or cut since the scope, and the open questions |
 | [architecture.md](architecture.md) | Repo layout, how an email flows, the pipeline, status, SSE, multi-tenancy and plug-in points |
 | [design-system.md](design-system.md) | The web app's look: tokens, components, patterns, copy and accessibility rules |
+| [evals.md](evals.md) | The labelled test emails, how to run them and how to read the score report |
+| [development.md](development.md) | Set up, run, test and debug Herald on your machine, including Gmail |
+
+How to propose a change is in [CONTRIBUTING.md](../CONTRIBUTING.md).
