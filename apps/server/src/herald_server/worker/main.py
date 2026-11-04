@@ -4,6 +4,7 @@ Run: uv run arq herald_server.worker.main.WorkerSettings
 """
 
 import contextlib
+import random
 from time import monotonic
 from typing import Any
 
@@ -14,6 +15,7 @@ from arq.worker import func
 from asyncer import asyncify
 from redis.exceptions import LockNotOwnedError
 
+from herald_core.model import ModelUnavailable
 from herald_server.connectors.base import RateLimited
 from herald_server.internal.client import AgentApi, ApiUnavailable
 from herald_server.internal.token import internal_token
@@ -37,9 +39,14 @@ SYNC_LOOP_BUDGET = 120
 # Seconds. A pending flag nobody consumed (e.g. the job failed) expires; the catch-up sync
 # covers that mailbox meanwhile.
 SYNC_PENDING_TTL = 3600
-# Tries and seconds per try for a triage job whose API call failed safely (see ApiUnavailable).
-PROCESS_EMAIL_TRIES = 5
+# Tries for a triage job, shared by both retry reasons below. The last try always saves.
+PROCESS_EMAIL_TRIES = 6
+# Seconds per try for a triage job whose API call failed safely (see ApiUnavailable).
 API_RETRY_DEFER = 5
+# Seconds before the next try when the AI was down or busy: 30 s, doubling to 8 min. With 6
+# tries an email waits at most about 15 minutes before it lands in "Needs a look".
+MODEL_RETRY_BASE = 30
+MODEL_RETRY_CAP = 480
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -63,16 +70,37 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     services.tracing.shutdown()
 
 
+def model_retry_defer(job_try: int, retry_after: float | None) -> float:
+    """Seconds to wait after try `job_try` failed because the AI was down or busy.
+
+    Doubles each try and honours the API's retry-after, both capped. The jitter spreads the
+    retries of one outage: up to 20 jobs fail together, and without it they would all call the
+    API again in the same second and be refused again.
+    """
+    backoff = min(MODEL_RETRY_BASE * 2 ** (job_try - 1), MODEL_RETRY_CAP)
+    wait = max(backoff, min(retry_after or 0, MODEL_RETRY_CAP))
+    return wait * random.uniform(0.8, 1.2)
+
+
 async def process_email_job(ctx: dict[str, Any], email_id: str) -> str:
+    # arq refuses to start a try past max_tries, so the last one must save whatever it has.
+    final = ctx["job_try"] >= PROCESS_EMAIL_TRIES
     try:
         decision = await process_email(
-            ctx["agent_api"], ctx["services"].graph, email_id, ctx["services"].tracing
+            ctx["agent_api"],
+            ctx["services"].graph,
+            email_id,
+            ctx["services"].tracing,
+            final=final,
         )
     except ApiUnavailable as exc:
         # The API is down or still starting (make dev starts it beside the worker), and
         # nothing was saved. arq does not retry a plain error, so without this the email
         # would stay "new" for good. Each try waits longer.
         raise Retry(defer=API_RETRY_DEFER * ctx["job_try"]) from exc
+    except ModelUnavailable as exc:
+        # Raised before the save, so nothing was published and the next try starts clean.
+        raise Retry(defer=model_retry_defer(ctx["job_try"], exc.failure.retry_after)) from exc
     return decision.route
 
 
