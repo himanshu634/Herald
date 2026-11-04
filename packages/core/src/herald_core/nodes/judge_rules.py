@@ -4,12 +4,14 @@ It runs beside write_notes, so it cannot see the notes. Mail that turns out not 
 business is still judged; decide closes it before reading the verdicts.
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
 
-from herald_core.model import TriageModel
+from herald_core.model import MODEL_DEADLINE, TriageModel
 from herald_core.model_tools import SenderLookup, asked
+from herald_core.nodes.failures import record_failure
 from herald_core.nodes.log_names import names
 from herald_core.state import TriageState
 
@@ -26,12 +28,18 @@ def make_judge_rules(model: TriageModel) -> Callable[[TriageState], Awaitable[Tr
         history = state.get("history")
         lookup = SenderLookup(history.sender if history else None)
         try:
-            verdicts = await model.judge_rules(
-                state["email"], state["business_name"], config, history=history, tools=[lookup]
-            )
-        except Exception:
-            log.exception("judge_rules failed for email %s", email_id)
-            return {"verdicts": [], "asked": asked("judge_rules", lookup)}
+            async with asyncio.timeout(MODEL_DEADLINE):
+                verdicts = await model.judge_rules(
+                    state["email"], state["business_name"], config, history=history, tools=[lookup]
+                )
+        except Exception as exc:
+            # None, not []: an empty list means "no rule matched", and decide would route the
+            # email as if the owner's rules had been read.
+            return {
+                "verdicts": None,
+                "asked": asked("judge_rules", lookup),
+                "ai_failures": [record_failure(log, "judge_rules", email_id, exc)],
+            }
         log.info(
             "email %s judge_rules: %d rules, matched=%s asked=%s in %d ms",
             email_id,

@@ -6,6 +6,7 @@ from herald_core.decide import decide, not_for_business
 from herald_core.history import History, PastEmail, SenderHistory
 from herald_core.schema import (
     SPAM_TOPIC,
+    FailureKind,
     Notes,
     RiskFlag,
     Route,
@@ -307,3 +308,43 @@ def test_without_notes_rule_verdicts_are_not_used():
 
 def test_without_notes_the_safety_floor_still_alerts():
     assert run(None, word_flags={RiskFlag.LEGAL_THREAT}, matched=["r-close"]).route is Route.ALERT
+
+
+def unread_rules(n, **kwargs):
+    """The rules call failed: verdicts are None, not an empty list."""
+    return decide(
+        notes=n, word_flags=set(), verdicts=None, config=CONFIG, sender="a@customer.in", **kwargs
+    )
+
+
+def test_unread_rules_never_send_a_routine_email_to_the_inbox():
+    decision = unread_rules(notes())
+    assert decision.route is Route.NEEDS_A_LOOK
+    assert decision.reason == "Your rules could not be checked"
+
+
+def test_unread_rules_never_close_spam_the_ai_is_unsure_about():
+    assert unread_rules(notes(topic=SPAM_TOPIC, sure=False)).route is Route.NEEDS_A_LOOK
+
+
+def test_unread_rules_still_alert_on_urgent_mail():
+    # An alert rule can only add alerts, and a close rule never quiets an urgent email.
+    assert unread_rules(notes(urgency=Urgency.URGENT)).route is Route.ALERT
+
+
+def test_no_rules_means_nothing_was_left_unread():
+    decision = decide(
+        notes=notes(),
+        word_flags=set(),
+        verdicts=None,
+        config=CONFIG.model_copy(update={"rules": []}),
+        sender="a@customer.in",
+    )
+    assert decision.route is Route.INBOX
+
+
+def test_missing_notes_say_whether_the_ai_was_down():
+    down = unread_rules(None, notes_failure=FailureKind.UNAVAILABLE)
+    unreadable = unread_rules(None, notes_failure=FailureKind.UNREADABLE)
+    assert down.reason == "The AI was unavailable"
+    assert unreadable.reason == "The AI could not read this email"

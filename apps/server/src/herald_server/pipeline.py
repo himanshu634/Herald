@@ -11,7 +11,16 @@ from langgraph.graph.state import CompiledStateGraph
 
 from herald_core.graph import triage
 from herald_core.history import EmailContext, History
-from herald_core.schema import Decision, Email, Notes, WorkspaceConfig
+from herald_core.model import ModelUnavailable
+from herald_core.schema import (
+    AiFailure,
+    Decision,
+    Email,
+    FailureKind,
+    Notes,
+    Route,
+    WorkspaceConfig,
+)
 from herald_server.internal.client import AgentApi
 from herald_server.internal.schemas import TriageResult
 from herald_server.tools import build_toolbox
@@ -51,8 +60,14 @@ async def _run(
         list(tools.failed),
         dict(tools.ms) | {"triage": total_ms},
         state.get("asked", []),
+        list(state.get("ai_failures", [])),
     )
     return state.get("notes"), state["decision"], context, total_ms
+
+
+def _unavailable(context: EmailContext) -> AiFailure | None:
+    """The first model call that failed for a reason a later try may fix."""
+    return next((f for f in context.ai_failures if f.kind is FailureKind.UNAVAILABLE), None)
 
 
 async def trial_read(
@@ -70,9 +85,12 @@ async def trial_read(
     """
     loaded = await api.triage_input(email_id)
     email = loaded.email
-    notes, decision, _context, total_ms = await _run(
+    notes, decision, context, total_ms = await _run(
         api, graph, email, loaded.business_name, config, tracing, "trial-read", "try"
     )
+    # The owner is waiting in the dialog: "try again" beats a result that blames their change.
+    if (failure := _unavailable(context)) is not None:
+        raise ModelUnavailable(failure)
     log.info(
         "email %s trial read in %d ms: route=%s rules=%s",
         email.id,
@@ -84,8 +102,21 @@ async def trial_read(
 
 
 async def process_email(
-    api: AgentApi, graph: CompiledStateGraph, email_id: str, tracing: Tracing = NO_TRACING
+    api: AgentApi,
+    graph: CompiledStateGraph,
+    email_id: str,
+    tracing: Tracing = NO_TRACING,
+    *,
+    final: bool = True,
 ) -> Decision:
+    """Triage one email and save the result.
+
+    `final` is False while the worker has tries left. Then an AI that was down or busy raises
+    `ModelUnavailable` before anything is saved, and the worker runs the job again later. The
+    save publishes events, so raising after it would announce the email twice. An alert is
+    saved at once whatever failed: the safety floor must never wait on the AI. The inline queue
+    has no retries, so its one try is final.
+    """
     loaded = await api.triage_input(email_id)
     email = loaded.email
     log.info("email %s triage started in workspace %s", email.id, email.workspace_id)
@@ -103,6 +134,10 @@ async def process_email(
         "yes" if notes else "no",
         ",".join(context.failed) or "none",
     )
+    failure = _unavailable(context)
+    if failure is not None and not final and decision.route is not Route.ALERT:
+        log.info("email %s: AI unavailable (%s), trying again later", email.id, failure.error)
+        raise ModelUnavailable(failure)
     await api.save_triage_result(
         email.id, TriageResult(notes=notes, decision=decision, context=context)
     )

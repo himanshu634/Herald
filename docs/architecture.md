@@ -56,7 +56,7 @@ The worker's pipeline never opens the database. It loads the email, runs the age
 - Every call needs the header `X-Herald-Internal-Token` with `HERALD_INTERNAL_TOKEN`, compared in constant time. With the arq queue the API and the worker refuse to start without it. The inline queue makes a random token per process, because its only caller is its own in-memory client.
 - The routes sit outside `/api`, so nginx and the Vite proxy never forward them, and they are left out of the OpenAPI schema (`schema.d.ts` does not change).
 - In lite mode and in tests the same routes are called in memory (`httpx.ASGITransport`), so every path runs the same code as the worker. The owner's trial read (`POST /api/workspaces/{id}/emails/{email_id}/try`) runs in the API process and uses that in-memory client too. It loads and runs the tools but never calls the save route.
-- Failures: a read that fails on the network or gets a 5xx raises `ApiUnavailable`. So does a save whose request never reached the API (connect error or connect timeout). The worker retries those (`Retry`, 5 tries, 5 s more each time), so an API that is still starting does not leave mail `new`. A save that may have reached the API is not retried, because a retry could publish its events twice. A tool's failure still only costs that tool's context (see History).
+- Failures: a read that fails on the network or gets a 5xx raises `ApiUnavailable`. So does a save whose request never reached the API (connect error or connect timeout). The worker retries those (`Retry`, 5 s more each try, sharing the job's 6 tries with AI retries), so an API that is still starting does not leave mail `new`. A save that may have reached the API is not retried, because a retry could publish its events twice. A tool's failure still only costs that tool's context (see History).
 - The model's tools are read-only. Saving the result is the pipeline's call, not a tool, so the AI still never sets status.
 
 ## The pipeline
@@ -75,11 +75,27 @@ flowchart LR
 
 - Each node is one file in `herald_core/nodes/`. `graph.py` only wires them, and `state.py` holds the state they share.
 - The graph is compiled once and shared by all tenants. Each run carries its workspace's config in the state.
-- `word_check`, `write_notes` and `judge_rules` run in parallel. They write different state keys, except `asked`, which both model nodes write and a reducer joins.
+- `word_check`, `write_notes` and `judge_rules` run in parallel. They write different state keys, except `asked` and `ai_failures`, which both model nodes write and a reducer joins.
 - `write_notes` and `judge_rules` wait on `gather_context`. `word_check` does not.
 - The two model calls run side by side because the rules prompt never reads the notes. Run one after the other, they took about 9 s; side by side, the slower one sets the time. `judge_rules` lists only the rules the email meets, with the line that decided each. A missing rule is a "no". Writing a "no" for every rule was most of that call's output, and so most of its time.
 - If the AI fails (outage, refusal, bad output), the notes are empty and the email goes to "Needs a look". A safety-floor match from the word check still alerts. Rule verdicts that arrive without notes are not used, so a matched close rule cannot hide an email the AI could not read.
-- `decide` order, first match wins: safety floor (one exception, below) → not for the business → owner rules (alert beats close; a set-urgency rule never lowers an urgent email) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
+- If the rules call fails, `verdicts` is `None`, not `[]`, so a failure never reads as "no rule matched". The alerts still apply; anything that would go to the inbox or close goes to "Needs a look" ("Your rules could not be checked").
+
+### When the AI fails
+
+A model node never raises: a raise inside the parallel step would also stop `word_check` and `decide`, and the safety floor with them. It records an `AiFailure` in state (`ai_failures`, joined by a reducer) and `decide` runs as usual. The failure is saved in the email's context, and decide's reason says "The AI was unavailable" apart from "The AI could not read this email".
+
+| Kind | Errors | What happens |
+| --- | --- | --- |
+| `unavailable` | 429, 529, other 5xx, 409, network, request timeout, the node deadline | The worker tries the email again later |
+| `setup` | 401, 403, 404 (model name), 402 (billing) | No retry. "Needs a look", logged at ERROR: every email fails this way until fixed |
+| `unreadable` | 400, 413, 422, refusal, invalid output, anything unknown | No retry. "Needs a look" |
+
+- In the call: the client times out a request after 30 s and retries it once (`REQUEST_TIMEOUT`, `REQUEST_RETRIES` in `model.py`). Each model node has a 90 s deadline (`MODEL_DEADLINE`) that covers its tool round and that retry, and cuts short a long `retry-after` the SDK would sleep through. The SDK's defaults (600 s, 2 retries) could run past arq's 300 s job timeout, and arq never retries a job it timed out, so the email stayed `new` for good.
+- Across jobs: when a call was `unavailable` and the job has tries left, `process_email` raises `ModelUnavailable` before it saves. The worker maps it to `Retry`, waiting 30 s and doubling to 8 min with ±20% jitter, and at least the API's `retry-after` (also capped at 8 min). With 6 tries an email waits at most about 15 minutes before it is saved.
+- Never deferred: an alert, including a safety-floor match, is saved on the try that found it. The last try (`job_try >= PROCESS_EMAIL_TRIES`) always saves, so the email lands in "Needs a look" with its reason. The inline queue has no retries, so its one try is final.
+- The owner's trial read returns 503 `ai_unavailable` instead of a result, and the dialog asks them to try again. The setup draft keeps its fixed fallback, and gets 120 s per request (`SETUP_TIMEOUT`): it runs in the owner's request, not a job, and writes a whole setup.
+- `decide` order, first match wins: safety floor (one exception, below) → not for the business → owner rules (alert beats close; a set-urgency rule never lowers an urgent email) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → rules not checked → unsure → spam → inbox.
 - "Not for the business" means the AI filed the email under "Spam or not for me", is sure, and the sender is not an important contact. That mail closes before the rules and defaults, so a promotion that reads as urgent or names a rule's words stays quiet. `judge_rules` still runs on it, because it cannot see the notes; `decide` closes the email before it reads the verdicts. Unsure spam and spam from an important contact take the normal path. The safety floor still comes first.
 - The one exception to the floor: mail read from the provider's Spam folder (`in_spam`) that the AI also files as not for the business goes to "Needs a look" with its floor flags, instead of alerting. Phishing is full of floor words. A Spam email the AI reads as real mail, or is unsure about, still alerts.
 
@@ -386,3 +402,4 @@ Production rolls forward only. Write `downgrade()` where it is cheap; it is for 
 - Binding the OAuth `state` to the browser that started the connect. It needs auth or a state cookie.
 - A sweeper for emails left `new` when a sync fails after its commit
 - Refusal fallbacks for the Claude model (a refusal currently routes the email to "Needs a look")
+- A re-read sweep for emails saved with an `unavailable` or `setup` AI failure, a shared cooldown when the API is overloaded, and a fallback model on overload

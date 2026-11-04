@@ -8,7 +8,18 @@ import re
 from collections.abc import Sequence
 from typing import Any, Protocol
 
-from anthropic import APIError, AsyncAnthropic
+from anthropic import (
+    APIConnectionError,
+    APIError,
+    APIStatusError,
+    AsyncAnthropic,
+    AuthenticationError,
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    Timeout,
+)
 from anthropic.types import ToolResultBlockParam, ToolUseBlock
 from pydantic import BaseModel, Field, ValidationError
 
@@ -18,7 +29,9 @@ from herald_core.prompt import system_prompt, user_message
 from herald_core.safety import word_check
 from herald_core.schema import (
     SPAM_TOPIC,
+    AiFailure,
     Email,
+    FailureKind,
     Notes,
     RiskFlag,
     RuleAction,
@@ -37,9 +50,80 @@ DEFAULT_MODEL = "claude-haiku-5-5"
 # round could only repeat the first. Each round is a full model call before decide runs.
 MAX_TOOL_ROUNDS = 1
 
+# Seconds per request, and quick retries inside one call. The worker's job timeout is 300 s and
+# arq never retries a job it timed out, so the SDK defaults (600 s, 2 retries) could strand an
+# email as "new". Triage takes under 10 s in the evals. One retry absorbs a dropped connection;
+# a longer outage is retried by the worker minutes later instead of held open here.
+REQUEST_TIMEOUT = 30.0
+REQUEST_RETRIES = 1
+# Seconds for one model node, tool round and retry included. It also cuts short a long
+# retry-after the SDK would otherwise sleep through, and keeps the job well inside 300 s.
+MODEL_DEADLINE = 90.0
+# Seconds per request for the setup draft. It runs in the owner's request, not a worker job,
+# and writes a whole setup, so it gets longer than triage before falling back.
+SETUP_TIMEOUT = 120.0
+
 
 class ModelError(Exception):
     """The model could not produce notes; the email goes to "Needs a look"."""
+
+    def __init__(self, message: str, kind: FailureKind = FailureKind.UNREADABLE) -> None:
+        super().__init__(message)
+        self.kind = kind
+
+
+class ModelUnavailable(ModelError):
+    """The AI was down or busy, and a later try may work. The worker queues the email again."""
+
+    def __init__(self, failure: AiFailure) -> None:
+        super().__init__(f"{failure.call}: {failure.error}", FailureKind.UNAVAILABLE)
+        self.failure = failure
+
+
+# Status classes a later try can fix. OverloadedError (529) and the 5xx classes are caught by
+# their status code below, so a new 5xx class in the SDK is covered too.
+_UNAVAILABLE = (RateLimitError, ConflictError, APIConnectionError, TimeoutError)
+_SETUP = (AuthenticationError, PermissionDeniedError, NotFoundError)
+
+
+def failure_kind(exc: BaseException) -> FailureKind:
+    """Sorts an error by what trying again can fix. Anything unknown is not retried: a bug
+    in Herald fails the same way every time, and retrying it would only delay the email."""
+    if isinstance(exc, ModelError):
+        return exc.kind
+    if isinstance(exc, _UNAVAILABLE):
+        return FailureKind.UNAVAILABLE
+    if isinstance(exc, _SETUP):
+        return FailureKind.SETUP
+    if isinstance(exc, APIStatusError):
+        if exc.status_code >= 500:
+            return FailureKind.UNAVAILABLE
+        if exc.status_code == 402:  # billing
+            return FailureKind.SETUP
+    return FailureKind.UNREADABLE
+
+
+def _retry_after(exc: BaseException) -> float | None:
+    if not isinstance(exc, APIStatusError):
+        return None
+    # Seconds only; the HTTP-date form is rare here and the worker's backoff covers it.
+    try:
+        seconds = float(exc.response.headers.get("retry-after", ""))
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
+
+
+def failure_of(call: str, exc: BaseException) -> AiFailure:
+    # A ModelError wraps the SDK error, so look through it for the retry-after and request id.
+    cause = exc.__cause__ if isinstance(exc, ModelError) and exc.__cause__ else exc
+    return AiFailure(
+        call=call,
+        kind=failure_kind(exc),
+        error=type(cause).__name__,
+        retry_after=_retry_after(cause),
+        request_id=getattr(cause, "request_id", None),
+    )
 
 
 class TriageModel(Protocol):
@@ -226,11 +310,20 @@ class AnthropicModel:
         model: str = DEFAULT_MODEL,
         api_key: str | None = None,
     ) -> None:
-        self._client = client or AsyncAnthropic(api_key=api_key)
+        self._client = client or AsyncAnthropic(
+            api_key=api_key,
+            timeout=Timeout(REQUEST_TIMEOUT, connect=5.0),
+            max_retries=REQUEST_RETRIES,
+        )
         self._model = model
 
     async def _parse[T: BaseModel](
-        self, system: str, content: str, output: type[T], tools: Sequence[ModelTool] = ()
+        self,
+        system: str,
+        content: str,
+        output: type[T],
+        tools: Sequence[ModelTool] = (),
+        request_timeout: float | None = None,
     ) -> T:
         by_name = {tool.name: tool for tool in tools}
         # The same tool list for the notes and rules calls, so tools never change a workspace's
@@ -253,10 +346,13 @@ class AnthropicModel:
                     # A copy: the list grows after the call, and a test client keeps the kwargs.
                     messages=list(messages),
                     output_format=output,
+                    **({"timeout": request_timeout} if request_timeout else {}),
                     **offered,
                     **choice,
                 )
-            except (APIError, ValidationError) as exc:
+            except APIError as exc:
+                raise ModelError(str(exc), failure_kind(exc)) from exc
+            except ValidationError as exc:
                 raise ModelError(str(exc)) from exc
             if response.stop_reason != "tool_use":
                 break
@@ -297,4 +393,6 @@ class AnthropicModel:
 
     async def suggest_setup(self, name: str, description: str) -> SetupDraft:
         content = f"<business>\nName: {name}\n\n{description}\n</business>"
-        return await self._parse(_SETUP_INSTRUCTIONS, content, SetupDraft)
+        return await self._parse(
+            _SETUP_INSTRUCTIONS, content, SetupDraft, request_timeout=SETUP_TIMEOUT
+        )

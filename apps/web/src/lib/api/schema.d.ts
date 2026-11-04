@@ -476,6 +476,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AiFailure
+         * @description One model call that gave no answer. Saved with the email, so "the AI was down" and
+         *     "the AI could not read it" stay apart in the app, the logs and the evals.
+         */
+        AiFailure: {
+            /** Call */
+            call: string;
+            kind: components["schemas"]["FailureKind"];
+            /** Error */
+            error: string;
+            /** Retry After */
+            retry_after?: number | null;
+            /** Request Id */
+            request_id?: string | null;
+        };
         /** ConnectIn */
         ConnectIn: {
             /**
@@ -511,7 +527,9 @@ export interface components {
         };
         /**
          * EmailContext
-         * @description What the agent looked up for one email: counts, the ids it saw, failures and timings.
+         * @description What triage looked up for one email: counts, the ids it fetched, the tools the model
+         *     chose to call, failures and timings. The sender's ids reached the model only when `asked`
+         *     holds a sender_history call.
          */
         EmailContext: {
             /**
@@ -536,6 +554,10 @@ export interface components {
             ms?: {
                 [key: string]: number;
             };
+            /** Asked */
+            asked?: string[];
+            /** Ai Failures */
+            ai_failures?: components["schemas"]["AiFailure"][];
         };
         /** EmailIn */
         EmailIn: {
@@ -592,6 +614,12 @@ export interface components {
          * @enum {string}
          */
         EmailStatus: "new" | "alerted" | "needs_a_look" | "inbox" | "in_progress" | "done" | "closed";
+        /**
+         * FailureKind
+         * @description Why a model call gave no answer, sorted by what trying again can fix.
+         * @enum {string}
+         */
+        FailureKind: "unavailable" | "setup" | "unreadable";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
