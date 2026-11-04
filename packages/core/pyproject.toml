@@ -9,6 +9,9 @@ dependencies = [
     "pydantic>=2.11",
 ]
 
+[project.entry-points."herald.model_providers"]
+anthropic = "herald_core.providers.anthropic:provider"
+
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]
 build-backend = "uv_build"

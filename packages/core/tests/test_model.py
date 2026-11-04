@@ -10,9 +10,10 @@ from herald_core.history import (
     History,
     SenderHistory,
 )
-from herald_core.model import AnthropicModel, ModelError, _Verdicts
+from herald_core.model import ModelError, _Verdicts
 from herald_core.model_tools import SENDER_HISTORY_TOOL, SenderLookup
 from herald_core.prompt import email_block, history_block, system_prompt
+from herald_core.providers.anthropic import AnthropicModel
 from herald_core.schema import Email, Notes, Rule, RuleAction, Urgency, WorkspaceConfig
 from herald_core.tools import ToolError
 

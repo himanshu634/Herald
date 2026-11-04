@@ -8,7 +8,8 @@ from sqlalchemy import Engine
 from sqlmodel import Session, col, create_engine, select
 
 from herald_core.graph import build_graph
-from herald_core.model import AnthropicModel, FakeModel, TriageModel
+from herald_core.model import FakeModel, TriageModel
+from herald_core.providers.anthropic import AnthropicModel
 from herald_server.bus import EventBus, InMemoryEventBus, RedisEventBus
 from herald_server.connectors import build_connectors
 from herald_server.connectors.base import MailConnector

@@ -19,8 +19,9 @@ from pathlib import Path
 
 from anthropic import AsyncAnthropic
 
-from herald_core.model import DEFAULT_MODEL, AnthropicModel, FakeModel, TriageModel
+from herald_core.model import FakeModel, TriageModel
 from herald_core.prompt import TRIAGE_INSTRUCTIONS
+from herald_core.providers.anthropic import DEFAULT_MODEL, AnthropicModel
 from herald_evals import dataset as ds
 from herald_evals.report import markdown, run_record, write
 from herald_evals.runner import Trial, run_all, stderr

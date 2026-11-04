@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from herald_core.model import DEFAULT_MODEL
+from herald_core.providers.anthropic import DEFAULT_MODEL
 
 
 class Settings(BaseSettings):
