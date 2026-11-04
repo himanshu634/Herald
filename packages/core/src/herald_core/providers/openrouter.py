@@ -9,23 +9,17 @@ from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI, Ti
 from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel, ValidationError
 
-from herald_core.history import History
 from herald_core.model import (
-    _SETUP_INSTRUCTIONS,
     MAX_TOOL_ROUNDS,
     REQUEST_RETRIES,
     REQUEST_TIMEOUT,
-    RULES_ASK,
-    SETUP_TIMEOUT,
     ModelError,
+    ProviderModel,
     TriageModel,
-    _Verdicts,
     status_kind,
 )
-from herald_core.model_tools import ModelTool
-from herald_core.prompt import system_prompt, user_message
-from herald_core.schema import Email, FailureKind, Notes, RuleVerdict, SetupDraft, WorkspaceConfig
-from herald_core.tools import ToolError
+from herald_core.schema import FailureKind
+from herald_core.tools import ModelTool, ToolError
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 BASE_URL = "https://openrouter.ai/api/v1"
@@ -82,7 +76,7 @@ async def _run(by_name: dict[str, ModelTool], name: str, arguments: str) -> str:
         return f"Error: {exc}"
 
 
-class OpenRouterModel:
+class OpenRouterModel(ProviderModel):
     def __init__(
         self,
         client: AsyncOpenAI | None = None,
@@ -184,38 +178,6 @@ class OpenRouterModel:
             return output.model_validate_json(message.content)
         except ValidationError as exc:
             raise ModelError(str(exc)) from exc
-
-    async def write_notes(
-        self,
-        email: Email,
-        business_name: str,
-        config: WorkspaceConfig,
-        history: History | None = None,
-        tools: Sequence[ModelTool] = (),
-    ) -> Notes:
-        content = user_message(email, config.is_important(email.sender), history or History())
-        return await self._parse(system_prompt(business_name, config), content, Notes, tools)
-
-    async def judge_rules(
-        self,
-        email: Email,
-        business_name: str,
-        config: WorkspaceConfig,
-        history: History | None = None,
-        tools: Sequence[ModelTool] = (),
-    ) -> list[RuleVerdict]:
-        if not config.rules:
-            return []
-        block = user_message(email, config.is_important(email.sender), history or History())
-        content = f"{block}\n\n{RULES_ASK}"
-        system = system_prompt(business_name, config)
-        return (await self._parse(system, content, _Verdicts, tools)).verdicts
-
-    async def suggest_setup(self, name: str, description: str) -> SetupDraft:
-        content = f"<business>\nName: {name}\n\n{description}\n</business>"
-        return await self._parse(
-            _SETUP_INSTRUCTIONS, content, SetupDraft, request_timeout=SETUP_TIMEOUT
-        )
 
 
 @dataclass(frozen=True)

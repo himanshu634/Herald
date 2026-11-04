@@ -7,9 +7,9 @@ from datetime import datetime
 import pytest
 
 from herald_core.history import SenderHistory
-from herald_core.model_tools import SenderLookup
 from herald_core.providers import load_provider
 from herald_core.schema import Email, Rule, RuleAction, WorkspaceConfig
+from herald_core.tools import SenderLookup
 
 pytestmark = [
     pytest.mark.live,

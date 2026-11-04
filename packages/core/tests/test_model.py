@@ -10,12 +10,11 @@ from herald_core.history import (
     History,
     SenderHistory,
 )
-from herald_core.model import ModelError, _Verdicts
-from herald_core.model_tools import SENDER_HISTORY_TOOL, SenderLookup
+from herald_core.model import ModelError, Verdicts
 from herald_core.prompt import email_block, history_block, system_prompt
 from herald_core.providers.anthropic import AnthropicModel
 from herald_core.schema import Email, Notes, Rule, RuleAction, Urgency, WorkspaceConfig
-from herald_core.tools import ToolError
+from herald_core.tools import SENDER_HISTORY_TOOL, SenderLookup, ToolError
 
 CONFIG = WorkspaceConfig(
     business_profile="Online luggage brand.",
@@ -93,7 +92,7 @@ async def test_notes_call_sends_the_cached_brand_prompt():
 async def test_rules_call_shares_the_notes_system_prompt():
     notes_model, notes_calls = stub_model(NOTES)
     await notes_model.write_notes(email(), "Tripfold", CONFIG)
-    rules_model, rules_calls = stub_model(_Verdicts(verdicts=[]))
+    rules_model, rules_calls = stub_model(Verdicts(verdicts=[]))
     await rules_model.judge_rules(email(), "Tripfold", CONFIG)
     assert rules_calls[0]["system"] == notes_calls[0]["system"]
     content = rules_calls[0]["messages"][0]["content"]
@@ -102,7 +101,7 @@ async def test_rules_call_shares_the_notes_system_prompt():
 
 
 async def test_no_rules_means_no_call():
-    model, calls = stub_model(_Verdicts(verdicts=[]))
+    model, calls = stub_model(Verdicts(verdicts=[]))
     config = CONFIG.model_copy(update={"rules": []})
     assert await model.judge_rules(email(), "Tripfold", config) == []
     assert calls == []
@@ -128,7 +127,7 @@ async def test_notes_call_sends_history_before_the_email():
 
 
 async def test_rules_call_sends_history_before_the_email():
-    model, calls = stub_model(_Verdicts(verdicts=[]))
+    model, calls = stub_model(Verdicts(verdicts=[]))
     await model.judge_rules(email(), "Tripfold", CONFIG, HISTORY)
     content = calls[0]["messages"][0]["content"]
     assert content.startswith(history_block(HISTORY) + "\n\n<email>")
@@ -215,7 +214,7 @@ async def test_no_answer_after_the_last_round_is_a_model_error():
 async def test_rules_call_offers_the_same_tools():
     notes_model, notes_calls = stub_model(NOTES)
     await notes_model.write_notes(email(), "Tripfold", CONFIG, tools=[SenderLookup(SENDER)])
-    rules_model, rules_calls = stub_model(_Verdicts(verdicts=[]))
+    rules_model, rules_calls = stub_model(Verdicts(verdicts=[]))
     await rules_model.judge_rules(email(), "Tripfold", CONFIG, tools=[SenderLookup(None)])
     # Byte-identical tools keep the two calls on one cache entry.
     assert rules_calls[0]["tools"] == notes_calls[0]["tools"]

@@ -14,9 +14,9 @@ from typing import Any, Protocol
 
 from herald_core.history import History
 from herald_core.model import TriageModel
-from herald_core.model_tools import ModelTool
 from herald_core.providers import load_provider
 from herald_core.schema import Decision, Email, Notes, RuleVerdict, SetupDraft, WorkspaceConfig
+from herald_core.tools import ModelTool
 from herald_server.settings import Settings
 
 log = logging.getLogger(__name__)

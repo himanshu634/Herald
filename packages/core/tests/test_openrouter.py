@@ -8,9 +8,8 @@ from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel
 
 from herald_core.history import SENDER_HISTORY, SenderHistory
-from herald_core.model import RULES_ASK, ModelError, _Verdicts
-from herald_core.model_tools import SenderLookup
-from herald_core.prompt import system_prompt
+from herald_core.model import ModelError, Verdicts
+from herald_core.prompt import RULES_ASK, system_prompt
 from herald_core.providers import load_provider
 from herald_core.providers.openrouter import BASE_URL, OpenRouterModel
 from herald_core.schema import (
@@ -24,6 +23,7 @@ from herald_core.schema import (
     Urgency,
     WorkspaceConfig,
 )
+from herald_core.tools import SenderLookup
 
 CONFIG = WorkspaceConfig(
     business_profile="Online luggage brand.",
@@ -105,10 +105,10 @@ async def test_notes_call_sends_schema_and_routing():
 
 async def test_rules_call_ends_with_rules_ask():
     verdict = RuleVerdict(rule_id="r1", matched=True, quote="a gift")
-    model, calls = stub_model(answer(_Verdicts(verdicts=[verdict])))
+    model, calls = stub_model(answer(Verdicts(verdicts=[verdict])))
     assert await model.judge_rules(EMAIL, "Tripfold", CONFIG) == [verdict]
     assert calls[0]["messages"][1]["content"].endswith(f"\n\n{RULES_ASK}")
-    assert calls[0]["response_format"]["json_schema"]["name"] == "_Verdicts"
+    assert calls[0]["response_format"]["json_schema"]["name"] == "Verdicts"
 
 
 async def test_no_rules_means_no_call():

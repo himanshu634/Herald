@@ -17,6 +17,7 @@ from anthropic import (
     RateLimitError,
 )
 
+from herald_core import graph
 from herald_core.graph import build_graph, triage
 from herald_core.model import (
     REQUEST_RETRIES,
@@ -27,7 +28,6 @@ from herald_core.model import (
     failure_of,
     status_kind,
 )
-from herald_core.nodes import judge_rules, write_notes
 from herald_core.providers import anthropic as anthropic_provider
 from herald_core.providers import openrouter as openrouter_provider
 from herald_core.providers.anthropic import AnthropicModel
@@ -209,8 +209,7 @@ class SlowModel(ScriptedModel):
 
 
 async def test_a_slow_call_is_cut_off_and_counts_as_unavailable(monkeypatch):
-    monkeypatch.setattr(write_notes, "MODEL_DEADLINE", 0.01)
-    monkeypatch.setattr(judge_rules, "MODEL_DEADLINE", 0.01)
+    monkeypatch.setattr(graph, "MODEL_DEADLINE", 0.01)
     state = await triage(build_graph(SlowModel()), email(), CONFIG, business_name="Tripfold")
     assert {(f.error, f.kind) for f in state["ai_failures"]} == {
         ("TimeoutError", FailureKind.UNAVAILABLE)

@@ -8,7 +8,6 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from herald_core.history import History
-from herald_core.model_tools import ModelTool
 from herald_core.schema import (
     Email,
     Notes,
@@ -20,6 +19,7 @@ from herald_core.schema import (
     Urgency,
     WorkspaceConfig,
 )
+from herald_core.tools import ModelTool
 
 DEFAULT_SETUP = SetupDraft(
     topics=[TopicDraft(name="Questions", meaning="Anything that fits no other topic")],

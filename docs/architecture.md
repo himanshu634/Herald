@@ -73,7 +73,7 @@ flowchart LR
     D --> E((end))
 ```
 
-- Each node is one file in `herald_core/nodes/`. `graph.py` only wires them, and `state.py` holds the state they share.
+- `herald_core/graph.py` holds the state, the five nodes and the wiring. The nodes only adapt state: the word check is in `safety.py` and the routing in `decide.py`.
 - The graph is compiled once and shared by all tenants. Each run carries its workspace's config in the state.
 - `word_check`, `write_notes` and `judge_rules` run in parallel. They write different state keys, except `asked` and `ai_failures`, which both model nodes write and a reducer joins.
 - `write_notes` and `judge_rules` wait on `gather_context`. `word_check` does not.
@@ -116,7 +116,7 @@ The thread and the corrections go into the prompt. The sender history does not: 
 
 ## Model tools
 
-The model may call a tool while it writes notes or judges rules. `herald_core/model_tools.py` holds them; each provider (`AnthropicModel`, `OpenRouterModel`) runs the loop. There is one so far, `sender_history`.
+The model may call a tool while it writes notes or judges rules. They are the model tools in `herald_core/tools.py`; each provider (`AnthropicModel`, `OpenRouterModel`) runs the loop. There is one so far, `sender_history`.
 
 - It answers from the sender history `gather_context` already fetched (`SenderLookup`). `decide` needs that history for the repeat count whatever the model does, so the fetch stays in code. The model's lookup costs no second request, and the model and `decide` see the same data.
 - It takes no input. The sender is always this email's own, so text in the email cannot steer the model into another customer's mail. It is `strict`, with a fixed description.
@@ -320,12 +320,12 @@ Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscri
 
 | Interface | Where | Built-in implementations |
 | --- | --- | --- |
-| `TriageModel` | `herald_core.model` | Found through `ModelProvider` plug-ins (entry-point group `herald.model_providers`): `openrouter` (`OpenRouterModel`, the default) and `anthropic` (`AnthropicModel`). Tests use `ScriptedModel` from `tests_support/`. |
+| `TriageModel` | `herald_core.model` | Found through `ModelProvider` plug-ins (entry-point group `herald.model_providers`): `openrouter` (`OpenRouterModel`, the default) and `anthropic` (`AnthropicModel`). Both subclass `ProviderModel`, which builds the prompts; a provider only makes the API call. Tests use `ScriptedModel` from `tests_support/`. |
 | `MailConnector` | `herald_server.connectors` | `GmailConnector`; `FakeConnector` in tests. The test-email box still posts to the API. |
 | `EventBus` | `herald_server.bus` | `RedisEventBus`, `InMemoryEventBus` |
 | `JobQueue` | `herald_server.queue` | `ArqQueue`, `InlineQueue` |
 | `Tool` / `Toolbox` | `herald_core.tools` (types), `herald_server.tools` (tools that call the internal routes) | `SenderHistoryTool`, `ThreadTool`, `CorrectionsTool` |
-| `ModelTool` | `herald_core.model_tools` | `SenderLookup` (the model's `sender_history`) |
+| `ModelTool` | `herald_core.tools` | `SenderLookup` (the model's `sender_history`) |
 
 ## Model providers
 
