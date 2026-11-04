@@ -1,9 +1,10 @@
 // Inbox logic with no UI: which emails a view shows, their order, what the owner can do,
 // and which parts of the body to highlight as proof. Kept pure so it is easy to test.
-import type { Email, EmailStatus } from '#lib/api/client.js';
+import type { Email, EmailStatus, WorkspaceConfig } from '#lib/api/client.js';
 import type { Tone } from '#lib/ui/tones.js';
 
-export type ViewId = 'needs-you' | 'inbox' | 'in-progress' | 'done' | 'closed' | 'all';
+export type ViewId =
+	'alerts' | 'needs-a-look' | 'inbox' | 'in-progress' | 'done' | 'closed' | 'all';
 
 export const VIEWS: {
 	id: ViewId;
@@ -11,11 +12,13 @@ export const VIEWS: {
 	statuses: EmailStatus[] | null;
 	countTone?: Tone;
 }[] = [
+	// Alerts are the desk the app opens on, not an inbox tab (INBOX_VIEWS leaves them out).
+	{ id: 'alerts', label: 'Alerts', statuses: ['alerted'], countTone: 'danger' },
 	{
-		id: 'needs-you',
-		label: 'Needs you',
-		statuses: ['alerted', 'needs_a_look'],
-		countTone: 'danger'
+		id: 'needs-a-look',
+		label: 'Needs a look',
+		statuses: ['needs_a_look'],
+		countTone: 'warning'
 	},
 	{ id: 'inbox', label: 'Inbox', statuses: ['inbox'] },
 	{ id: 'in-progress', label: 'In progress', statuses: ['in_progress'] },
@@ -24,8 +27,12 @@ export const VIEWS: {
 	{ id: 'all', label: 'All mail', statuses: null }
 ];
 
+/** The inbox's tabs. */
+export const INBOX_VIEWS = VIEWS.filter((v) => v.id !== 'alerts');
+
 export const EMPTY: Record<ViewId, string> = {
-	'needs-you': 'Nothing needs you. Urgent emails will show up here first.',
+	alerts: 'No alerts. Herald puts an email here the moment it can’t wait.',
+	'needs-a-look': 'Nothing needs a look. Mail Herald couldn’t read shows up here.',
 	inbox: 'Your inbox is clear.',
 	'in-progress': 'Nothing in progress. Press On it on an email to start it.',
 	done: 'Nothing done yet today.',
@@ -97,6 +104,49 @@ export function asksOwner(email: Email): boolean {
 
 export function questionsFor(emails: Email[]): Email[] {
 	return emails.filter(asksOwner).toSorted(compareEmails);
+}
+
+/**
+ * The alert desk's queue: every alerted email, in decide's order. No search or Urgent filter,
+ * which stay on the URL from the inbox and would hide alerts here. Unsure alerts stay in too:
+ * an alert outranks a question, so the desk shows it as an alert with its question attached.
+ */
+export function alertsFor(emails: Email[]): Email[] {
+	return emails.filter((e) => e.status === 'alerted').toSorted(compareEmails);
+}
+
+/** The questions the desk lists under its queue. Unsure alerts are already in the queue. */
+export function deskQuestionsFor(emails: Email[]): Email[] {
+	return questionsFor(emails).filter((e) => e.status !== 'alerted');
+}
+
+/**
+ * The alert to open after the open one left the queue: the one now at its place, or the last.
+ * `index` is where the open alert stood before it left.
+ */
+export function nextAlert(queue: Email[], index: number): Email | null {
+	if (!queue.length) return null;
+	return queue[Math.min(Math.max(index, 0), queue.length - 1)];
+}
+
+/** The owner's "alert me" rules that matched this email, so the desk can show their words. */
+export function firedAlertRules(
+	email: Email,
+	config: WorkspaceConfig
+): NonNullable<WorkspaceConfig['rules']> {
+	const ids = email.decision?.fired_rule_ids ?? [];
+	return (config.rules ?? []).filter((r) => r.action === 'alert' && ids.includes(r.id));
+}
+
+/**
+ * An alert rule as the owner would say it: "When the customer threatens a review, alert me."
+ * Rules are stored as written, often capitalised and with a full stop, so both are tidied.
+ * A leading acronym ("VIP customer…") keeps its capitals.
+ */
+export function alertRuleSentence(when: string): string {
+	const text = when.trim().replace(/[.!\s]+$/, '');
+	const keep = /^[A-Z]{2}/.test(text);
+	return `When ${keep ? text : text.charAt(0).toLowerCase() + text.slice(1)}, alert me.`;
 }
 
 /** The table under the questions. Questions are left out: they are already shown above it. */

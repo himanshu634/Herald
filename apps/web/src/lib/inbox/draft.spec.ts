@@ -20,7 +20,7 @@ describe('tryOutcome', () => {
 	it('says a rule moved it, even while Herald is still unsure', () => {
 		expect(tryOutcome('needs_a_look', { status: 'alerted', notes: unsure })).toEqual({
 			tone: 'success',
-			title: 'With your changes, it goes to Needs you now',
+			title: 'With your changes, it goes to Alerts',
 			unsure: true
 		});
 	});

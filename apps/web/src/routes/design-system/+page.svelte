@@ -55,12 +55,12 @@
 	const urgencies = Object.keys(URGENCY) as Urgency[];
 
 	const tabs: TabItem[] = [
-		{ id: 'needs-you', label: 'Needs you', count: 3, countTone: 'danger' },
+		{ id: 'needs-a-look', label: 'Needs a look', count: 3, countTone: 'warning' },
 		{ id: 'all', label: 'All mail', count: 62 },
 		{ id: 'thread', label: 'Arjun Mehta' },
 		{ id: 'rule-test', label: 'Rule test: Damaged bag' }
 	];
-	let tab = $state('needs-you');
+	let tab = $state('needs-a-look');
 	let anger4 = $state(true);
 	let dialogOpen = $state(false);
 	let toast = $state<string | null>(null);
@@ -167,7 +167,7 @@
 			<div class="flex flex-col gap-3">
 				<Tabs items={tabs} bind:selected={tab} label="Inbox views" />
 				<div class="flex flex-wrap gap-2">
-					<FilterChip pressed>Status: needs you</FilterChip>
+					<FilterChip pressed>Status: needs a look</FilterChip>
 					<FilterChip>Topic</FilterChip>
 					<FilterChip>Urgency</FilterChip>
 					<FilterChip bind:pressed={anger4}>Anger 4+</FilterChip>
