@@ -121,7 +121,7 @@ async def test_connect_commits_status_event_with_the_status_change(app, client, 
     ws = await demo_workspace(client)
     seen_at_subscribe: list[list[str]] = []
 
-    async def subscribe(credentials, provider_state) -> Subscription:
+    async def subscribe(credentials, provider_state, *, include_spam=False) -> Subscription:
         # The provider call comes after the commit: the event is stored with the change.
         seen_at_subscribe.append(status_events(app, ws))
         return Subscription(expires_at=None, provider_state={})
@@ -579,3 +579,163 @@ async def test_providers_empty_without_token_key(app, client, fake_connector):
     app.state.services.secrets = None
 
     assert (await client.get("/api/providers")).json() == []
+
+
+def spam_message(provider_message_id: str) -> InboundMessage:
+    return message(provider_message_id).model_copy(update={"in_spam": True})
+
+
+async def connect_with(app, client, workspace_id: str, read_spam: bool | None) -> str:
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/mailboxes/fake/connect",
+        json=None if read_spam is None else {"read_spam": read_spam},
+    )
+    state = parse_qs(urlsplit(response.json()["authorization_url"]).query)["state"][0]
+    query = redirect_query(await callback(client, code="c", state=state))
+    await app.state.queue.drain()
+    return query["mailbox_connected"][0]
+
+
+async def test_connect_with_spam_saves_the_choice_and_reads_spam(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    fake_connector.queue = [message("m1"), spam_message("s1")]
+
+    await connect_with(app, client, ws, read_spam=True)
+
+    [mailbox] = mailboxes_of(app, ws)
+    assert mailbox.read_spam is True
+    assert "subscribe+spam" in fake_connector.calls
+    assert "fetch_changes+spam" in fake_connector.calls
+    stored = {e.provider_message_id: e.in_spam for e in emails_of(app, ws)}
+    assert stored == {"m1": False, "s1": True}
+    listed = (await client.get(f"/api/workspaces/{ws}/emails")).json()
+    assert sorted(e["in_spam"] for e in listed) == [False, True]
+
+
+async def test_reconnect_from_the_web_sends_no_spam_choice(app, client, fake_connector):
+    # The web's request() always sets the JSON content type, even with no body.
+    ws = await demo_workspace(client)
+    response = await client.post(
+        f"/api/workspaces/{ws}/mailboxes/fake/connect",
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 200
+    state = parse_qs(urlsplit(response.json()["authorization_url"]).query)["state"][0]
+    assert "read_spam" not in app.state.services.secrets.open(state)
+
+
+async def test_connect_without_a_choice_leaves_spam_off(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    await connect_with(app, client, ws, read_spam=None)
+    [mailbox] = mailboxes_of(app, ws)
+    assert mailbox.read_spam is False
+    assert "fetch_changes" in fake_connector.calls
+
+
+async def test_reconnect_without_a_choice_keeps_spam_on(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    await connect_with(app, client, ws, read_spam=True)
+    # The composer's and the menu's Reconnect send no choice.
+    await connect_with(app, client, ws, read_spam=None)
+    [mailbox] = mailboxes_of(app, ws)
+    assert mailbox.read_spam is True
+
+
+async def test_turning_spam_on_watches_spam_and_reads_recent_spam(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    mailbox_id = await connect(app, client, ws)
+    [before] = mailboxes_of(app, ws)
+    fake_connector.spam = [spam_message("s1")]
+    fake_connector.calls.clear()
+
+    response = await client.patch(
+        f"/api/workspaces/{ws}/mailboxes/{mailbox_id}", json={"read_spam": True}
+    )
+    await app.state.queue.drain()
+
+    assert response.status_code == 200
+    assert response.json()["read_spam"] is True
+    assert fake_connector.calls[:2] == ["subscribe+spam", "fetch_recent_spam"]
+    [email] = emails_of(app, ws)
+    assert (email.provider_message_id, email.in_spam) == ("s1", True)
+    # Triage ran on it, and the cursor the sync owns did not move.
+    assert email.status != "new"
+    [after] = mailboxes_of(app, ws)
+    assert after.cursor == before.cursor
+    assert status_events(app, ws) == ["active", "active"]
+
+
+async def test_turning_spam_off_watches_the_inbox_only(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    mailbox_id = await connect_with(app, client, ws, read_spam=True)
+    fake_connector.calls.clear()
+
+    response = await client.patch(
+        f"/api/workspaces/{ws}/mailboxes/{mailbox_id}", json={"read_spam": False}
+    )
+
+    assert response.json()["read_spam"] is False
+    assert fake_connector.calls == ["subscribe"]
+
+
+async def test_setting_spam_to_the_same_value_calls_no_provider(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    mailbox_id = await connect(app, client, ws)
+    fake_connector.calls.clear()
+
+    response = await client.patch(
+        f"/api/workspaces/{ws}/mailboxes/{mailbox_id}", json={"read_spam": False}
+    )
+
+    assert response.status_code == 200
+    assert fake_connector.calls == []
+    assert status_events(app, ws) == ["active"]
+
+
+async def test_spam_backfill_failure_still_saves_the_choice(app, client, fake_connector, caplog):
+    ws = await demo_workspace(client)
+    mailbox_id = await connect(app, client, ws)
+    fake_connector.raise_on_fetch = RuntimeError("provider down")
+
+    response = await client.patch(
+        f"/api/workspaces/{ws}/mailboxes/{mailbox_id}", json={"read_spam": True}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["read_spam"] is True
+    assert "RuntimeError on Spam backfill" in caplog.text
+
+
+async def test_turning_spam_on_while_paused_reads_nothing_yet(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    mailbox_id = await connect(app, client, ws)
+    base = f"/api/workspaces/{ws}/mailboxes/{mailbox_id}"
+    await client.post(f"{base}/pause")
+    fake_connector.calls.clear()
+
+    response = await client.patch(base, json={"read_spam": True})
+
+    assert response.json()["read_spam"] is True
+    assert fake_connector.calls == []
+
+
+async def test_spam_setting_refused_for_a_disconnected_mailbox(app, client, fake_connector):
+    ws = await demo_workspace(client)
+    mailbox_id = await connect(app, client, ws)
+    base = f"/api/workspaces/{ws}/mailboxes/{mailbox_id}"
+    await client.delete(base)
+
+    assert (await client.patch(base, json={"read_spam": True})).status_code == 409
+
+
+async def test_other_workspace_cannot_change_spam_setting(app, client, fake_connector):
+    ws_a, ws_b = await demo_workspace(client), await demo_workspace(client)
+    mailbox_id = await connect(app, client, ws_a)
+
+    response = await client.patch(
+        f"/api/workspaces/{ws_b}/mailboxes/{mailbox_id}", json={"read_spam": True}
+    )
+
+    assert response.status_code == 404
+    [mailbox] = mailboxes_of(app, ws_a)
+    assert mailbox.read_spam is False

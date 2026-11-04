@@ -67,6 +67,7 @@ class EmailOut(BaseModel):
     decision: Decision | None
     context: EmailContext | None
     received_at: datetime
+    in_spam: bool = Field(description="Read from the mail provider's Spam folder.")
 
 
 class ReplyIn(BaseModel):
@@ -114,10 +115,23 @@ class MailboxOut(BaseModel):
     email_address: str
     status: MailboxStatus
     can_send: bool
+    read_spam: bool
     subscription_expires_at: datetime | None
     last_synced_at: datetime | None
     created_at: datetime
 
 
+class ConnectIn(BaseModel):
+    read_spam: bool | None = Field(
+        default=None,
+        description="Read the Spam folder too. Leave it out on a reconnect to keep the "
+        "mailbox's current choice.",
+    )
+
+
 class ConnectOut(BaseModel):
     authorization_url: str
+
+
+class MailboxPatch(BaseModel):
+    read_spam: bool

@@ -85,8 +85,17 @@ async def oauth_callback(
     if not code:
         return _back_to_web(services, mailbox_error="authorization_failed", **back)
 
+    # The owner's Spam choice from the connect screen. Absent on a reconnect, which keeps the
+    # mailbox's earlier choice. The state is sealed, so this is the owner's own answer.
+    read_spam = data.get("read_spam")
     try:
-        mailbox = await connect_mailbox(services, workspace_id, connector, code)
+        mailbox = await connect_mailbox(
+            services,
+            workspace_id,
+            connector,
+            code,
+            read_spam if isinstance(read_spam, bool) else None,
+        )
     except MissingRefreshToken:
         log.info("oauth callback for %s: no refresh token", provider)
         return _back_to_web(services, mailbox_error="no_refresh_token", **back)

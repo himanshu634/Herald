@@ -22,6 +22,7 @@ class FakeConnector:
 
     def __init__(self) -> None:
         self.queue: list[InboundMessage] = []
+        self.spam: list[InboundMessage] = []  # what fetch_recent_spam returns
         # When set, each fetch returns the next batch, with has_more while batches remain.
         self.batches: list[list[InboundMessage]] = []
         self.raise_on_fetch: Exception | None = None
@@ -46,9 +47,13 @@ class FakeConnector:
         return self.account
 
     async def subscribe(
-        self, credentials: dict[str, str], provider_state: dict[str, Any]
+        self,
+        credentials: dict[str, str],
+        provider_state: dict[str, Any],
+        *,
+        include_spam: bool = False,
     ) -> Subscription:
-        self.calls.append("subscribe")
+        self.calls.append("subscribe+spam" if include_spam else "subscribe")
         if self.raise_on_subscribe is not None:
             raise self.raise_on_subscribe
         return self.subscription
@@ -58,8 +63,10 @@ class FakeConnector:
     ) -> None:
         self.calls.append("unsubscribe")
 
-    async def fetch_changes(self, credentials: dict[str, str], cursor: str | None) -> FetchResult:
-        self.calls.append("fetch_changes")
+    async def fetch_changes(
+        self, credentials: dict[str, str], cursor: str | None, *, include_spam: bool = False
+    ) -> FetchResult:
+        self.calls.append("fetch_changes+spam" if include_spam else "fetch_changes")
         if self.raise_on_fetch is not None:
             raise self.raise_on_fetch
         next_cursor = str(int(cursor or 0) + 1)
@@ -68,6 +75,12 @@ class FakeConnector:
             return FetchResult(messages=batch, cursor=next_cursor, has_more=bool(self.batches))
         messages, self.queue = self.queue, []
         return FetchResult(messages=messages, cursor=next_cursor)
+
+    async def fetch_recent_spam(self, credentials: dict[str, str]) -> list[InboundMessage]:
+        self.calls.append("fetch_recent_spam")
+        if self.raise_on_fetch is not None:
+            raise self.raise_on_fetch
+        return list(self.spam)
 
     async def revoke(self, credentials: dict[str, str]) -> None:
         self.calls.append("revoke")

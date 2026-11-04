@@ -28,6 +28,7 @@ function email(over: Partial<Email> = {}): Email {
 		notes: null,
 		decision: null,
 		context: null,
+		in_spam: false,
 		received_at: '2026-11-03T09:00:00Z',
 		...over
 	};

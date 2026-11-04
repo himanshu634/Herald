@@ -65,6 +65,8 @@
 	let providers = $state.raw<string[]>([]);
 	let notice = $state<Notice | null>(null);
 	let connecting = $state(false);
+	// The connect screen's "Also read my Spam folder". Kept here so Try again sends it too.
+	let readSpam = $state(false);
 
 	const view = $derived(viewFrom(params.view));
 	// Search keeps its own copy. runed copies the URL back over its values whenever the URL
@@ -245,12 +247,15 @@
 		}
 	}
 
-	/** Start the connect. Returns whether the page is leaving for Google. */
-	async function connectGmail(): Promise<boolean> {
+	/**
+	 * Start the connect. Returns whether the page is leaving for Google. `readSpam` is the
+	 * connect screen's choice; a reconnect leaves it out so the mailbox keeps the earlier one.
+	 */
+	async function connectGmail(readSpam?: boolean): Promise<boolean> {
 		if (!workspaceId || connecting) return false;
 		connecting = true;
 		try {
-			const { authorization_url } = await api.startConnect(workspaceId, 'gmail');
+			const { authorization_url } = await api.startConnect(workspaceId, 'gmail', readSpam);
 			// A full page redirect: Google sends the browser back to / with the outcome on the URL.
 			window.location.assign(authorization_url);
 			return true;
@@ -463,8 +468,17 @@
 								(w, m) => api.mailboxAction(w, m, 'resume'),
 								'Resumed. Herald is catching up.'
 							)}
+						onspam={() => {
+							const on = !mailbox.read_spam;
+							mailboxAct(
+								(w, m) => api.setReadSpam(w, m, on),
+								on
+									? 'Herald reads Spam too, starting with the last 2 days.'
+									: 'Herald stopped reading Spam.'
+							);
+						}}
 						ondisconnect={disconnect}
-						onreconnect={connectGmail}
+						onreconnect={() => connectGmail()}
 					/>
 				{/if}
 				{#if workspaces.length}
@@ -496,7 +510,11 @@
 			>
 				<p class="flex-1"><b>{notice.title}</b> {notice.text}</p>
 				{#if notice.retry && workspace}
-					<Button size="sm" disabled={connecting} onclick={connectGmail}>Try again</Button>
+					<Button
+						size="sm"
+						disabled={connecting}
+						onclick={() => connectGmail(gated ? readSpam : undefined)}>Try again</Button
+					>
 				{/if}
 				<Button variant="quiet" size="sm" onclick={() => (notice = null)}>Dismiss</Button>
 			</div>
@@ -511,7 +529,7 @@
 					<b>Herald has stopped reading {mailbox.email_address}.</b> Google access ended, so new mail
 					can’t alert you. Nothing is lost: Herald catches up when you reconnect.
 				</p>
-				<Button variant="primary" size="sm" disabled={connecting} onclick={connectGmail}
+				<Button variant="primary" size="sm" disabled={connecting} onclick={() => connectGmail()}
 					>Reconnect Gmail</Button
 				>
 			</div>
@@ -613,7 +631,7 @@
 							replies={replies.list}
 							{connecting}
 							onreply={openReply}
-							onreconnect={connectGmail}
+							onreconnect={() => connectGmail()}
 						/>
 					</div>
 				{/if}
@@ -623,7 +641,8 @@
 				business={workspace.name}
 				available={providers.includes('gmail')}
 				busy={connecting}
-				onconnect={connectGmail}
+				bind:readSpam
+				onconnect={() => connectGmail(readSpam)}
 			/>
 		{:else if loaded && !workspace}
 			<main class="flex flex-1 items-center justify-center p-6">

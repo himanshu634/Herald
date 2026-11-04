@@ -157,7 +157,7 @@ async def test_auth_revoked_does_not_override_a_disconnect(app, client, fake_con
     workspace_id = await demo_workspace(client)
     mailbox_id = add_mailbox(app, workspace_id)
 
-    async def disconnect_then_revoke(credentials, cursor) -> FetchResult:
+    async def disconnect_then_revoke(credentials, cursor, *, include_spam=False) -> FetchResult:
         # The owner disconnects while this fetch is in flight, then the provider says revoked.
         with Session(app.state.services.engine) as session:
             mailbox = session.get(Mailbox, mailbox_id)

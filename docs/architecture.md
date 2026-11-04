@@ -77,8 +77,9 @@ flowchart LR
 - `word_check` and `write_notes` run in parallel and write different state keys.
 - `write_notes` waits on `gather_context`. `word_check` does not.
 - If the AI fails (outage, refusal, bad output), the notes are empty and the email goes to "Needs a look". A safety-floor match from the word check still alerts.
-- `decide` order, first match wins: safety floor → not for the business → owner rules (alert beats close; a set-urgency rule never lowers an urgent email) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
+- `decide` order, first match wins: safety floor (one exception, below) → not for the business → owner rules (alert beats close; a set-urgency rule never lowers an urgent email) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
 - "Not for the business" means the AI filed the email under "Spam or not for me", is sure, and the sender is not an important contact. That mail closes before the rules and defaults, so a promotion that reads as urgent or names a rule's words stays quiet. `judge_rules` skips it, which saves one model call. Unsure spam and spam from an important contact take the normal path. The safety floor still comes first.
+- The one exception to the floor: mail read from the provider's Spam folder (`in_spam`) that the AI also files as not for the business goes to "Needs a look" with its floor flags, instead of alerting. Phishing is full of floor words. A Spam email the AI reads as real mail, or is unsure about, still alerts.
 
 ## History
 
@@ -209,11 +210,13 @@ sequenceDiagram
     Note over W: process_email runs the pipeline shown above
 ```
 
-- The first sync (no cursor) reads the last 2 days of inbox mail, at most 50 messages. The cursor is the profile `historyId`, read before the list, so mail that lands during the sync is read by the next one. The same path runs when Gmail no longer has the cursor's history (about a week).
+- The first sync (no cursor) reads the last 2 days of inbox mail (and Spam, when the mailbox reads it), at most 50 messages. The cursor is the profile `historyId`, read before the list, so mail that lands during the sync is read by the next one. The same path runs when Gmail no longer has the cursor's history (about a week).
 - Later syncs read the history since the cursor. The new cursor is the `historyId` of the first page, so a re-read is possible but a loss is not. Stored mail is deduped on `(mailbox_id, provider_message_id)`.
 - One fetch downloads at most 100 messages. A long gap (a reconnect or a resume keeps the cursor) is read in batches: the fetch stops before the history record that would pass the cap, its cursor is the last record it took, and it reports `has_more`. Each batch is stored with its cursor, and the caller fetches again (see Sync job). A single record with more than 100 messages is taken whole. Records at or before the start cursor are skipped, so the cursor always moves (Gmail documents only records after it, but a fetch that returned its own start cursor would loop on the mailbox forever).
 - A mail that cannot be parsed is skipped, so one bad email cannot block the mailbox. A message that Gmail refuses with 400 or 410 is skipped and logged the same way. Any other refusal of a message (another 403, a 408 or a 5xx) fails the fetch, so the cursor does not move and the next sync (a push or the 15-minute catch-up) reads it again. A 403 for a daily or project quota is a rate limit.
-- Only inbox mail is read. Sent mail and drafts are skipped. Herald reads inbox mail and sends only replies the owner writes. The scopes are `gmail.readonly` and `gmail.send`. Google lets the owner untick a scope, so each mailbox records whether send was granted (`can_send`).
+- Only inbox mail is read, plus the Spam folder when the owner chose it (`read_spam`). Sent mail and drafts are skipped. The history query has no label filter (Gmail takes one, Herald may read two) and asks for `labelAdded` as well as `messageAdded`, so mail marked "Not spam" or moved back to the inbox is read too. The watch covers the same labels. Mail read from Spam is stored with `in_spam` and stays in Spam in Gmail.
+- The Spam choice is a checkbox on the connect screen, sent in the sealed OAuth `state`. A reconnect sends none and keeps the mailbox's choice. The mailbox menu switches it later (`PATCH`): the watch is renewed for the new labels, and turning it on reads the last 2 days of Spam without moving the cursor.
+- Herald sends only replies the owner writes. The scopes are `gmail.readonly` and `gmail.send`. Google lets the owner untick a scope, so each mailbox records whether send was granted (`can_send`).
 - Credentials are encrypted with `HERALD_TOKEN_KEY` and never leave the server. The OAuth `state` is signed with the same key and expires after 10 minutes.
 - Push is verified: the Pub/Sub JWT must match the audience and service account in the settings. A bad signature gets 401. A good push for an unknown or inactive address gets 204, so Pub/Sub does not retry it.
 
@@ -250,7 +253,8 @@ The API and the worker refuse to start when `HERALD_TOKEN_KEY` cannot decrypt th
 | --- | --- |
 | `GET /api/providers` | Providers this server can connect, like `["gmail"]`. Empty without `HERALD_TOKEN_KEY`. |
 | `GET /api/workspaces/{id}/mailboxes` | List mailboxes. No credential fields. |
-| `POST /api/workspaces/{id}/mailboxes/{provider}/connect` | Returns the provider's `authorization_url` |
+| `POST /api/workspaces/{id}/mailboxes/{provider}/connect` | Returns the provider's `authorization_url`. Optional body `{read_spam}`; leave it out on a reconnect. |
+| `PATCH /api/workspaces/{id}/mailboxes/{mailbox_id}` | `{read_spam}`: read the Spam folder too, or stop. 409 when disconnected. |
 | `GET /api/oauth/{provider}/callback` | Finishes the connect, then redirects to the web app |
 | `POST /api/workspaces/{id}/mailboxes/{mailbox_id}/sync` | Queue a sync now (202). 409 unless `active`. |
 | `POST .../pause`, `POST .../resume`, `DELETE .../{mailbox_id}` | Owner actions. 409 when the status does not allow it. |

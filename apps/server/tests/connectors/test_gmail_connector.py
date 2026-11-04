@@ -24,7 +24,9 @@ from herald_server.connectors.gmail.client import (
 from herald_server.connectors.gmail.connector import (
     BACKFILL_LIMIT,
     BACKFILL_QUERY,
+    BACKFILL_WITH_SPAM_QUERY,
     MAX_MESSAGES_PER_FETCH,
+    SPAM_BACKFILL_QUERY,
     GmailConnector,
 )
 from herald_server.settings import Settings
@@ -65,6 +67,7 @@ class FakeGoogle:
         # Page tokens (None is the first page) whose history request answers 404.
         self.expired_pages: set[str | None] = set()
         self.listed_ids: list[str] = []
+        self.watch_labels: list[str] | None = None
         # id -> (raw, labelIds); a missing id answers 404.
         self.messages: dict[str, tuple[str, list[str]]] = {}
         # id -> HTTP status the message get answers with instead.
@@ -91,6 +94,7 @@ class FakeGoogle:
             )
         if path == WATCH:
             self.calls.append("watch")
+            self.watch_labels = json.loads(request.read())["labelIds"]
             return httpx.Response(200, json={"historyId": "9", "expiration": "2000"})
         if path == HISTORY:
             page_token = params.get("pageToken")
@@ -103,8 +107,7 @@ class FakeGoogle:
             return httpx.Response(200, json=self.history_pages[page_token])
         # Match the list path exactly before treating the path as /messages/{id}.
         if path == MESSAGES:
-            self.calls.append("list")
-            assert params["q"] == BACKFILL_QUERY
+            self.calls.append(f"list:{params['q']}")
             assert params["maxResults"] == str(BACKFILL_LIMIT)
             return httpx.Response(200, json={"messages": [{"id": i} for i in self.listed_ids]})
         if path.startswith(MESSAGES + "/"):
@@ -257,7 +260,50 @@ async def test_first_fetch_backfills_and_takes_cursor_from_profile(connector, go
     assert (first.sender, first.subject, first.body) == ("riya@customer.in", "Order", "Where?")
     assert first.received_at.timestamp() == 1.0
     assert first.thread_id == "t-m1"
-    assert google.calls.index("profile") < google.calls.index("list")
+    assert google.calls.index("profile") < google.calls.index(f"list:{BACKFILL_QUERY}")
+    assert first.in_spam is False
+
+
+async def test_first_fetch_with_spam_backfills_inbox_and_spam(connector, google):
+    google.listed_ids = ["m1", "s1"]
+    google.add_message("m1")
+    google.add_message("s1", labels=("SPAM",))
+
+    result = await connector.fetch_changes(CREDS, None, include_spam=True)
+
+    assert f"list:{BACKFILL_WITH_SPAM_QUERY}" in google.calls
+    assert [(m.provider_message_id, m.in_spam) for m in result.messages] == [
+        ("m1", False),
+        ("s1", True),
+    ]
+
+
+async def test_spam_is_skipped_unless_asked(connector, google):
+    google.listed_ids = ["m1", "s1"]
+    google.add_message("m1")
+    google.add_message("s1", labels=("SPAM",))
+
+    result = await connector.fetch_changes(CREDS, None)
+
+    assert [m.provider_message_id for m in result.messages] == ["m1"]
+
+
+async def test_fetch_recent_spam_reads_spam_and_moves_no_cursor(connector, google):
+    google.listed_ids = ["s1", "gone-to-trash"]
+    google.add_message("s1", labels=("SPAM", "UNREAD"))
+    google.add_message("gone-to-trash", labels=("TRASH",))
+
+    messages = await connector.fetch_recent_spam(CREDS)
+
+    assert [(m.provider_message_id, m.in_spam) for m in messages] == [("s1", True)]
+    assert google.calls == ["token", f"list:{SPAM_BACKFILL_QUERY}", "get:s1", "get:gone-to-trash"]
+
+
+async def test_subscribe_watches_spam_when_asked(connector, google):
+    await connector.subscribe(CREDS, {}, include_spam=True)
+    assert google.watch_labels == ["INBOX", "SPAM"]
+    await connector.subscribe(CREDS, {})
+    assert google.watch_labels == ["INBOX"]
 
 
 async def test_fetch_follows_every_history_page(connector, google):

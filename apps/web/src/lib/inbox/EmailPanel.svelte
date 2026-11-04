@@ -43,6 +43,8 @@
 	} = $props();
 
 	const floor = $derived(floorLabel(email.decision?.floor_flags ?? []));
+	// The one case a floor word does not alert: Spam that Gmail and the AI both call spam.
+	const floorHeld = $derived(!!floor && email.decision?.route === 'needs_a_look');
 	const urgency = $derived(email.decision?.urgency ?? email.notes?.urgency);
 	const quotes = $derived(email.notes?.quotes?.map((q) => tidyBody(q.text)).filter(Boolean) ?? []);
 	// Quotes are tidied the same way as the body, so a quote that spans lines still matches.
@@ -65,6 +67,14 @@
 			<StatusTag status={email.status} />
 		</div>
 		<h2 class="mt-1 text-xl font-extrabold">{email.subject}</h2>
+		{#if email.in_spam}
+			<p
+				class="mt-2 flex items-start gap-2 rounded-md bg-neutral-bg px-3 py-2 text-sm text-neutral-fg"
+			>
+				<Icon name="shield" size={16} />Gmail filed this in Spam. Herald read it because you turned
+				on Spam. It stays in Spam in Gmail.
+			</p>
+		{/if}
 	</header>
 
 	<!-- One card: its parts are split by dashed dividers, never cards inside the card. -->
@@ -73,7 +83,14 @@
 			{#if floor}
 				<div class="mb-4 flex items-start gap-3 rounded-lg bg-floor-bg px-4 py-3 text-floor-fg">
 					<Icon name="shield" size={18} />
-					<p class="text-sm">{floor}. This always alerts you, whatever your rules say.</p>
+					<p class="text-sm">
+						{#if floorHeld}
+							{floor}. Gmail and Herald both read this as spam, so it waits here instead of alerting
+							you.
+						{:else}
+							{floor}. This always alerts you, whatever your rules say.
+						{/if}
+					</p>
 				</div>
 			{/if}
 

@@ -17,6 +17,7 @@ def run_decide(state: TriageState) -> TriageState:
         config=state["config"],
         sender=state["email"].sender,
         history=state.get("history"),
+        in_spam=state["email"].in_spam,
     )
     # The reason is built from fixed strings and the owner's rule names, not the email.
     log.info(

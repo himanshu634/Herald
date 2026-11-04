@@ -27,7 +27,7 @@ from herald_server.connectors.gmail.client import (
     HistoryExpired,
     MessageGone,
     MessageUnavailable,
-    is_inbox_mail,
+    is_received_mail,
 )
 from herald_server.connectors.gmail.compose import build_reply
 from herald_server.connectors.gmail.mime import parse_raw_message
@@ -40,6 +40,8 @@ from herald_server.connectors.gmail.push import (
 log = logging.getLogger(__name__)
 
 BACKFILL_QUERY = "in:inbox newer_than:2d"
+BACKFILL_WITH_SPAM_QUERY = "{in:inbox in:spam} newer_than:2d"
+SPAM_BACKFILL_QUERY = "in:spam newer_than:2d"
 BACKFILL_LIMIT = 50
 # Messages downloaded by one fetch at most. A long gap (a reconnect or resume keeps the
 # cursor) could hold thousands: one fetch for all of them would outlast the job timeout,
@@ -99,10 +101,14 @@ class GmailConnector(MailConnector):
         )
 
     async def subscribe(
-        self, credentials: dict[str, str], provider_state: dict[str, Any]
+        self,
+        credentials: dict[str, str],
+        provider_state: dict[str, Any],
+        *,
+        include_spam: bool = False,
     ) -> Subscription:
         access = await self._client.refresh(credentials["refresh_token"])
-        watch = await self._client.watch(access, self._topic)
+        watch = await self._client.watch(access, self._topic, include_spam)
         return Subscription(expires_at=watch.expiration, provider_state={})
 
     async def unsubscribe(
@@ -114,20 +120,32 @@ class GmailConnector(MailConnector):
     async def revoke(self, credentials: dict[str, str]) -> None:
         await self._client.revoke(credentials["refresh_token"])
 
-    async def fetch_changes(self, credentials: dict[str, str], cursor: str | None) -> FetchResult:
+    async def fetch_changes(
+        self, credentials: dict[str, str], cursor: str | None, *, include_spam: bool = False
+    ) -> FetchResult:
         access = await self._client.refresh(credentials["refresh_token"])
         has_more = False  # the backfill is at most BACKFILL_LIMIT, under the cap
         if cursor is None:
-            ids, new_cursor = await self._backfill(access)
+            ids, new_cursor = await self._backfill(access, include_spam)
         else:
             try:
-                ids, new_cursor, has_more = await self._history(access, cursor)
+                ids, new_cursor, has_more = await self._history(access, cursor, include_spam)
             except HistoryExpired:
                 # Gmail keeps about a week of history. Any ids gathered from earlier pages are
                 # dropped: the backfill below covers the recent inbox and gives a fresh cursor.
                 log.info("gmail history cursor expired; backfilling")
-                ids, new_cursor = await self._backfill(access)
+                ids, new_cursor = await self._backfill(access, include_spam)
+        messages = await self._download(access, ids, include_spam)
+        return FetchResult(messages=messages, cursor=new_cursor, has_more=has_more)
 
+    async def fetch_recent_spam(self, credentials: dict[str, str]) -> list[InboundMessage]:
+        access = await self._client.refresh(credentials["refresh_token"])
+        page = await self._client.list_messages(access, SPAM_BACKFILL_QUERY, BACKFILL_LIMIT)
+        return await self._download(access, page.message_ids, include_spam=True)
+
+    async def _download(
+        self, access: str, ids: list[str], include_spam: bool
+    ) -> list[InboundMessage]:
         messages: list[InboundMessage] = []
         for message_id in ids:
             try:
@@ -142,9 +160,9 @@ class GmailConnector(MailConnector):
                     "skipping unavailable gmail message %s (%s)", message_id, type(exc).__name__
                 )
                 continue
-            if not is_inbox_mail(raw.label_ids):
-                # Archived since it was listed, or the owner's own mail: the backfill query
-                # in:inbox also matches mail the owner sent to themselves.
+            if not is_received_mail(raw.label_ids, include_spam):
+                # Archived or deleted since it was listed, or the owner's own mail: the
+                # backfill query in:inbox also matches mail the owner sent to themselves.
                 continue
             try:
                 parsed = parse_raw_message(raw.raw)
@@ -167,27 +185,31 @@ class GmailConnector(MailConnector):
                     internet_message_id=parsed.message_id,
                     references=parsed.references,
                     reply_to=parsed.reply_to,
+                    in_spam="SPAM" in raw.label_ids,
                 )
             )
-        return FetchResult(messages=messages, cursor=new_cursor, has_more=has_more)
+        return messages
 
-    async def _backfill(self, access: str) -> tuple[list[str], str]:
-        """Recent inbox mail and a fresh cursor, for a first sync or an expired cursor."""
+    async def _backfill(self, access: str, include_spam: bool) -> tuple[list[str], str]:
+        """Recent inbox (and Spam) mail and a fresh cursor, for a first sync or expired cursor."""
         # Read the profile's historyId before listing: mail that lands while we list and fetch
         # is then after the cursor, so the next history sync picks it up. Reading it after the
         # list would put that mail before the cursor and lose it. Mail caught by both the list
         # and the next sync is removed by dedupe on provider_message_id.
         profile = await self._client.get_profile(access)
-        page = await self._client.list_messages(access, BACKFILL_QUERY, BACKFILL_LIMIT)
+        query = BACKFILL_WITH_SPAM_QUERY if include_spam else BACKFILL_QUERY
+        page = await self._client.list_messages(access, query, BACKFILL_LIMIT)
         return page.message_ids, profile.history_id
 
-    async def _history(self, access: str, cursor: str) -> tuple[list[str], str, bool]:
-        """Inbox message ids added since the cursor, the next cursor, and whether more wait.
+    async def _history(
+        self, access: str, cursor: str, include_spam: bool
+    ) -> tuple[list[str], str, bool]:
+        """Message ids Herald reads added since the cursor, the next cursor, and whether more wait.
 
         Takes whole history records, in order, until MAX_MESSAGES_PER_FETCH would be passed.
         """
         ids: dict[str, None] = {}  # insertion-ordered set: a message can show up on two pages
-        page = await self._client.list_history(access, cursor)
+        page = await self._client.list_history(access, cursor, include_spam=include_spam)
         # When every page is read, the cursor is the FIRST page's historyId. Every history
         # record up to it is enumerated by the pages, so this is loss-safe whether Gmail pages
         # a snapshot or a live list. Records added mid-paging are simply re-read on the next
@@ -218,7 +240,9 @@ class GmailConnector(MailConnector):
                 last_taken = record.id
             if page.next_page_token is None:
                 break
-            page = await self._client.list_history(access, cursor, page.next_page_token)
+            page = await self._client.list_history(
+                access, cursor, page.next_page_token, include_spam=include_spam
+            )
         return list(ids), first_page_history_id, False
 
     async def send_reply(self, credentials: dict[str, str], reply: OutboundReply) -> SentReply:

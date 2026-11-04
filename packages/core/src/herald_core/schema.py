@@ -161,6 +161,8 @@ class Email(BaseModel):
     subject: str
     body: str
     thread_id: str | None = None
+    # The mail provider filed it as spam. Only read when the owner chose to read Spam too.
+    in_spam: bool = False
 
 
 class Quote(BaseModel):

@@ -6,12 +6,15 @@
 		business,
 		available,
 		busy = false,
+		readSpam = $bindable(false),
 		onconnect
 	}: {
 		business: string;
 		/** False when this server has no Gmail set up, so the button would only fail. */
 		available: boolean;
 		busy?: boolean;
+		/** "Also read my Spam folder". Off until the owner ticks it. */
+		readSpam?: boolean;
 		onconnect: () => void;
 	} = $props();
 </script>
@@ -30,6 +33,29 @@
 				on each email and alerts you only when your rules say so.
 			</p>
 			{#if available}
+				<!-- Between the reasons and the button, so the choice is seen before leaving for Google. -->
+				<label
+					class={[
+						'mt-1.5 flex cursor-pointer items-start gap-3 rounded-md px-3.5 py-3',
+						readSpam
+							? 'border-[1.5px] border-ink bg-accent-soft'
+							: 'border border-line-strong bg-surface'
+					]}
+				>
+					<input
+						type="checkbox"
+						bind:checked={readSpam}
+						disabled={busy}
+						class="mt-0.5 size-5 flex-none cursor-pointer accent-ink"
+					/>
+					<span>
+						<span class="block font-bold">Also read my Spam folder</span>
+						<span class="block text-sm text-muted">
+							Gmail sometimes files real customer mail as spam. Herald reads it too and closes real
+							spam quietly. It never moves mail out of Spam.
+						</span>
+					</span>
+				</label>
 				<Button variant="primary" class="mt-1.5 self-start" disabled={busy} onclick={onconnect}>
 					<Icon name="mail" size={16} />{busy ? 'Opening Google…' : 'Connect Gmail'}
 				</Button>

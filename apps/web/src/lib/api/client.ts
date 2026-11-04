@@ -91,9 +91,17 @@ export const api = {
 	listMailboxes: (workspaceId: string) =>
 		request<Mailbox[]>(`/workspaces/${workspaceId}/mailboxes`),
 	/** Start a connect. Send the browser to the returned URL; the provider sends it back to /. */
-	startConnect: (workspaceId: string, provider: string) =>
+	/** Leave `readSpam` out on a reconnect: the mailbox keeps the owner's earlier choice. */
+	startConnect: (workspaceId: string, provider: string, readSpam?: boolean) =>
 		request<ConnectOut>(`/workspaces/${workspaceId}/mailboxes/${provider}/connect`, {
-			method: 'POST'
+			method: 'POST',
+			...(readSpam === undefined ? {} : { body: JSON.stringify({ read_spam: readSpam }) })
+		}),
+	/** Read the Spam folder too, or stop. Turning it on also reads the last 2 days of Spam. */
+	setReadSpam: (workspaceId: string, mailboxId: string, readSpam: boolean) =>
+		request<Mailbox>(`/workspaces/${workspaceId}/mailboxes/${mailboxId}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ read_spam: readSpam })
 		}),
 	mailboxAction: (workspaceId: string, mailboxId: string, action: 'sync' | 'pause' | 'resume') =>
 		request<Mailbox>(`/workspaces/${workspaceId}/mailboxes/${mailboxId}/${action}`, {
