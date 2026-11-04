@@ -45,7 +45,7 @@ A pull request that breaks one of these will not be merged, however good the res
 
 ### Bigger changes
 
-A change that spans several files or changes what Herald does gets a short spec and a plan in `docs/superpowers/specs` and `docs/superpowers/plans` before the code, dated like the others there. When the change settles a product question, add a row to the decision log in `decisions.md`: the date, the decision and why.
+When a change settles a product question, add a row to the decision log in `decisions.md`: the date, the decision and why. When it changes how Herald works, update `architecture.md` in the same pull request.
 
 ## Commits
 
