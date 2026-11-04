@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -30,7 +30,7 @@ def create_app(settings: Settings | None = None, model: TriageModel | None = Non
     setup_logging(settings.log_level)
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         services: Services = build_services(settings, model)
         inline = settings.queue == "inline"
         token = internal_token(settings, allow_random=inline)
