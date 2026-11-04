@@ -5,6 +5,7 @@ missing (the production image). Tracing must never change what triage does: ever
 here catches its own errors, and a model error from the inner model passes through unchanged.
 """
 
+import importlib
 import logging
 from collections.abc import Sequence
 from contextlib import AbstractContextManager, ExitStack, contextmanager
@@ -14,13 +15,14 @@ from typing import Any, Protocol
 from herald_core.history import History
 from herald_core.model import TriageModel
 from herald_core.model_tools import ModelTool
+from herald_core.providers import load_provider
 from herald_core.schema import Decision, Email, Notes, RuleVerdict, SetupDraft, WorkspaceConfig
 from herald_server.settings import Settings
 
 log = logging.getLogger(__name__)
 
-# Anthropic is patched once per process. create_app runs once per test and on every reload,
-# and instrumenting twice would wrap `parse` twice and log every call twice.
+# The provider SDKs are patched once per process. create_app runs once per test and on every
+# reload, and instrumenting twice would wrap `parse` twice and log every call twice.
 _instrumented = False
 
 
@@ -241,6 +243,28 @@ def _shutdown_quietly(client: Any) -> None:
         pass
 
 
+def _model_name(settings: Settings) -> str:
+    return settings.model_name or load_provider(settings.model_provider).default_model
+
+
+def _instrumentors() -> list[Any]:
+    """The OpenInference instrumentors that are installed, one per model SDK.
+
+    Each is optional: a provider whose instrumentor is missing runs untraced, so its
+    generations (prompts, tokens, cost) are absent while the spans and scores remain.
+    """
+    found = []
+    for module, name in (
+        ("openinference.instrumentation.anthropic", "AnthropicInstrumentor"),
+        ("openinference.instrumentation.openai", "OpenAIInstrumentor"),
+    ):
+        try:
+            found.append(getattr(importlib.import_module(module), name))
+        except (ImportError, AttributeError):
+            log.info("%s is not installed; those model calls are not traced", module)
+    return found
+
+
 def build_tracing(settings: Settings) -> Tracing:
     """Tracing when both keys are set and Langfuse answers, otherwise NO_TRACING."""
     # An empty string counts as unset: the test conftest blanks the keys.
@@ -254,10 +278,10 @@ def build_tracing(settings: Settings) -> Tracing:
     try:
         from langfuse import Langfuse, propagate_attributes
         from langfuse.langchain import CallbackHandler
-        from openinference.instrumentation.anthropic import AnthropicInstrumentor
     except ImportError:
         log.warning("langfuse is not installed; tracing is off")
         return NO_TRACING
+    instrumentors = _instrumentors()
 
     client = None
     try:
@@ -279,20 +303,21 @@ def build_tracing(settings: Settings) -> Tracing:
         )
         return NO_TRACING
 
-    # Only after auth succeeds, so a down Langfuse leaves Anthropic unpatched.
+    # Only after auth succeeds, so a down Langfuse leaves the SDKs unpatched.
     global _instrumented
     if not _instrumented:
         try:
-            AnthropicInstrumentor().instrument()
+            for instrumentor in instrumentors:
+                instrumentor().instrument()
         except Exception as exc:
             # Dev tooling must not stop the API or worker from starting.
             _shutdown_quietly(client)
-            log.warning("Tracing: could not instrument Anthropic, tracing is off: %s", exc)
+            log.warning("Tracing: could not instrument the model SDKs, tracing is off: %s", exc)
             return NO_TRACING
         _instrumented = True
-    # The tag names the model that runs. Fake runs (lite mode, evals) must not carry the
-    # Claude name from settings.
-    model_name = settings.model_name if settings.model_provider == "anthropic" else "fake"
+    # The tag names the provider and the model that runs, so a switched provider shows in
+    # Langfuse. An empty model name means the provider's default.
+    model_name = f"{settings.model_provider}/{_model_name(settings)}"
     log.info("Tracing to Langfuse at %s", settings.langfuse_base_url)
     return LangfuseTracing(
         client, model_name, propagate_attributes, CallbackHandler, public_key=public_key

@@ -30,28 +30,9 @@ from herald_server.tracing import build_tracing
 RESULTS = Path(__file__).resolve().parents[2] / "results"
 
 
-def _load_dotenv(name: str) -> str | None:
-    """Read `name` from the process environment, then the nearest .env.
-
-    The server's settings read only HERALD_* names and a provider's SDK may read none, so a
-    key kept in .env would otherwise never reach the provider.
-    """
-    if os.environ.get(name):
-        return os.environ[name]
-    for folder in [Path.cwd(), *Path.cwd().parents]:
-        env = folder / ".env"
-        if env.is_file():
-            for line in env.read_text(encoding="utf-8").splitlines():
-                key, sep, value = line.partition("=")
-                if sep and key.strip() == name and value.strip():
-                    return value.strip().strip("\"'")
-            return None
-    return None
-
-
 def _model(provider_name: str, model_name: str) -> TriageModel:
     provider = load_provider(provider_name)
-    key = _load_dotenv(provider.api_key_env)
+    key = get_settings().secret(provider.api_key_env)
     if not key:
         raise SystemExit(f"{provider.api_key_env} is not set (in the environment or .env).")
     # More retries than the default 2: a burst of parallel calls can hit the rate limit, and

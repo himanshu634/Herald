@@ -7,7 +7,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from pydantic import SecretStr
 
 import herald_server.tracing as tracing_module
-from herald_core.model import FakeModel, ModelError
+from herald_core.model import ModelError
 from herald_core.schema import Decision, Email, Notes, RiskFlag, Route, WorkspaceConfig
 from herald_server.pipeline import process_email, trial_read
 from herald_server.tracing import (
@@ -18,6 +18,7 @@ from herald_server.tracing import (
     build_tracing,
     record_outcome,
 )
+from scripted_model import ScriptedModel
 
 EMAIL = Email(id="e1", workspace_id="w1", sender="a@b.example", subject="Hi", body="Hello")
 CONFIG = WorkspaceConfig(business_profile="Online luggage brand.", topics=["Orders and delivery"])
@@ -59,6 +60,7 @@ class StubClient:
 
 
 propagated: list[dict] = []
+instrumented: list[int] = []
 
 
 @contextmanager
@@ -68,9 +70,9 @@ def stub_propagate(**kwargs):
     yield
 
 
-class FailingModel(FakeModel):
-    async def write_notes(self, *args, **kwargs):
-        raise ModelError("rate limited")
+class FailingModel(ScriptedModel):
+    def __init__(self) -> None:
+        super().__init__(notes=ModelError("rate limited"))
 
 
 class BrokenSpanClient(StubClient):
@@ -110,14 +112,14 @@ def test_tracing_is_off_when_langfuse_is_down(settings, caplog):
     assert build_tracing(down) is NO_TRACING
     # One warning, not one per email. Count only Herald's records: the SDK logs on its own.
     assert len([r for r in caplog.records if r.name == "herald_server.tracing"]) == 1
-    assert not tracing_module._instrumented  # anthropic stays unpatched for the rest of the session
+    assert not tracing_module._instrumented  # the SDKs stay unpatched for the rest of the session
 
 
 async def test_traced_model_passes_calls_through():
     client = StubClient()
-    traced = TracedModel(FakeModel(), client)
+    traced = TracedModel(ScriptedModel(), client)
     notes = await traced.write_notes(EMAIL, "Tripfold", CONFIG)
-    assert notes == await FakeModel().write_notes(EMAIL, "Tripfold", CONFIG)
+    assert notes == await ScriptedModel().write_notes(EMAIL, "Tripfold", CONFIG)
     await traced.judge_rules(EMAIL, "Tripfold", CONFIG)
     assert client.spans == ["model.write_notes", "model.judge_rules"]
 
@@ -129,9 +131,9 @@ async def test_traced_model_passes_errors_through():
 
 
 async def test_traced_model_calls_inner_when_the_span_fails(caplog):
-    traced = TracedModel(FakeModel(), BrokenSpanClient())
+    traced = TracedModel(ScriptedModel(), BrokenSpanClient())
     notes = await traced.write_notes(EMAIL, "Tripfold", CONFIG)
-    assert notes == await FakeModel().write_notes(EMAIL, "Tripfold", CONFIG)
+    assert notes == await ScriptedModel().write_notes(EMAIL, "Tripfold", CONFIG)
     # A real model error is still raised unchanged when the span is broken too.
     with pytest.raises(ModelError):
         await TracedModel(FailingModel(), BrokenSpanClient()).write_notes(EMAIL, "T", CONFIG)
@@ -204,7 +206,7 @@ def test_score_swallows_client_errors(caplog):
 
 
 def test_no_tracing_does_nothing():
-    model = FakeModel()
+    model = ScriptedModel()
     assert NO_TRACING.wrap_model(model) is model
     with NO_TRACING.run("x", user_id="u", session_id="s", tags=[], metadata={}) as run:
         assert run == Run(None, [])
@@ -217,9 +219,9 @@ def _herald_warnings(caplog):
 
 
 async def test_traced_model_survives_a_failing_span_exit(caplog):
-    traced = TracedModel(FakeModel(), StubClient(exit_raises=True))
+    traced = TracedModel(ScriptedModel(), StubClient(exit_raises=True))
     notes = await traced.write_notes(EMAIL, "Tripfold", CONFIG)
-    assert notes == await FakeModel().write_notes(EMAIL, "Tripfold", CONFIG)
+    assert notes == await ScriptedModel().write_notes(EMAIL, "Tripfold", CONFIG)
     assert len(_herald_warnings(caplog)) == 1
 
 
@@ -372,6 +374,7 @@ def _stub_langfuse(monkeypatch, instrument_raises=False, auth_error=None, auth_o
 
     class Instrumentor:
         def instrument(self):
+            instrumented.append(1)
             if instrument_raises:
                 raise RuntimeError("patch failed")
 
@@ -385,16 +388,25 @@ def _stub_langfuse(monkeypatch, instrument_raises=False, auth_error=None, auth_o
     module("openinference")
     module("openinference.instrumentation")
     module("openinference.instrumentation.anthropic", AnthropicInstrumentor=Instrumentor)
+    module("openinference.instrumentation.openai", OpenAIInstrumentor=Instrumentor)
     monkeypatch.setattr(tracing_module, "_instrumented", False)
     return shutdowns
 
 
-def test_build_tracing_tags_fake_runs_as_fake(settings, monkeypatch):
+def test_build_tracing_tags_runs_with_provider_and_model(settings, monkeypatch):
     _stub_langfuse(monkeypatch)
-    fake = keyed(settings, model_provider="fake", model_name="claude-sonnet-x")
-    assert build_tracing(fake)._model_name == "fake"
-    real = keyed(settings, model_provider="anthropic", model_name="claude-sonnet-x")
-    assert build_tracing(real)._model_name == "claude-sonnet-x"
+    named = keyed(settings, model_provider="anthropic", model_name="claude-sonnet-x")
+    assert build_tracing(named)._model_name == "anthropic/claude-sonnet-x"
+    # An empty model name is the provider's default, and the tag says which.
+    default = keyed(settings, model_provider="openrouter", model_name=None)
+    assert build_tracing(default)._model_name == "openrouter/openai/gpt-oss-20b"
+
+
+def test_build_tracing_instruments_each_installed_sdk(settings, monkeypatch):
+    instrumented.clear()
+    _stub_langfuse(monkeypatch)
+    assert build_tracing(keyed(settings)).enabled
+    assert len(instrumented) == 2
 
 
 def test_build_tracing_survives_an_instrumentor_failure(settings, monkeypatch, caplog):

@@ -11,6 +11,7 @@ from herald_server.api.main import create_app
 from herald_server.internal.client import AgentApi
 from herald_server.migrate import upgrade
 from herald_server.settings import Settings
+from scripted_model import ScriptedModel
 
 
 @pytest.fixture(scope="session")
@@ -24,14 +25,14 @@ def migrated_db(tmp_path_factory) -> Path:
 
 @pytest.fixture
 def settings(tmp_path, migrated_db) -> Settings:
-    # One process, no Redis or Postgres: SQLite file, in-memory bus, inline queue, fake model.
+    # One process, no Redis or Postgres: SQLite file, in-memory bus, inline queue.
+    # The model is the scripted_model fixture, passed to create_app.
     db = tmp_path / "herald.db"
     shutil.copy(migrated_db, db)
     return Settings(
         database_url=f"sqlite:///{db}",
         bus="memory",
         queue="inline",
-        model_provider="fake",
         token_key=Fernet.generate_key().decode(),
         # Set here so a token in .env or the shell cannot leak into the tests.
         internal_token=None,
@@ -39,8 +40,14 @@ def settings(tmp_path, migrated_db) -> Settings:
 
 
 @pytest.fixture
-async def app(settings):
-    app = create_app(settings)
+def scripted_model() -> ScriptedModel:
+    # Tests change what the model says by assigning .notes, .verdicts or .setup.
+    return ScriptedModel()
+
+
+@pytest.fixture
+async def app(settings, scripted_model):
+    app = create_app(settings, scripted_model)
     async with app.router.lifespan_context(app):
         yield app
 

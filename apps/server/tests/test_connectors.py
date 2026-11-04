@@ -8,6 +8,7 @@ from herald_server.crypto import SecretBox
 from herald_server.models import Mailbox, MailboxStatus, Workspace
 from herald_server.services import build_services
 from herald_server.settings import Settings
+from scripted_model import ScriptedModel
 
 
 async def test_no_connectors_without_google_settings():
@@ -47,7 +48,7 @@ def add_sealed_mailbox(
 
 
 async def test_startup_succeeds_with_no_mailboxes(settings):
-    services = build_services(settings)
+    services = build_services(settings, ScriptedModel())
     assert services.secrets is not None
     await services.http.aclose()
     services.engine.dispose()
@@ -57,7 +58,7 @@ async def test_startup_succeeds_when_key_opens_stored_credentials(settings):
     assert settings.token_key is not None
     add_sealed_mailbox(settings, SecretBox(settings.token_key))
 
-    services = build_services(settings)
+    services = build_services(settings, ScriptedModel())
     await services.http.aclose()
     services.engine.dispose()
 
@@ -88,6 +89,6 @@ async def test_startup_check_prefers_active_mailboxes(settings):
     )
     add_sealed_mailbox(settings, SecretBox(settings.token_key))
 
-    services = build_services(settings)
+    services = build_services(settings, ScriptedModel())
     await services.http.aclose()
     services.engine.dispose()

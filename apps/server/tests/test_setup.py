@@ -1,5 +1,4 @@
-from herald_core.graph import build_graph
-from herald_core.model import FakeModel, ModelError
+from herald_core.model import ModelError
 from herald_core.prompt import business_block
 from herald_core.schema import (
     SPAM_TOPIC,
@@ -98,7 +97,17 @@ async def start(client, name="Crumb", description=DESCRIPTION):
     return response.json()
 
 
-async def test_setup_creates_a_draft_workspace(client):
+def drafted(*names: str) -> SetupDraft:
+    return SetupDraft(
+        topics=[topic(name, f"About {name.lower()}") for name in names],
+        facts=[],
+        guidance=[],
+        rules=[],
+    )
+
+
+async def test_setup_creates_a_draft_workspace(client, scripted_model):
+    scripted_model.setup = drafted("Orders and delivery", "Questions")
     body = await start(client)
     workspace = body["workspace"]
     assert body["drafted"] is True
@@ -107,12 +116,8 @@ async def test_setup_creates_a_draft_workspace(client):
     assert "Orders and delivery" in [t["name"] for t in workspace["config"]["topics"]]
 
 
-async def test_setup_falls_back_when_the_ai_fails(app, client):
-    class BrokenModel(FakeModel):
-        async def suggest_setup(self, name, description):
-            raise ModelError("AI service is down")
-
-    app.state.services.model = BrokenModel()
+async def test_setup_falls_back_when_the_ai_fails(client, scripted_model):
+    scripted_model.setup = ModelError("AI service is down")
     body = await start(client)
     assert body["drafted"] is False
     topics = body["workspace"]["config"]["topics"]
@@ -135,23 +140,20 @@ async def test_draft_workspace_takes_no_email_until_saved(app, client):
     assert (await client.post(f"/api/workspaces/{ws}/emails", json=email)).status_code == 202
 
 
-async def test_saved_guidance_reaches_the_notes_model(app, client):
-    seen = []
-
-    class RecordingModel(FakeModel):
-        async def write_notes(self, email, business_name, config, history=None, tools=()):
-            seen.append((business_name, config.guidance))
-            return await super().write_notes(email, business_name, config, history=history)
-
+async def test_saved_guidance_reaches_the_notes_model(app, client, scripted_model):
     workspace = (await start(client))["workspace"]
     ws = workspace["id"]
     config = workspace["config"] | {"guidance": ["Wedding cakes are always urgent."]}
     await client.put(f"/api/workspaces/{ws}/config", json={"name": "Crumb", "config": config})
 
-    app.state.services.graph = build_graph(RecordingModel())
     email = {"sender": "riya@customer.in", "subject": "Order", "body": "Where is my cake?"}
     await client.post(f"/api/workspaces/{ws}/emails", json=email)
     await app.state.queue.drain()
+    seen = [
+        (call["business_name"], call["config"].guidance)
+        for name, call in scripted_model.calls
+        if name == "write_notes"
+    ]
     assert seen == [("Crumb", ["Wedding cakes are always urgent."])]
 
 
@@ -164,9 +166,10 @@ async def test_config_needs_a_topic(client):
     assert response.status_code == 422
 
 
-async def test_suggest_saves_nothing(client):
+async def test_suggest_saves_nothing(client, scripted_model):
     workspace = (await start(client))["workspace"]
     ws = workspace["id"]
+    scripted_model.setup = drafted("Accounts and subscriptions", "Questions")
     response = await client.post(
         f"/api/workspaces/{ws}/setup/suggest",
         json={"description": "We sell software subscriptions."},

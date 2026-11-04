@@ -1,10 +1,10 @@
+import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from dotenv import dotenv_values
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-from herald_core.providers.anthropic import DEFAULT_MODEL
 
 
 class Settings(BaseSettings):
@@ -22,11 +22,10 @@ class Settings(BaseSettings):
     bus: Literal["redis", "memory"] = "redis"
     queue: Literal["arq", "inline"] = "arq"
 
-    model_provider: Literal["anthropic", "fake"] = "fake"
-    model_name: str = DEFAULT_MODEL
-    # Read here, not by the SDK: values in .env never reach os.environ, so a bare
-    # AsyncAnthropic() would start without a key and fail on every email.
-    anthropic_api_key: SecretStr | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
+    # A name from the herald.model_providers entry points. Not a Literal: plug-ins add names.
+    model_provider: str = "openrouter"
+    # Empty means the provider's default model.
+    model_name: str | None = None
 
     # Send the traceback in 500 responses, so the web app shows it. Dev only: it leaks internals.
     debug: bool = False
@@ -62,6 +61,24 @@ class Settings(BaseSettings):
     # Audience and service account email expected in the Pub/Sub push JWT.
     gmail_push_audience: str | None = None
     gmail_push_service_account: str | None = None
+
+    def secret(self, name: str) -> str | None:
+        """An API key by its own variable name, from the environment, then the .env files.
+
+        pydantic-settings reads .env into fields only and never exports it to os.environ, so a
+        key kept in .env would never reach a provider that reads a bare variable. The key has
+        no HERALD_ prefix, so it is not a field. Empty counts as unset.
+        """
+        if value := os.environ.get(name):
+            return value
+        files = self.model_config.get("env_file") or ()
+        if isinstance(files, str | os.PathLike):
+            files = (files,)
+        found = None
+        # Later files win, as in pydantic-settings.
+        for file in files:
+            found = dotenv_values(file).get(name) or found
+        return found
 
 
 @lru_cache
