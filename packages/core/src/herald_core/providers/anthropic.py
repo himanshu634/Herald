@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from anthropic import APIError, AsyncAnthropic
+from anthropic import APIConnectionError, APIError, APIStatusError, AsyncAnthropic, Timeout
 from anthropic.types import ToolResultBlockParam, ToolUseBlock
 from pydantic import BaseModel, ValidationError
 
@@ -12,17 +12,31 @@ from herald_core.history import History
 from herald_core.model import (
     _SETUP_INSTRUCTIONS,
     MAX_TOOL_ROUNDS,
+    REQUEST_RETRIES,
+    REQUEST_TIMEOUT,
     RULES_ASK,
+    SETUP_TIMEOUT,
     ModelError,
     TriageModel,
     _Verdicts,
+    status_kind,
 )
 from herald_core.model_tools import ModelTool
 from herald_core.prompt import system_prompt, user_message
-from herald_core.schema import Email, Notes, RuleVerdict, SetupDraft, WorkspaceConfig
+from herald_core.schema import Email, FailureKind, Notes, RuleVerdict, SetupDraft, WorkspaceConfig
 from herald_core.tools import ToolError
 
 DEFAULT_MODEL = "claude-haiku-5-5"
+
+
+def error_kind(exc: APIError) -> FailureKind:
+    """Sorts an Anthropic SDK error by what trying again can fix."""
+    # Timeouts are connection errors in the SDK.
+    if isinstance(exc, APIConnectionError):
+        return FailureKind.UNAVAILABLE
+    if isinstance(exc, APIStatusError):
+        return status_kind(exc.status_code)
+    return FailureKind.UNREADABLE
 
 
 async def _run(by_name: dict[str, ModelTool], call: ToolUseBlock) -> ToolResultBlockParam:
@@ -47,12 +61,22 @@ class AnthropicModel:
         client: AsyncAnthropic | None = None,
         model: str = DEFAULT_MODEL,
         api_key: str | None = None,
+        max_retries: int = REQUEST_RETRIES,
     ) -> None:
-        self._client = client or AsyncAnthropic(api_key=api_key)
+        self._client = client or AsyncAnthropic(
+            api_key=api_key,
+            timeout=Timeout(REQUEST_TIMEOUT, connect=5.0),
+            max_retries=max_retries,
+        )
         self._model = model
 
     async def _parse[T: BaseModel](
-        self, system: str, content: str, output: type[T], tools: Sequence[ModelTool] = ()
+        self,
+        system: str,
+        content: str,
+        output: type[T],
+        tools: Sequence[ModelTool] = (),
+        request_timeout: float | None = None,
     ) -> T:
         by_name = {tool.name: tool for tool in tools}
         # The same tool list for the notes and rules calls, so tools never change a workspace's
@@ -75,10 +99,13 @@ class AnthropicModel:
                     # A copy: the list grows after the call, and a test client keeps the kwargs.
                     messages=list(messages),
                     output_format=output,
+                    **({"timeout": request_timeout} if request_timeout else {}),
                     **offered,
                     **choice,
                 )
-            except (APIError, ValidationError) as exc:
+            except APIError as exc:
+                raise ModelError(str(exc), error_kind(exc)) from exc
+            except ValidationError as exc:
                 raise ModelError(str(exc)) from exc
             if response.stop_reason != "tool_use":
                 break
@@ -119,7 +146,9 @@ class AnthropicModel:
 
     async def suggest_setup(self, name: str, description: str) -> SetupDraft:
         content = f"<business>\nName: {name}\n\n{description}\n</business>"
-        return await self._parse(_SETUP_INSTRUCTIONS, content, SetupDraft)
+        return await self._parse(
+            _SETUP_INSTRUCTIONS, content, SetupDraft, request_timeout=SETUP_TIMEOUT
+        )
 
 
 @dataclass(frozen=True)
@@ -128,9 +157,8 @@ class AnthropicProvider:
     default_model: str = DEFAULT_MODEL
     api_key_env: str = "ANTHROPIC_API_KEY"
 
-    def build(self, model: str, api_key: str, max_retries: int = 2) -> TriageModel:
-        client = AsyncAnthropic(api_key=api_key, max_retries=max_retries)
-        return AnthropicModel(client, model=model)
+    def build(self, model: str, api_key: str, max_retries: int = REQUEST_RETRIES) -> TriageModel:
+        return AnthropicModel(model=model, api_key=api_key, max_retries=max_retries)
 
 
 provider = AnthropicProvider()

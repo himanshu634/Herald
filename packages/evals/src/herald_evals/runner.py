@@ -139,15 +139,24 @@ async def run_case(
             callbacks=traced.callbacks,
         )
         record_outcome(tracing, traced, state["decision"], state.get("notes"))
+    # The node's deadline cancels the call inside the recorder, so a timeout reaches only the
+    # state. Count it too, or a slow API would be scored as the AI's judgement.
+    recorded = {error.split(":", 1)[0] for error in recorder.errors}
+    errors = recorder.errors + [
+        f"{failure.call}: {failure.error}"
+        for failure in state.get("ai_failures", [])
+        if failure.call not in recorded
+    ]
     return Trial(
         dataset=dataset.name,
         case_id=case.id,
         run=run,
         notes=state.get("notes"),
-        verdicts=state.get("verdicts", []),
+        # None when the rules call failed; that trial is a model error, not a verdict.
+        verdicts=state.get("verdicts") or [],
         word_flags=sorted(state.get("word_flags", set())),
         decision=state["decision"],
-        errors=recorder.errors,
+        errors=errors,
         asked=state.get("asked", []),
         ms=round((time.perf_counter() - started) * 1000),
         trace_id=traced.trace_id,

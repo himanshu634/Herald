@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from openai import APIError, AsyncOpenAI
+from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI, Timeout
 from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel, ValidationError
 
@@ -13,14 +13,18 @@ from herald_core.history import History
 from herald_core.model import (
     _SETUP_INSTRUCTIONS,
     MAX_TOOL_ROUNDS,
+    REQUEST_RETRIES,
+    REQUEST_TIMEOUT,
     RULES_ASK,
+    SETUP_TIMEOUT,
     ModelError,
     TriageModel,
     _Verdicts,
+    status_kind,
 )
 from herald_core.model_tools import ModelTool
 from herald_core.prompt import system_prompt, user_message
-from herald_core.schema import Email, Notes, RuleVerdict, SetupDraft, WorkspaceConfig
+from herald_core.schema import Email, FailureKind, Notes, RuleVerdict, SetupDraft, WorkspaceConfig
 from herald_core.tools import ToolError
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"
@@ -33,6 +37,16 @@ EXTRA_BODY: dict[str, Any] = {
     "provider": {"require_parameters": True},
     "reasoning": {"effort": "low"},
 }
+
+
+def error_kind(exc: APIError) -> FailureKind:
+    """Sorts an OpenAI SDK error from OpenRouter by what trying again can fix."""
+    # Timeouts are connection errors in the SDK.
+    if isinstance(exc, APIConnectionError):
+        return FailureKind.UNAVAILABLE
+    if isinstance(exc, APIStatusError):
+        return status_kind(exc.status_code)
+    return FailureKind.UNREADABLE
 
 
 def _function_tool(tool: ModelTool) -> dict[str, Any]:
@@ -69,12 +83,29 @@ async def _run(by_name: dict[str, ModelTool], name: str, arguments: str) -> str:
 
 
 class OpenRouterModel:
-    def __init__(self, client: AsyncOpenAI | None = None, model: str = DEFAULT_MODEL) -> None:
-        self._client = client or AsyncOpenAI(base_url=BASE_URL)
+    def __init__(
+        self,
+        client: AsyncOpenAI | None = None,
+        model: str = DEFAULT_MODEL,
+        api_key: str | None = None,
+        max_retries: int = REQUEST_RETRIES,
+    ) -> None:
+        self._client = client or AsyncOpenAI(
+            api_key=api_key,
+            base_url=BASE_URL,
+            timeout=Timeout(REQUEST_TIMEOUT, connect=5.0),
+            max_retries=max_retries,
+            default_headers={"X-Title": "Herald"},
+        )
         self._model = model
 
     async def _parse[T: BaseModel](
-        self, system: str, content: str, output: type[T], tools: Sequence[ModelTool] = ()
+        self,
+        system: str,
+        content: str,
+        output: type[T],
+        tools: Sequence[ModelTool] = (),
+        request_timeout: float | None = None,
     ) -> T:
         by_name = {tool.name: tool for tool in tools}
         offered: dict[str, Any] = {"tools": [_function_tool(t) for t in tools]} if tools else {}
@@ -102,11 +133,12 @@ class OpenRouterModel:
                         },
                     },
                     extra_body=EXTRA_BODY,
+                    **({"timeout": request_timeout} if request_timeout else {}),
                     **offered,
                     **choice,
                 )
             except APIError as exc:
-                raise ModelError(str(exc)) from exc
+                raise ModelError(str(exc), error_kind(exc)) from exc
             except Exception as exc:
                 # An error body inside a 200, or a null `choices`, fails in the SDK's parsing.
                 raise ModelError(f"Bad response: {exc}") from exc
@@ -181,7 +213,9 @@ class OpenRouterModel:
 
     async def suggest_setup(self, name: str, description: str) -> SetupDraft:
         content = f"<business>\nName: {name}\n\n{description}\n</business>"
-        return await self._parse(_SETUP_INSTRUCTIONS, content, SetupDraft)
+        return await self._parse(
+            _SETUP_INSTRUCTIONS, content, SetupDraft, request_timeout=SETUP_TIMEOUT
+        )
 
 
 @dataclass(frozen=True)
@@ -190,14 +224,8 @@ class OpenRouterProvider:
     default_model: str = DEFAULT_MODEL
     api_key_env: str = "OPENROUTER_API_KEY"
 
-    def build(self, model: str, api_key: str, max_retries: int = 2) -> TriageModel:
-        client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=BASE_URL,
-            max_retries=max_retries,
-            default_headers={"X-Title": "Herald"},
-        )
-        return OpenRouterModel(client, model=model)
+    def build(self, model: str, api_key: str, max_retries: int = REQUEST_RETRIES) -> TriageModel:
+        return OpenRouterModel(model=model, api_key=api_key, max_retries=max_retries)
 
 
 provider = OpenRouterProvider()

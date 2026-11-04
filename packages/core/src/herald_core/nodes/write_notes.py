@@ -3,12 +3,14 @@
 It may call sender_history first, when it decides it needs the sender's earlier emails.
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
 
-from herald_core.model import TriageModel
+from herald_core.model import MODEL_DEADLINE, TriageModel
 from herald_core.model_tools import SenderLookup, asked
+from herald_core.nodes.failures import record_failure
 from herald_core.nodes.log_names import names
 from herald_core.state import TriageState
 
@@ -23,18 +25,22 @@ def make_write_notes(model: TriageModel) -> Callable[[TriageState], Awaitable[Tr
         history = state.get("history")
         lookup = SenderLookup(history.sender if history else None)
         try:
-            notes = await model.write_notes(
-                state["email"],
-                state["business_name"],
-                state["config"],
-                history=history,
-                tools=[lookup],
-            )
+            async with asyncio.timeout(MODEL_DEADLINE):
+                notes = await model.write_notes(
+                    state["email"],
+                    state["business_name"],
+                    state["config"],
+                    history=history,
+                    tools=[lookup],
+                )
         # Any failure, not only ModelError: an uncaught one (a missing API key raises
         # TypeError) fails the whole run and leaves the email unread for good.
-        except Exception:
-            log.exception("write_notes failed for email %s", email_id)
-            return {"notes": None, "asked": asked("write_notes", lookup)}
+        except Exception as exc:
+            return {
+                "notes": None,
+                "asked": asked("write_notes", lookup),
+                "ai_failures": [record_failure(log, "write_notes", email_id, exc)],
+            }
         log.info(
             "email %s write_notes: urgency=%s anger=%d sure=%s flags=%s asked=%s in %d ms",
             email_id,

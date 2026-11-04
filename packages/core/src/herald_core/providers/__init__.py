@@ -7,7 +7,7 @@ installed package can add one. The entry point's name must equal the provider's 
 from importlib.metadata import entry_points
 from typing import Protocol
 
-from herald_core.model import TriageModel
+from herald_core.model import REQUEST_RETRIES, TriageModel
 
 ENTRY_POINT_GROUP = "herald.model_providers"
 
@@ -17,7 +17,9 @@ class ModelProvider(Protocol):
     default_model: str  # used when no model name is set
     api_key_env: str  # the one environment variable this provider reads its key from
 
-    def build(self, model: str, api_key: str, max_retries: int = 2) -> TriageModel: ...
+    def build(
+        self, model: str, api_key: str, max_retries: int = REQUEST_RETRIES
+    ) -> TriageModel: ...
 
 
 class UnknownProvider(ValueError):

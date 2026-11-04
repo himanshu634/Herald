@@ -8,7 +8,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from herald_core.schema import Urgency
+from herald_core.schema import AiFailure, Urgency
 
 SENDER_HISTORY = "sender_history"
 THREAD = "thread"
@@ -109,6 +109,8 @@ class EmailContext(BaseModel):
     ms: dict[str, int] = Field(default_factory=dict)
     # "node:tool" for each model tool call, e.g. "write_notes:sender_history".
     asked: list[str] = Field(default_factory=list)
+    # Model calls that gave no answer, and why. Empty when the AI answered both.
+    ai_failures: list[AiFailure] = Field(default_factory=list)
 
     @classmethod
     def from_run(
@@ -117,6 +119,7 @@ class EmailContext(BaseModel):
         failed: list[str],
         ms: dict[str, int],
         asked: list[str] | None = None,
+        ai_failures: list[AiFailure] | None = None,
     ) -> "EmailContext":
         sender, thread, corrections = history.sender, history.thread, history.corrections
         return cls(
@@ -128,4 +131,5 @@ class EmailContext(BaseModel):
             failed=failed,
             ms=ms,
             asked=asked or [],
+            ai_failures=ai_failures or [],
         )

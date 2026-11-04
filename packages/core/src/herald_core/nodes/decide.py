@@ -10,6 +10,9 @@ log = logging.getLogger(__name__)
 
 
 def run_decide(state: TriageState) -> TriageState:
+    notes_failure = next(
+        (f.kind for f in state.get("ai_failures", []) if f.call == "write_notes"), None
+    )
     decision = decide(
         notes=state.get("notes"),
         word_flags=state.get("word_flags", set()),
@@ -18,6 +21,7 @@ def run_decide(state: TriageState) -> TriageState:
         sender=state["email"].sender,
         history=state.get("history"),
         in_spam=state["email"].in_spam,
+        notes_failure=notes_failure,
     )
     # The reason is built from fixed strings and the owner's rule names, not the email.
     log.info(

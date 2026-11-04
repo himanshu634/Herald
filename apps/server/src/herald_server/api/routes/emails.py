@@ -7,6 +7,7 @@ from asyncer import asyncify
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from sqlmodel import Session, col, select
 
+from herald_core.model import ModelUnavailable
 from herald_server.api.deps import AgentApiDep, QueueDep, ServicesDep, SessionDep, WorkspaceDep
 from herald_server.api.schemas import EmailIn, EmailOut, TryIn, TryOut
 from herald_server.bus import BusEvent
@@ -182,9 +183,15 @@ async def try_config(
     model thinks.
     """
     await asyncify(_check_email)(services, workspace.id, email_id)
-    notes, decision = await trial_read(
-        agent_api, services.graph, email_id, data.config, services.tracing
-    )
+    try:
+        notes, decision = await trial_read(
+            agent_api, services.graph, email_id, data.config, services.tracing
+        )
+    except ModelUnavailable as exc:
+        # The dialog keeps the owner's changes and asks them to try again.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="ai_unavailable"
+        ) from exc
     return TryOut(status=STATUS_FOR_ROUTE[decision.route], notes=notes, decision=decision)
 
 

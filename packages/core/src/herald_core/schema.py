@@ -222,6 +222,30 @@ class Decision(BaseModel):
     floor_flags: list[RiskFlag] = Field(default_factory=list)
 
 
+class FailureKind(StrEnum):
+    """Why a model call gave no answer, sorted by what trying again can fix."""
+
+    # Down, busy, rate limited, slow or unreachable. A later try may work.
+    UNAVAILABLE = "unavailable"
+    # Herald's own key, model name or billing. Every email fails the same way until fixed.
+    SETUP = "setup"
+    # This request: refused, malformed, too large or answered badly. A retry fails again.
+    UNREADABLE = "unreadable"
+
+
+class AiFailure(BaseModel):
+    """One model call that gave no answer. Saved with the email, so "the AI was down" and
+    "the AI could not read it" stay apart in the app, the logs and the evals."""
+
+    call: str
+    kind: FailureKind
+    # The exception's class name, never its message: a message can quote the request.
+    error: str
+    # Seconds the API asked us to wait (429, 529), when it said.
+    retry_after: float | None = None
+    request_id: str | None = None
+
+
 class Alert(BaseModel):
     """What an email raises when `decide` routes it to "alert". SSE sends it as `alert.sent`."""
 
