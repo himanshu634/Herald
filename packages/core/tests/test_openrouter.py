@@ -15,6 +15,7 @@ from herald_core.providers import load_provider
 from herald_core.providers.openrouter import BASE_URL, OpenRouterModel
 from herald_core.schema import (
     Email,
+    FailureKind,
     Notes,
     Rule,
     RuleAction,
@@ -195,8 +196,6 @@ async def test_a_tool_request_on_the_last_round_raises():
     "body",
     [
         completion(None, refusal="No."),
-        completion(None),
-        completion("", finish="stop"),
         completion("not json"),
         completion('{"topic": "Orders and delivery"}'),
         completion(NOTES.model_dump_json(), finish="length"),
@@ -207,8 +206,6 @@ async def test_a_tool_request_on_the_last_round_raises():
     ],
     ids=[
         "refusal",
-        "null content",
-        "empty content",
         "not json",
         "fails validation",
         "length",
@@ -222,6 +219,32 @@ async def test_bad_replies_raise_model_error(body):
     model, _ = stub_model(body)
     with pytest.raises(ModelError):
         await model.write_notes(EMAIL, "Tripfold", CONFIG)
+
+
+@pytest.mark.parametrize("empty", [completion(None), completion("")], ids=["null", "blank"])
+async def test_an_empty_reply_is_asked_again_once(empty):
+    model, calls = stub_model(empty, answer(NOTES))
+    assert await model.write_notes(EMAIL, "Tripfold", CONFIG) == NOTES
+    assert len(calls) == 2
+    assert calls[0] == calls[1]  # no host named, so nothing to leave out
+
+
+async def test_the_retry_leaves_out_the_host_that_sent_nothing():
+    model, calls = stub_model(completion(None, provider="Darkbloom"), answer(NOTES))
+    assert await model.write_notes(EMAIL, "Tripfold", CONFIG) == NOTES
+    assert "ignore" not in calls[0]["provider"]
+    assert calls[1]["provider"] == {"require_parameters": True, "ignore": ["Darkbloom"]}
+    assert calls[1]["reasoning"] == {"effort": "low"}
+
+
+async def test_two_empty_replies_are_unavailable():
+    # Seen live: one host returns only the reasoning. The worker retries an unavailable AI.
+    reasoning_only = completion(None, message_extra={"reasoning": "Topic: orders."})
+    model, calls = stub_model(reasoning_only, reasoning_only)
+    with pytest.raises(ModelError) as raised:
+        await model.write_notes(EMAIL, "Tripfold", CONFIG)
+    assert raised.value.kind is FailureKind.UNAVAILABLE
+    assert len(calls) == 2
 
 
 async def test_http_error_raises_model_error():

@@ -7,6 +7,7 @@ from typing import Any
 
 from openai import APIConnectionError, APIError, APIStatusError, AsyncOpenAI, Timeout
 from openai.lib._pydantic import to_strict_json_schema
+from openai.types.chat.chat_completion import Choice
 from pydantic import BaseModel, ValidationError
 
 from herald_core.history import History
@@ -117,37 +118,25 @@ class OpenRouterModel:
             # The last round takes the tools away, so the model has to answer with the schema.
             last = bool(tools) and round_ == MAX_TOOL_ROUNDS
             choice = {"tool_choice": "none"} if last else {}
-            try:
-                response = await self._client.chat.completions.create(
-                    model=self._model,
-                    # A copy: the list grows after the call.
-                    messages=list(messages),
-                    # `create`, not `parse`: `parse` runs json.loads on tool arguments inside the
-                    # SDK, so broken arguments would fail the call instead of reaching `_run`.
-                    response_format={
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": output.__name__,
-                            "schema": to_strict_json_schema(output),
-                            "strict": True,
-                        },
-                    },
-                    extra_body=EXTRA_BODY,
-                    **({"timeout": request_timeout} if request_timeout else {}),
-                    **offered,
-                    **choice,
+            # Some hosts behind OpenRouter return only the model's reasoning, with no answer and
+            # no tool call. One empty reply gets one more try with that host left out; OpenRouter
+            # tends to send a retry back to the same host otherwise. A second empty reply is
+            # reported as unavailable, so the worker retries the email later.
+            ignore: list[str] = []
+            for _ in range(2):
+                picked, host = await self._complete(
+                    messages, output, request_timeout, offered, choice, ignore
                 )
-            except APIError as exc:
-                raise ModelError(str(exc), error_kind(exc)) from exc
-            except Exception as exc:
-                # An error body inside a 200, or a null `choices`, fails in the SDK's parsing.
-                raise ModelError(f"Bad response: {exc}") from exc
-            if not response.choices:
-                raise ModelError("No choices in the response")
-            picked = response.choices[0]
-            message = picked.message
-            if picked.finish_reason in ("length", "content_filter"):
-                raise ModelError(f"The model stopped early (finish_reason={picked.finish_reason})")
+                message = picked.message
+                if message.content or message.tool_calls or message.refusal:
+                    break
+                if host:
+                    ignore.append(host)
+            else:
+                raise ModelError(
+                    f"Empty reply twice (finish_reason={picked.finish_reason})",
+                    FailureKind.UNAVAILABLE,
+                )
             if not message.tool_calls:
                 break
             if last:
@@ -184,6 +173,53 @@ class OpenRouterModel:
             return output.model_validate_json(message.content)
         except ValidationError as exc:
             raise ModelError(str(exc)) from exc
+
+    async def _complete(
+        self,
+        messages: list[dict[str, Any]],
+        output: type[BaseModel],
+        request_timeout: float | None,
+        offered: dict[str, Any],
+        choice: dict[str, Any],
+        ignore: list[str],
+    ) -> tuple[Choice, str | None]:
+        """One request: the first choice and the host that served it. Every failure, and a
+        reply that stopped early, raises ModelError."""
+        extra_body = EXTRA_BODY
+        if ignore:
+            extra_body = {**EXTRA_BODY, "provider": {**EXTRA_BODY["provider"], "ignore": ignore}}
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                # A copy: the list grows after the call.
+                messages=list(messages),
+                # `create`, not `parse`: `parse` runs json.loads on tool arguments inside the
+                # SDK, so broken arguments would fail the call instead of reaching `_run`.
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": output.__name__,
+                        "schema": to_strict_json_schema(output),
+                        "strict": True,
+                    },
+                },
+                extra_body=extra_body,
+                **({"timeout": request_timeout} if request_timeout else {}),
+                **offered,
+                **choice,
+            )
+        except APIError as exc:
+            raise ModelError(str(exc), error_kind(exc)) from exc
+        except Exception as exc:
+            # An error body inside a 200, or a null `choices`, fails in the SDK's parsing.
+            raise ModelError(f"Bad response: {exc}") from exc
+        if not response.choices:
+            raise ModelError("No choices in the response")
+        picked = response.choices[0]
+        if picked.finish_reason in ("length", "content_filter"):
+            raise ModelError(f"The model stopped early (finish_reason={picked.finish_reason})")
+        # OpenRouter names the host in a top-level `provider` field the SDK does not model.
+        return picked, (response.model_extra or {}).get("provider")
 
     async def write_notes(
         self,
