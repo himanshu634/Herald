@@ -6,6 +6,7 @@ Write new migrations with the Alembic CLI from apps/server (see docs/architectur
 """
 
 import logging
+import sys
 from typing import Any
 
 # Registers its comparator on import, for every migration context in this process. Without
@@ -133,9 +134,16 @@ def upgrade(database_url: str) -> None:
 
 
 def main() -> None:
-    # Its own process, so a root handler is fine: it prints Alembic's "Running upgrade" lines.
-    logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(name)s: %(message)s")
-    upgrade(get_settings().database_url)
+    # Its own process, so a root handler is fine. INFO only for the "Running upgrade" lines and
+    # this module: autogenerate logs every difference at INFO, and the refusal already lists them.
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)-7s %(name)s: %(message)s")
+    for name in ("alembic.runtime.migration", __name__):
+        logging.getLogger(name).setLevel(logging.INFO)
+    try:
+        upgrade(get_settings().database_url)
+    except SchemaMismatch as error:
+        # A message the person can act on, without a traceback. Exits 1, so a deploy stops.
+        sys.exit(str(error))
 
 
 if __name__ == "__main__":
