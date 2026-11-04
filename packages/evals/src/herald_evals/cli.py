@@ -1,11 +1,11 @@
 """`herald-evals`: run the test emails through triage and write the score report.
 
-uv run herald-evals                         # every dataset, Claude, one run each
+uv run herald-evals                         # every dataset, OpenRouter, one run each
+uv run herald-evals --model anthropic       # Claude direct (needs ANTHROPIC_API_KEY)
 uv run herald-evals --repeats 3             # three runs each, to see unstable cases
 uv run herald-evals --case sue-is-a-name    # one case while fixing it
 uv run herald-evals --compare packages/evals/results/<earlier>.json
 uv run herald-evals --rescore packages/evals/results/<earlier>.json   # new labels, no calls
-uv run herald-evals --model fake            # offline smoke run of the harness itself
 """
 
 import argparse
@@ -17,11 +17,9 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from anthropic import AsyncAnthropic
-
-from herald_core.model import FakeModel, TriageModel
+from herald_core.model import TriageModel
 from herald_core.prompt import TRIAGE_INSTRUCTIONS
-from herald_core.providers.anthropic import DEFAULT_MODEL, AnthropicModel
+from herald_core.providers import load_provider, provider_names
 from herald_evals import dataset as ds
 from herald_evals.report import markdown, run_record, write
 from herald_evals.runner import Trial, run_all, stderr
@@ -32,33 +30,33 @@ from herald_server.tracing import build_tracing
 RESULTS = Path(__file__).resolve().parents[2] / "results"
 
 
-def _load_dotenv() -> None:
-    """Read ANTHROPIC_API_KEY from the nearest .env when it is not set.
+def _load_dotenv(name: str) -> str | None:
+    """Read `name` from the process environment, then the nearest .env.
 
-    The server's settings read only HERALD_* names, and the Anthropic client reads the
-    process environment, so a key kept in .env would otherwise never reach it.
+    The server's settings read only HERALD_* names and a provider's SDK may read none, so a
+    key kept in .env would otherwise never reach the provider.
     """
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return
+    if os.environ.get(name):
+        return os.environ[name]
     for folder in [Path.cwd(), *Path.cwd().parents]:
         env = folder / ".env"
         if env.is_file():
             for line in env.read_text(encoding="utf-8").splitlines():
                 key, sep, value = line.partition("=")
-                if sep and key.strip() == "ANTHROPIC_API_KEY" and value.strip():
-                    os.environ["ANTHROPIC_API_KEY"] = value.strip().strip("\"'")
-            return
+                if sep and key.strip() == name and value.strip():
+                    return value.strip().strip("\"'")
+            return None
+    return None
 
 
-def _model(provider: str, name: str) -> TriageModel:
-    if provider == "fake":
-        return FakeModel()
-    _load_dotenv()
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise SystemExit("ANTHROPIC_API_KEY is not set (in the environment or .env).")
+def _model(provider_name: str, model_name: str) -> TriageModel:
+    provider = load_provider(provider_name)
+    key = _load_dotenv(provider.api_key_env)
+    if not key:
+        raise SystemExit(f"{provider.api_key_env} is not set (in the environment or .env).")
     # More retries than the default 2: a burst of parallel calls can hit the rate limit, and
     # a call that still fails is reported as a model error, not a wrong answer.
-    return AnthropicModel(AsyncAnthropic(max_retries=6), model=name)
+    return provider.build(model_name, key, max_retries=6)
 
 
 def _commit() -> str:
@@ -81,8 +79,12 @@ def main(argv: list[str] | None = None) -> None:
         action="append",
         help=f"Built-in name or a TOML path. Default: all ({', '.join(ds.builtin_names())}).",
     )
-    parser.add_argument("--model", choices=["anthropic", "fake"], default="anthropic")
-    parser.add_argument("--model-name", default=os.environ.get("HERALD_MODEL_NAME", DEFAULT_MODEL))
+    parser.add_argument("--model", choices=provider_names(), default="openrouter", help="Provider.")
+    parser.add_argument(
+        "--model-name",
+        default=os.environ.get("HERALD_MODEL_NAME", ""),
+        help="Empty means the provider's default model.",
+    )
     parser.add_argument("--repeats", type=int, default=1, help="Runs per case.")
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--case", action="append", help="Run only these case ids.")
@@ -120,6 +122,7 @@ def main(argv: list[str] | None = None) -> None:
         ]
         _report(args, datasets, work, trials, recorded["meta"] | {"rescored": _stamp(started)})
         return
+    args.model_name = args.model_name or load_provider(args.model).default_model
     model = _model(args.model, args.model_name)
     # Tracing is on only when the Langfuse keys are set (dev). It is never built for --rescore.
     # Tag traces with the model this run uses, not the one in settings or .env.
@@ -155,9 +158,9 @@ def _meta(args: argparse.Namespace, started: datetime) -> dict:
     return {
         "started": _stamp(started),
         "model": args.model,
-        "model_name": args.model_name if args.model == "anthropic" else "fake",
-        # AnthropicModel sets no temperature, so the API default applies.
-        "temperature": "API default (1.0)" if args.model == "anthropic" else "n/a",
+        "model_name": args.model_name,
+        # No provider sets a temperature, so the API default applies.
+        "temperature": "API default",
         "repeats": args.repeats,
         "prompt_hash": hashlib.sha256(TRIAGE_INSTRUCTIONS.encode()).hexdigest()[:12],
         "commit": _commit(),
@@ -186,7 +189,8 @@ def _report(
     report = markdown(meta, scored, previous)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     suffix = "-rescored" if "rescored" in meta else ""
-    stem = f"{stamp}-{meta['model_name']}{suffix}"
+    # A model name can hold a slash ("openai/gpt-oss-20b"), which must not become a folder.
+    stem = f"{stamp}-{meta['model_name'].replace('/', '-')}{suffix}"
     json_path, md_path = write(args.out, stem, run_record(meta, info, scored), report)
     print(report)
     stderr(f"Report: {md_path}\nRun record: {json_path}")

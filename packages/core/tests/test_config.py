@@ -1,7 +1,6 @@
 import pytest
 from pydantic import ValidationError
 
-from herald_core.model import FakeModel
 from herald_core.schema import Rule, RuleAction, WorkspaceConfig
 
 
@@ -30,21 +29,6 @@ def test_rule_ids_are_unique():
 
 def test_old_configs_without_guidance_still_load():
     assert config().guidance == []
-
-
-async def test_fake_suggest_setup_is_deterministic():
-    model = FakeModel()
-    description = "We take cake orders and deliver on the day. Refunds by bank transfer."
-    first = await model.suggest_setup("Crumb", description)
-    assert first == await model.suggest_setup("Crumb", description)
-    assert [t.name for t in first.topics] == [
-        "Orders and delivery",
-        "Payments and refunds",
-        "Questions",
-    ]
-    assert all(t.meaning for t in first.topics)
-    assert first.facts == []
-    assert first.rules
 
 
 def test_string_topics_still_load():

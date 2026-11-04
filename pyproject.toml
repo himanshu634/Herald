@@ -21,10 +21,11 @@ extend-exclude = ["docs/superpowers"]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "FAST"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["herald_core", "herald_evals", "herald_server"]
+known-first-party = ["herald_core", "herald_evals", "herald_server", "scripted_model"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages/core/tests", "packages/evals/tests", "apps/server/tests"]
+pythonpath = ["tests_support"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = ["live: calls a real model provider; skipped without its API key"]

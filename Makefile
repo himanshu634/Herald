@@ -85,7 +85,7 @@ test: ## Run all tests
 	pnpm -C apps/web test
 
 # ARGS passes options through, e.g. make eval ARGS="--repeats 3" or ARGS="--case sue-is-a-name".
-eval: ## Run the triage evals on Claude and write the score report (needs ANTHROPIC_API_KEY)
+eval: ## Run the triage evals and write the score report (needs OPENROUTER_API_KEY)
 	uv run herald-evals $(ARGS)
 
 lint: ## Lint, format-check and type-check everything
