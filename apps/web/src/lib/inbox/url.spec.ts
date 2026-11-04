@@ -6,9 +6,10 @@ describe('viewFrom', () => {
 		expect(viewFrom('closed')).toBe('closed');
 	});
 
-	it('falls back to Needs you for anything else', () => {
-		expect(viewFrom('archive')).toBe('needs-you');
-		expect(viewFrom('')).toBe('needs-you');
+	it('falls back to the alert desk for anything else, old Needs you links too', () => {
+		expect(viewFrom('archive')).toBe('alerts');
+		expect(viewFrom('')).toBe('alerts');
+		expect(viewFrom('needs-you')).toBe('alerts');
 	});
 });
 

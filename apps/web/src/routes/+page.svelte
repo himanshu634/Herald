@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import {
 		api,
 		type Email,
@@ -11,6 +12,9 @@
 		type WorkspaceConfig
 	} from '#lib/api/client.js';
 	import { WorkspaceEvents } from '#lib/events.svelte.js';
+	import AlertFocus from '#lib/inbox/AlertFocus.svelte';
+	import AlertQueue from '#lib/inbox/AlertQueue.svelte';
+	import AlertsClear from '#lib/inbox/AlertsClear.svelte';
 	import BusinessMenu from '#lib/inbox/BusinessMenu.svelte';
 	import EmailPanel from '#lib/inbox/EmailPanel.svelte';
 	import EmailTable from '#lib/inbox/EmailTable.svelte';
@@ -26,9 +30,12 @@
 	import {
 		ACTIONS,
 		EMPTY,
-		VIEWS,
+		INBOX_VIEWS,
 		actionsFor,
+		alertsFor,
 		countByView,
+		deskQuestionsFor,
+		nextAlert,
 		questionActionsFor,
 		questionsFor,
 		senderName,
@@ -69,6 +76,8 @@
 	let readSpam = $state(false);
 
 	const view = $derived(viewFrom(params.view));
+	// The alert desk is the app's default view: its own layout, rail item and keys.
+	const desk = $derived(view === 'alerts');
 	// Search keeps its own copy. runed copies the URL back over its values whenever the URL
 	// changes, so a key typed while an earlier URL update lands would be lost from the box.
 	let query = $state(params.q);
@@ -99,6 +108,17 @@
 	const counts = $derived(countByView(emails));
 	const visible = $derived(visibleEmails(emails, view, filters));
 	const questions = $derived(questionsFor(emails));
+	const queue = $derived(alertsFor(emails));
+	const deskQuestions = $derived(deskQuestionsFor(emails));
+	// What J and K step through and what opens by default: the queue on the desk, else the table.
+	const stepList = $derived(desk ? queue : visible);
+	// Where the open alert stood in the queue. When On it or Not urgent takes it out, the alert
+	// that moved up into its place opens, as the desk promises ("the next alert opens").
+	let deskAt = $state(0);
+	// Alerts that arrived over SSE while this tab was open and haven't been opened. A fresh
+	// connection replays nothing (only a reconnect with Last-Event-ID does), so a page load
+	// never marks old alerts as new.
+	const fresh = new SvelteSet<string>();
 	// Closes by itself once the email stops asking, say after On it from another tab.
 	const asking = $derived(questions.find((e) => e.id === askingId) ?? null);
 	// The email the owner just replied to stays open, even once "Send and mark done" drops it
@@ -108,7 +128,10 @@
 	const pinned = $derived(emails.find((e) => e.id === pinnedId) ?? null);
 	// Keep the owner's choice while it is in view; otherwise open the top email.
 	const selected = $derived(
-		pinned ?? visible.find((e) => e.id === params.email) ?? visible[0] ?? null
+		pinned ??
+			stepList.find((e) => e.id === params.email) ??
+			(desk ? nextAlert(queue, deskAt) : visible[0]) ??
+			null
 	);
 
 	const replies = new ReplyDesk({
@@ -138,7 +161,12 @@
 	const currentId = $derived(current?.id ?? null);
 	const canReply = $derived(current ? replyState(current, mailboxes) : 'no_mailbox');
 	const tabs = $derived<TabItem[]>(
-		VIEWS.map((v) => ({ id: v.id, label: v.label, count: counts[v.id], countTone: v.countTone }))
+		INBOX_VIEWS.map((v) => ({
+			id: v.id,
+			label: v.label,
+			count: counts[v.id],
+			countTone: v.countTone
+		}))
 	);
 
 	api
@@ -181,6 +209,7 @@
 				if (current && event.data.email_id === current.id) replies.load(current);
 				return;
 			}
+			if (event.type === 'alert.sent') fresh.add(event.data.email_id as string);
 			const done = event.type === 'email.noted' ? rereading : null;
 			if (done && event.data.email_id === done.id) {
 				toast = rereadOutcome(done.sender, event.data);
@@ -212,6 +241,18 @@
 		if (!currentId) return;
 		const email = untrack(() => current);
 		if (email) replies.load(email);
+	});
+
+	// Keep the open alert on the URL, so a new alert that sorts above it never swaps the page
+	// under the owner. Remember its place for when acting takes it out of the queue.
+	$effect(() => {
+		if (!desk || !selected || composing) return;
+		const at = queue.indexOf(selected);
+		if (at < 0) return;
+		deskAt = at;
+		fresh.delete(selected.id);
+		const id = selected.id;
+		if (untrack(() => params.email) !== id) untrack(() => (params.email = id));
 	});
 
 	// Messages clear themselves after a few seconds.
@@ -383,12 +424,12 @@
 
 	function move(step: number) {
 		// The list is hidden while composing; moving would change the panel under the draft.
-		if (composing || !visible.length) return;
+		if (composing || !stepList.length) return;
 		// Step from the open email, pinned or not. One that left the view starts from the top.
 		const from = selected;
 		pinnedId = null;
-		const index = from ? visible.indexOf(from) : -1;
-		params.email = visible[Math.min(visible.length - 1, Math.max(0, index + step))].id;
+		const index = from ? stepList.indexOf(from) : -1;
+		params.email = stepList[Math.min(stepList.length - 1, Math.max(0, index + step))].id;
 	}
 
 	function toggleFull() {
@@ -418,7 +459,7 @@
 			d: () => act('done'),
 			e: toggleFull,
 			r: openReply,
-			'/': () => !composing && search?.focus()
+			'/': () => !composing && !desk && search?.focus()
 		};
 		const run = keys[event.key];
 		if (!run) return;
@@ -428,10 +469,15 @@
 </script>
 
 <svelte:window {onkeydown} />
-<svelte:head><title>Inbox · Herald</title></svelte:head>
+<svelte:head><title>{desk ? 'Alerts' : 'Inbox'} · Herald</title></svelte:head>
 
 <div class="flex min-h-screen">
-	<Rail />
+	<Rail
+		current={open ? (desk ? 'alerts' : 'inbox') : null}
+		alerts={counts.alerts}
+		workspace={workspaceId ?? ''}
+		onpick={(d) => chooseView(d === 'alerts' ? 'alerts' : 'needs-a-look')}
+	/>
 
 	<!-- Wide screens: fit the viewport so the list and the email panel scroll on their own.
 		Otherwise a long email scrolls the list and header away with it. -->
@@ -439,7 +485,9 @@
 		<header
 			class="flex flex-wrap items-end justify-between gap-3 border-b border-line px-4 pt-2.5 lg:border-b-0"
 		>
-			{#if open}
+			{#if open && desk}
+				<h1 class="pb-2 text-2xl font-extrabold">Alerts</h1>
+			{:else if open}
 				<Tabs items={tabs} bind:selected={() => view, chooseView} label="Inbox views" />
 			{:else}
 				<p class="pb-2 text-2xl font-extrabold">{workspace?.name ?? 'Herald'}</p>
@@ -535,7 +583,56 @@
 			</div>
 		{/if}
 
-		{#if open}
+		{#if open && desk && !composing}
+			<div class="flex flex-1 flex-col border-t border-line lg:min-h-0 lg:flex-row">
+				{#if current}
+					{@const at = queue.indexOf(current)}
+					<!-- On a phone the open alert comes first and the queue follows it. -->
+					<div
+						class="order-2 border-t border-line bg-surface lg:order-1 lg:w-88 lg:flex-none lg:overflow-y-auto lg:border-t-0 lg:border-r"
+					>
+						<AlertQueue
+							alerts={queue}
+							selectedId={current.id}
+							{fresh}
+							questions={deskQuestions}
+							onselect={(id) => {
+								pinnedId = null;
+								params.email = id;
+							}}
+							onanswer={(id) => (askingId = id)}
+						/>
+					</div>
+					<main class="order-1 flex min-w-0 flex-1 flex-col lg:order-2 lg:overflow-y-auto">
+						<AlertFocus
+							email={current}
+							position={at >= 0 ? at + 1 : null}
+							total={queue.length}
+							config={workspace.config}
+							{busy}
+							full={fullId === current.id}
+							ontogglefull={toggleFull}
+							onact={act}
+							onmove={move}
+							onanswer={() => (askingId = current?.id ?? null)}
+							replyState={canReply}
+							replies={replies.list}
+							{connecting}
+							onreply={openReply}
+							onreconnect={() => connectGmail()}
+						/>
+					</main>
+				{:else}
+					<AlertsClear
+						address={mailbox?.email_address}
+						questions={deskQuestions.length}
+						needsALook={counts['needs-a-look']}
+						onanswer={() => (askingId = deskQuestions[0]?.id ?? null)}
+						onview={chooseView}
+					/>
+				{/if}
+			</div>
+		{:else if open}
 			<div class="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
 				<main
 					class="flex min-w-0 flex-1 flex-col gap-3 p-4 lg:overflow-y-auto lg:border-t lg:border-line"

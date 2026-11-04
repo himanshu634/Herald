@@ -8,7 +8,7 @@ describe('tones', () => {
 	});
 
 	it('names the owner-facing statuses the way the docs do', () => {
-		expect(STATUS.alerted.label).toBe('Needs you now');
+		expect(STATUS.alerted.label).toBe('Alerts');
 		expect(STATUS.needs_a_look.label).toBe('Needs a look');
 		expect(STATUS.closed.label).toBe('Closed quietly');
 	});

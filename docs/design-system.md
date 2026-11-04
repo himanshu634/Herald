@@ -17,7 +17,7 @@ The web app styles everything with **Tailwind CSS v4**, and the tokens below are
 ## Principles
 
 1. **One loud colour, and it means "act here".** Chartreuse is only for the primary action, the selected row or tab, and text selection. It never shows a status.
-2. **Status has its own colours.** Red for needs you now, amber for needs a look, green for in progress, grey for everything Herald already handled. A status always shows its words too, never colour alone.
+2. **Status has its own colours.** Red for alerts, amber for needs a look, green for in progress, grey for everything Herald already handled. A status always shows its words too, never colour alone.
 3. **Show the proof.** Any note Herald writes (urgency, anger, a rule that fired) sits next to the line from the email behind it.
 4. **The safety floor looks different from everything else.** Ink with chartreuse in light mode, inverted in dark. Nothing else uses that pair, and no rule or setting hides it.
 5. **Dense, not cramped.** 13 px tables, 42 px rows, 32 px controls. Density comes from fewer decorations, not smaller targets.
@@ -65,7 +65,7 @@ Each tone is a `-bg` and `-fg` pair (`bg-danger-bg text-danger-fg`). The mapping
 
 | Tone | Status | Urgency | Other |
 | --- | --- | --- | --- |
-| `danger` | Needs you now (`alerted`) | Urgent | |
+| `danger` | Alerts (`alerted`) | Urgent | |
 | `warning` | Needs a look (`needs_a_look`) | High | |
 | `success` | In progress (`in_progress`) | | |
 | `neutral` | Inbox (`inbox`) | Normal | About to cancel |
@@ -73,7 +73,7 @@ Each tone is a `-bg` and `-fg` pair (`bg-danger-bg text-danger-fg`). The mapping
 | `floor` | | | Safety floor flags only |
 | `accent` | | | Important contact only |
 
-The status words are fixed: **Needs you now, Needs a look, Inbox, In progress, Done, Closed quietly, Reading.** Use them in tags, tabs, filters and copy alike.
+The status words are fixed: **Alerts, Needs a look, Inbox, In progress, Done, Closed quietly, Reading.** Use them in tags, tabs, filters and copy alike.
 
 ### Type
 
@@ -119,7 +119,7 @@ A raised face sits `--press-depth` (3 px) above a darker base. On click it drops
 | `secondary` | Every other action (**Not urgent**, **Done**, **Test on past emails**) | White face, 3:1 edge |
 | `quiet` | Low-stakes actions and links in toolbars (**Open thread**) | No base, no press |
 
-- Pass `kbd` to show the shortcut. The owner actions are fixed: **O** On it, **N** Not urgent, **I** Move to Inbox, **D** Done, **E** read the whole email, **R** Reply (in the composer, **Esc** goes back to the list and **⌘↵** or Ctrl+Enter is Send and mark done), **/** Search, **J** and **K** next and previous email. Wiring the key is the screen's job; the button only shows it.
+- Pass `kbd` to show the shortcut. The owner actions are fixed: **O** On it, **N** Not urgent, **I** Move to Inbox, **D** Done, **E** read the whole email, **R** Reply (in the composer, **Esc** goes back to the list and **⌘↵** or Ctrl+Enter is Send and mark done), **/** Search, **J** and **K** next and previous email. Wiring the key is the screen's job; the button only shows it. The key is hidden on touch screens, which have no keyboard.
 - Labels say what happens, and the result uses the same words: the button **Not urgent** gives the message "Moved to Inbox. Herald saved this as a correction."
 - There is no destructive red button. Herald never deletes; closing is reversible.
 
@@ -133,7 +133,7 @@ Five bars, filled with ink. Anger is never shown with urgency colours: a calm em
 
 ### Tabs
 
-Browser-style tabs across the top of a view. A tab can carry a count (`Tag`), with a danger tone only for **Needs you**. Arrow keys move between tabs.
+Browser-style tabs across the top of a view. A tab can carry a count (`Tag`), with a warning tone only for **Needs a look**. Alerts are not a tab: they have their own desk. Arrow keys move between tabs.
 
 ### FilterChip
 
@@ -182,14 +182,15 @@ The mark is three emails on a tile, with one pulled out of the pile and lit char
 
 ## Patterns
 
-- **The inbox** has tabs per status (Needs you, Inbox, In progress, Done, Closed quietly, All mail) and a table: Status, From, Summary, Topic (wide screens only), Urgency, Anger, Why, Time. Sorted by status, then urgency, then anger, then newest, the way the decide step orders them. The selected row gets `bg-accent-soft` and a chartreuse edge.
+- **The alert desk** is what the app opens on, under **Alerts** in the rail, where a red badge counts open alerts from any screen. On the left, the queue: every alerted email in decide's order, worst first, with no search or filter, each with the sender, why it alerted and the time. An alert that arrived while the page was open is marked **New** until it is opened. On the right, one alert at a time: "Alert 2 of 6", urgency and anger, the summary as the headline, the customer's quoted lines, **Why Herald alerted you** (the safety floor callout, or the reason and the owner's rule in their own words: "When …, alert me."), Herald's question if it is unsure, then the email and the owner's replies. The actions sit in a bar pinned to the bottom: **On it**, **Not urgent**, **Reply**. Acting takes the alert out of the queue and opens the one that moved into its place. Herald's questions about other mail are listed under the queue. With no alerts, the desk says so and points to the questions, Needs a look and the inbox. On a phone the open alert comes first, with Previous and Next, and the queue follows it.
+- **The inbox** has tabs per status (Needs a look, Inbox, In progress, Done, Closed quietly, All mail) and a table: Status, From, Summary, Topic (wide screens only), Urgency, Anger, Why, Time. Sorted by status, then urgency, then anger, then newest, the way the decide step orders them. The selected row gets `bg-accent-soft` and a chartreuse edge.
 - **The side panel** explains the open email. It is one card on the canvas (`rounded-lg border-line bg-surface`, the table's gap away), with its parts split by dashed dividers, never cards inside it: the subject, then **Why it's here** (the safety floor callout if there is one, the reason in bold, Herald's summary, the quoted lines as proof in `bg-accent-tint`, then the notes), then **The email**, then the actions at the bottom. The email part shows a three-line preview; **E** or "Read it all" opens the whole email with the proof highlighted, and picking another email folds it again. An email with no notes (Herald is still reading, or the AI failed) opens in full, because there is no summary to read instead.
 - **The safety floor callout** is a `bg-floor-bg text-floor-fg` block with the `shield` icon and one sentence: "Safety floor: legal threat. This always alerts you, whatever your rules say."
 - **Herald's questions** sit above the search and filters, in every tab, while any unsure email is not yet taken over: a `border-ink` card with a `bg-warning-bg` header line, one row per question with a chartreuse `?` mark, the sender, the email's status and **Answer**. These emails leave the table, so nothing shows twice. **Answer** opens the question dialog: the email on the left with the proof highlighted, Herald's question in an ink block on the right, the fact draft (dashed `accent-base` edge when Herald wrote it), then the owner's facts, each with **Change** (and **Replace** at the 10-fact limit). The footer has **Save and re-read this email**, **Not now**, and the email's own actions.
 - **What Herald handled** is always one line, never hidden: "Also today: 18 in the inbox, 2 in progress, 40 closed quietly." with a way to see them.
 - **Live** is the `live` dot with "Live". Nothing else in the app animates on its own.
 - **The error page** (`routes/+error.svelte`) is the one playful screen: the logo's lit row has floated out of the pile and a magnifying glass hunts for it (`lib/shell/LostMail.svelte`, animations in `tokens.css`). It names the problem in plain words and always offers the way back to the inbox.
-- **Empty states** tell the owner what happens next: "Nothing needs you. Urgent emails will show up here first."
+- **Empty states** tell the owner what happens next: "No alerts. Herald puts an email here the moment it can’t wait."
 
 ## Copy
 

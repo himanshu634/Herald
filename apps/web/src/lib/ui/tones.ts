@@ -19,7 +19,7 @@ export type Urgency = 'urgent' | 'high' | 'normal' | 'low';
 
 export const STATUS: Record<EmailStatus, { label: string; tone: Tone }> = {
 	new: { label: 'Reading', tone: 'muted' },
-	alerted: { label: 'Needs you now', tone: 'danger' },
+	alerted: { label: 'Alerts', tone: 'danger' },
 	needs_a_look: { label: 'Needs a look', tone: 'warning' },
 	inbox: { label: 'Inbox', tone: 'neutral' },
 	in_progress: { label: 'In progress', tone: 'success' },
