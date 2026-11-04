@@ -215,7 +215,7 @@
 				<Button onclick={() => (toast = 'Moved to Inbox. Herald saved this as a correction.')}
 					>Show a toast</Button
 				>
-				<span class="text-sm text-muted">Bottom centre, the action's own words.</span>
+				<span class="text-sm text-muted">Drops in at the top centre, the action's own words.</span>
 			</div>
 		</Panel>
 
