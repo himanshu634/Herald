@@ -102,14 +102,16 @@ ALERT_ON_CUSTOMERS = CONFIG.model_copy(
         ("sam.lee and 3 others are new in your feed", "Manage your email preferences."),
     ],
 )
-async def test_promotions_close_without_judging_rules(subject, body):
+async def test_promotions_close_before_the_rules(subject, body):
+    # Rules are judged beside the notes, so promotions get verdicts too ("Customer review
+    # roundup" matches the alert rule). decide closes them before it reads any.
     model = CountingModel()
     state = await triage(
         build_graph(model), email(subject, body), ALERT_ON_CUSTOMERS, business_name="Tripfold"
     )
     assert state["decision"].route is Route.CLOSED
-    assert state["verdicts"] == []
-    assert model.rule_calls == 0
+    assert state["decision"].fired_rule_ids == []
+    assert model.rule_calls == 1
 
 
 async def test_customer_email_still_judges_rules():
@@ -270,6 +272,51 @@ async def test_both_model_calls_are_offered_sender_history():
     assert model.seen["write_notes_tools"] == [SENDER_HISTORY]
     assert model.seen["judge_rules_tools"] == [SENDER_HISTORY]
     assert state["asked"] == []  # offered, not called
+
+
+class BothAskModel(AskingModel):
+    """Calls sender_history in both model calls, which run in parallel."""
+
+    async def judge_rules(self, email, business_name, config, history=None, tools=()):
+        (tool,) = tools
+        self.answers.append(await tool.run({}))
+        return await super().judge_rules(email, business_name, config, history=history)
+
+
+async def test_parallel_model_calls_both_record_their_lookups():
+    tools = Toolbox([StaticTool(SENDER_HISTORY, SenderHistoryIn, SENDER)])
+    state = await triage(
+        build_graph(BothAskModel()),
+        email("Order", "Where?"),
+        CONFIG,
+        business_name="Tripfold",
+        tools=tools,
+    )
+    assert sorted(state["asked"]) == ["judge_rules:sender_history", "write_notes:sender_history"]
+
+
+class GatedModel(FakeModel):
+    """Each call waits for the other to start, so the run only ends if they overlap."""
+
+    def __init__(self) -> None:
+        self.started = {"notes": asyncio.Event(), "rules": asyncio.Event()}
+
+    async def write_notes(self, email, business_name, config, history=None, tools=()):
+        self.started["notes"].set()
+        await asyncio.wait_for(self.started["rules"].wait(), timeout=2)
+        return await super().write_notes(email, business_name, config, history=history)
+
+    async def judge_rules(self, email, business_name, config, history=None, tools=()):
+        self.started["rules"].set()
+        await asyncio.wait_for(self.started["notes"].wait(), timeout=2)
+        return await super().judge_rules(email, business_name, config, history=history)
+
+
+async def test_notes_and_rules_calls_run_at_the_same_time():
+    state = await triage(
+        build_graph(GatedModel()), email("Order", "Where?"), CONFIG, business_name="Tripfold"
+    )
+    assert state["notes"] is not None
 
 
 async def test_model_lookup_is_served_from_the_gathered_history():

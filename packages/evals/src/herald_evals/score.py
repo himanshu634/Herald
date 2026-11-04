@@ -128,7 +128,8 @@ def check(case: Case, trial: Trial, rule_ids: Iterable[str] = ()) -> list[Check]
     verdicts = {v.rule_id: v for v in trial.verdicts}
     for rule_id, want in expect.rules.items():
         verdict = verdicts.get(rule_id)
-        # No verdict (rules skipped for not-for-business mail, or a missing answer) is a "no".
+        # No verdict is a "no": the model lists only the rules it matched, and skips them all
+        # when the workspace has no rules.
         matched = verdict.matched if verdict else False
         got = ("yes" if matched else "no") + (
             f' "{verdict.quote}"' if verdict and verdict.quote else ""
@@ -138,7 +139,7 @@ def check(case: Case, trial: Trial, rule_ids: Iterable[str] = ()) -> list[Check]
                 name=f"rule:{rule_id}",
                 ok=matched == want,
                 expected="yes" if want else "no",
-                got=got if verdict else "no (not judged)",
+                got=got if verdict else "no (not listed)",
             )
         )
     if notes and rule_talk(notes.summary, rule_ids):
