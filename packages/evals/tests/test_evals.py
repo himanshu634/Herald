@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from herald_core.model import FakeModel, ModelError
+from herald_core.model import ModelError
 from herald_core.schema import Decision, Notes, Quote, Route, RuleVerdict, Urgency
+from herald_evals import cli
 from herald_evals import dataset as ds
 from herald_evals.cli import main
 from herald_evals.report import markdown
@@ -15,6 +16,7 @@ from herald_evals.runner import Trial, run_all
 from herald_evals.score import check, grounded, rule_talk, score_trials, summarise
 from herald_server.seed import TRIPFOLD
 from herald_server.tracing import NO_TRACING, Run
+from scripted_model import ScriptedModel
 
 
 @pytest.mark.parametrize("name", ds.builtin_names())
@@ -161,14 +163,15 @@ def test_false_alarms_count_alerts_on_should_not_alert_cases():
     assert str(scores.missed_alerts) == "—"
 
 
-class FailingModel(FakeModel):
-    async def write_notes(self, email, business_name, config, history=None, tools=()):
-        raise ModelError("rate limited")
+@pytest.fixture
+def scripted_cli(monkeypatch):
+    """Run the CLI on a scripted model, so no provider or key is needed."""
+    monkeypatch.setattr("herald_evals.cli._model", lambda provider, name: ScriptedModel())
 
 
 async def test_runner_records_model_errors_the_graph_swallows():
     data = ds.load_named("tripfold")
-    trials = await run_all(FailingModel(), [(data, data.cases[0])])
+    trials = await run_all(ScriptedModel(notes=ModelError("rate limited")), [(data, data.cases[0])])
     assert trials[0].errors == ["write_notes: rate limited"]
     assert trials[0].decision.route is Route.NEEDS_A_LOOK
 
@@ -176,7 +179,7 @@ async def test_runner_records_model_errors_the_graph_swallows():
 async def test_runner_feeds_recorded_history_to_the_model():
     seen = []
 
-    class Spy(FakeModel):
+    class Spy(ScriptedModel):
         async def write_notes(self, email, business_name, config, history=None, tools=()):
             seen.append((email.thread_id, history))
             return await super().write_notes(email, business_name, config, history)
@@ -189,17 +192,19 @@ async def test_runner_feeds_recorded_history_to_the_model():
     assert history.thread and history.thread.messages
 
 
-def test_fake_run_writes_a_report(tmp_path, capsys):
-    main(["--model", "fake", "--out", str(tmp_path)])
+def test_run_writes_a_report(scripted_cli, tmp_path, capsys):
+    main(["--out", str(tmp_path)])
     files = sorted(p.suffix for p in tmp_path.iterdir())
     assert files == [".json", ".md"]
     assert "# Herald score report" in capsys.readouterr().out
 
 
-def test_rescore_reads_an_earlier_run_without_a_model(tmp_path, capsys):
-    main(["--model", "fake", "--dataset", "ledgerly", "--out", str(tmp_path / "first")])
+def test_rescore_reads_an_earlier_run_without_a_model(scripted_cli, tmp_path, capsys, monkeypatch):
+    main(["--dataset", "ledgerly", "--out", str(tmp_path / "first")])
     first = next((tmp_path / "first").glob("*.json"))
     capsys.readouterr()
+    # A rescore re-reads the record; it must neither build a model nor need a key.
+    monkeypatch.setattr("herald_evals.cli._model", lambda *a: pytest.fail("rescore built a model"))
     main(["--rescore", str(first), "--out", str(tmp_path / "again")])
     again = next((tmp_path / "again").glob("*.json"))
     assert again.name.endswith("-rescored.json")
@@ -209,9 +214,9 @@ def test_rescore_reads_an_earlier_run_without_a_model(tmp_path, capsys):
 def test_report_names_unreviewed_cases():
     cases = {("d", "c1"): _case(route="inbox")}
     meta = {
-        "model": "fake",
-        "model_name": "fake",
-        "temperature": "n/a",
+        "model": "openrouter",
+        "model_name": "openai/gpt-oss-20b",
+        "temperature": "API default",
         "repeats": 1,
         "prompt_hash": "x",
         "commit": "y",
@@ -249,7 +254,7 @@ async def test_run_all_traces_each_trial():
     tracing = RecordingTracing()
     data = ds.load_named("tripfold")
     trials = await run_all(
-        FakeModel(), [(data, data.cases[0])], repeats=2, tracing=tracing, session="eval-test"
+        ScriptedModel(), [(data, data.cases[0])], repeats=2, tracing=tracing, session="eval-test"
     )
     assert [r[0] for r in tracing.runs] == ["eval", "eval"]
     kw = tracing.runs[0][1]
@@ -258,7 +263,7 @@ async def test_run_all_traces_each_trial():
     assert {s[1] for s in tracing.scores} == {"route", "floor", "unsure", "ai_failed"}
 
 
-def test_traces_carry_the_model_the_run_uses(tmp_path, monkeypatch):
+def test_traces_carry_the_model_the_run_uses(scripted_cli, tmp_path, monkeypatch):
     seen = []
 
     def capture(settings):
@@ -266,9 +271,51 @@ def test_traces_carry_the_model_the_run_uses(tmp_path, monkeypatch):
         return NO_TRACING
 
     monkeypatch.setattr("herald_evals.cli.build_tracing", capture)
-    # Settings say Claude; the run uses the fake model, so the tag must say "fake".
+    # Settings say Claude; the run uses another provider, so the tag must follow the run.
     monkeypatch.setenv("HERALD_MODEL_PROVIDER", "anthropic")
-    monkeypatch.setenv("HERALD_MODEL_NAME", "claude-from-env")
-    main(["--model", "fake", "--dataset", "ledgerly", "--out", str(tmp_path)])
-    assert seen[0].model_provider == "fake"
-    assert seen[0].model_name == "claude-from-env"  # build_tracing turns fake into the tag
+    monkeypatch.setenv("HERALD_MODEL_NAME", "")
+    main(["--model", "openrouter", "--dataset", "ledgerly", "--out", str(tmp_path)])
+    assert seen[0].model_provider == "openrouter"
+    assert seen[0].model_name == "openai/gpt-oss-20b"  # empty name resolves to the default
+
+
+def test_report_file_name_has_no_slash(scripted_cli, tmp_path):
+    main(["--dataset", "ledgerly", "--model-name", "openai/gpt-oss-20b", "--out", str(tmp_path)])
+    assert all("/" not in p.name for p in tmp_path.iterdir())
+    assert any(p.name.endswith("-openai-gpt-oss-20b.json") for p in tmp_path.iterdir())
+
+
+class _StubProvider:
+    api_key_env = "STUB_API_KEY"
+
+    def __init__(self):
+        self.built: list[tuple] = []
+
+    def build(self, model, api_key, max_retries=2):
+        self.built.append((model, api_key, max_retries))
+        return ScriptedModel()
+
+
+def test_cli_model_needs_the_providers_key(monkeypatch):
+    stub = _StubProvider()
+    monkeypatch.setattr(cli, "load_provider", lambda name: stub)
+    monkeypatch.setattr(cli, "get_settings", lambda: type("S", (), {"secret": lambda s, n: ""})())
+    with pytest.raises(SystemExit, match="STUB_API_KEY"):
+        cli._model("stub", "m")
+    assert stub.built == []
+
+
+def test_cli_model_builds_with_the_key_and_more_retries(monkeypatch):
+    stub = _StubProvider()
+    asked: list[str] = []
+
+    class _Settings:
+        def secret(self, name):
+            asked.append(name)
+            return "sk-stub"
+
+    monkeypatch.setattr(cli, "load_provider", lambda name: stub)
+    monkeypatch.setattr(cli, "get_settings", lambda: _Settings())
+    assert isinstance(cli._model("stub", "m"), ScriptedModel)
+    assert asked == ["STUB_API_KEY"]
+    assert stub.built == [("m", "sk-stub", 6)]

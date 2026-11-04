@@ -5,7 +5,7 @@ from arq import Retry
 from test_api import demo_workspace, send
 
 from herald_core.graph import build_graph
-from herald_core.model import FakeModel, ModelError
+from herald_core.model import ModelError
 from herald_core.schema import FailureKind
 from herald_server.worker import main as worker_main
 from herald_server.worker.main import (
@@ -14,9 +14,10 @@ from herald_server.worker.main import (
     model_retry_defer,
     process_email_job,
 )
+from scripted_model import ScriptedModel
 
 
-class DownModel(FakeModel):
+class DownModel(ScriptedModel):
     async def write_notes(self, email, business_name, config, history=None, tools=()):
         raise ModelError("overloaded", FailureKind.UNAVAILABLE)
 

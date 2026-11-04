@@ -8,6 +8,7 @@ import httpx
 import uvicorn
 
 from herald_server.api.main import create_app
+from scripted_model import ScriptedModel
 
 
 def free_port() -> int:
@@ -34,7 +35,9 @@ async def read_events(response: httpx.Response, count: int) -> list[dict]:
 async def test_events_stream_and_replay(settings):
     port = free_port()
     server = uvicorn.Server(
-        uvicorn.Config(create_app(settings), port=port, log_level="warning", lifespan="on")
+        uvicorn.Config(
+            create_app(settings, ScriptedModel()), port=port, log_level="warning", lifespan="on"
+        )
     )
     serving = asyncio.create_task(server.serve())
     base = f"http://127.0.0.1:{port}/api"

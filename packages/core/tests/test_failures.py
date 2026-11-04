@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import httpx2
+import openai
 import pytest
 from anthropic import (
     APIConnectionError,
@@ -21,14 +22,18 @@ from herald_core.model import (
     REQUEST_RETRIES,
     REQUEST_TIMEOUT,
     SETUP_TIMEOUT,
-    AnthropicModel,
-    FakeModel,
     ModelError,
     failure_kind,
     failure_of,
+    status_kind,
 )
 from herald_core.nodes import judge_rules, write_notes
+from herald_core.providers import anthropic as anthropic_provider
+from herald_core.providers import openrouter as openrouter_provider
+from herald_core.providers.anthropic import AnthropicModel
+from herald_core.providers.openrouter import OpenRouterModel
 from herald_core.schema import Email, FailureKind, Route, Rule, RuleAction, WorkspaceConfig
+from scripted_model import ScriptedModel
 
 REQUEST = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
 
@@ -56,14 +61,54 @@ def email(body: str = "Where is my order?") -> Email:
         (status_error(InternalServerError, 500), FailureKind.UNAVAILABLE),
         (APIConnectionError(request=REQUEST), FailureKind.UNAVAILABLE),
         (APITimeoutError(request=REQUEST), FailureKind.UNAVAILABLE),
-        (TimeoutError(), FailureKind.UNAVAILABLE),
         (status_error(AuthenticationError, 401), FailureKind.SETUP),
         (status_error(NotFoundError, 404), FailureKind.SETUP),
         (status_error(BadRequestError, 400), FailureKind.UNREADABLE),
+    ],
+)
+def test_anthropic_errors_are_sorted_by_what_a_retry_can_fix(error, kind):
+    assert anthropic_provider.error_kind(error) is kind
+
+
+OR_REQUEST = httpx2.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+
+
+def or_status_error(cls, code: int):
+    return cls("refused", response=httpx2.Response(code, request=OR_REQUEST), body=None)
+
+
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        (or_status_error(openai.RateLimitError, 429), FailureKind.UNAVAILABLE),
+        (or_status_error(openai.InternalServerError, 502), FailureKind.UNAVAILABLE),
+        (openai.APITimeoutError(request=OR_REQUEST), FailureKind.UNAVAILABLE),
+        (or_status_error(openai.APIStatusError, 402), FailureKind.SETUP),  # out of credits
+        (or_status_error(openai.AuthenticationError, 401), FailureKind.SETUP),
+        (or_status_error(openai.BadRequestError, 400), FailureKind.UNREADABLE),
+    ],
+)
+def test_openrouter_errors_are_sorted_by_what_a_retry_can_fix(error, kind):
+    assert openrouter_provider.error_kind(error) is kind
+
+
+@pytest.mark.parametrize(
+    ("status", "kind"),
+    [(408, FailureKind.UNAVAILABLE), (529, FailureKind.UNAVAILABLE), (403, FailureKind.SETUP)],
+)
+def test_status_codes_are_sorted_the_same_for_every_provider(status, kind):
+    assert status_kind(status) is kind
+
+
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        (ModelError("down", FailureKind.UNAVAILABLE), FailureKind.UNAVAILABLE),
+        (TimeoutError(), FailureKind.UNAVAILABLE),  # a node deadline
         (TypeError("a bug in Herald"), FailureKind.UNREADABLE),
     ],
 )
-def test_errors_are_sorted_by_what_a_retry_can_fix(error, kind):
+def test_errors_outside_the_sdks_are_sorted(error, kind):
     assert failure_kind(error) is kind
 
 
@@ -72,7 +117,7 @@ def test_failure_keeps_the_sdk_error_behind_a_model_error():
         try:
             raise status_error(RateLimitError, 429, {"retry-after": "12"})
         except RateLimitError as exc:
-            raise ModelError(str(exc), failure_kind(exc)) from exc
+            raise ModelError(str(exc), anthropic_provider.error_kind(exc)) from exc
     except ModelError as wrapped:
         failure = failure_of("write_notes", wrapped)
     assert failure.kind is FailureKind.UNAVAILABLE
@@ -80,8 +125,9 @@ def test_failure_keeps_the_sdk_error_behind_a_model_error():
     assert failure.retry_after == 12
 
 
-def test_client_fits_inside_the_job_timeout():
-    client = AnthropicModel(api_key="test")._client
+@pytest.mark.parametrize("model_class", [AnthropicModel, OpenRouterModel])
+def test_client_fits_inside_the_job_timeout(model_class):
+    client = model_class(api_key="test")._client
     assert client.max_retries == REQUEST_RETRIES
     assert client.timeout.read == REQUEST_TIMEOUT
 
@@ -112,7 +158,7 @@ async def test_parse_says_an_overload_is_worth_retrying():
     assert raised.value.kind is FailureKind.UNAVAILABLE
 
 
-class DownModel(FakeModel):
+class DownModel(ScriptedModel):
     async def write_notes(self, email, business_name, config, history=None, tools=()):
         raise ModelError("overloaded", FailureKind.UNAVAILABLE)
 
@@ -138,7 +184,7 @@ async def test_an_outage_never_stops_the_safety_floor():
     assert state["decision"].route is Route.ALERT
 
 
-class RulesDownModel(FakeModel):
+class RulesDownModel(ScriptedModel):
     async def judge_rules(self, email, business_name, config, history=None, tools=()):
         raise ModelError("overloaded", FailureKind.UNAVAILABLE)
 
@@ -152,7 +198,7 @@ async def test_failed_rules_call_is_not_read_as_no_rule_matched():
     assert state["decision"].reason == "Your rules could not be checked"
 
 
-class SlowModel(FakeModel):
+class SlowModel(ScriptedModel):
     async def write_notes(self, email, business_name, config, history=None, tools=()):
         await asyncio.sleep(5)
         raise AssertionError("the deadline should have stopped this call")

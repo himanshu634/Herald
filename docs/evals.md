@@ -5,17 +5,17 @@ The evals run test emails with known answers through the real triage graph (word
 ## Run them
 
 ```bash
-make eval                                   # every dataset on Claude, one run per case
+make eval                                   # every dataset on OpenRouter, one run per case
 make eval ARGS="--repeats 3"                # three runs each; the report lists cases whose route changed
 make eval ARGS="--case sue-is-a-name"       # one case while you fix it
 make eval ARGS="--tag safety_floor"         # one slice
 make eval ARGS="--compare packages/evals/results/<earlier>.json"
 make eval ARGS="--rescore packages/evals/results/<earlier>.json"   # new labels or checks, no model calls
 make eval ARGS="--compare packages/evals/baselines/2026-11-04-claude-haiku-5-5.json"
-uv run herald-evals --model fake            # offline smoke run of the harness itself
+make eval ARGS="--model anthropic"          # Claude direct instead of OpenRouter
 ```
 
-`make eval` needs `ANTHROPIC_API_KEY` in the environment or in `.env`. The model is `HERALD_MODEL_NAME` (default `claude-haiku-5-5`), or `--model-name`. Each run writes `<time>-<model>.md` and `.json` to `packages/evals/results/`, which git ignores.
+`make eval` needs `OPENROUTER_API_KEY` in the environment or in `.env` (`ANTHROPIC_API_KEY` with `--model anthropic`). The model is `HERALD_MODEL_NAME` or `--model-name`; empty means the provider's default (`openai/gpt-oss-20b` on OpenRouter, `claude-haiku-5-5` on Anthropic). Each run writes `<time>-<model>.md` and `.json` to `packages/evals/results/`, which git ignores.
 
 `--rescore` scores the recorded notes and verdicts again. It assumes the case emails have not changed since that run; a case whose email changed needs a real run.
 

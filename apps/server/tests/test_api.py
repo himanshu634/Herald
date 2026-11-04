@@ -1,3 +1,22 @@
+from herald_core.schema import SPAM_TOPIC, RuleVerdict
+from scripted_model import plain_notes
+
+
+def unsure_until_engraving_fact(email, config):
+    """Unsure about an engraving question until the owner's facts cover it."""
+    sure = any("Engraving" in fact for fact in config.facts)
+    return plain_notes(
+        email,
+        config,
+        sure=sure,
+        question=None if sure else "Does Tripfold engrave bags?",
+    )
+
+
+def newsletter_closes_it(email, config):
+    return [RuleVerdict(rule_id="newsletters", matched=True, quote="courier")]
+
+
 async def demo_workspace(client) -> str:
     response = await client.post("/api/workspaces/demo")
     assert response.status_code == 201
@@ -27,7 +46,8 @@ async def test_health(client):
     assert (await client.get("/api/health")).json() == {"status": "ok"}
 
 
-async def test_routine_email_reaches_the_inbox(app, client):
+async def test_routine_email_reaches_the_inbox(app, client, scripted_model):
+    scripted_model.notes = lambda e, c: plain_notes(e, c, topic="Product questions")
     ws = await demo_workspace(client)
     email = await send(app, client, ws, "Product questions", "Does the cabin bag fit Indigo?")
     assert email["status"] == "inbox"
@@ -113,7 +133,8 @@ async def test_correction_shows_up_for_the_next_email(app, client):
     assert len(nxt["context"]["correction_ids"]) == 1
 
 
-async def test_owner_moves_a_closed_email_back_to_the_inbox(app, client):
+async def test_owner_moves_a_closed_email_back_to_the_inbox(app, client, scripted_model):
+    scripted_model.notes = lambda e, c: plain_notes(e, c, topic=SPAM_TOPIC)
     from sqlmodel import Session, select
 
     from herald_server.models import Correction
@@ -179,7 +200,8 @@ async def test_only_the_seeded_demo_is_marked_demo(client):
     assert setup["demo"] is False
 
 
-async def test_saved_fact_and_reread_settle_an_unsure_email(app, client):
+async def test_saved_fact_and_reread_settle_an_unsure_email(app, client, scripted_model):
+    scripted_model.notes = unsure_until_engraving_fact
     ws = await demo_workspace(client)
     other = await demo_workspace(client)
     email = await send(app, client, ws, "Engraving", "Can you engrave my initials on the tag?")
@@ -219,7 +241,9 @@ async def test_reread_is_409_once_the_owner_took_it(app, client):
     assert response.status_code == 409
 
 
-async def test_unsure_mail_a_close_rule_won_can_be_marked_done(app, client):
+async def test_unsure_mail_a_close_rule_won_can_be_marked_done(app, client, scripted_model):
+    scripted_model.notes = lambda e, c: plain_notes(e, c, sure=False, question="Which slot?")
+    scripted_model.verdicts = newsletter_closes_it
     from sqlmodel import Session, select
 
     from herald_server.models import Correction
@@ -235,7 +259,14 @@ async def test_unsure_mail_a_close_rule_won_can_be_marked_done(app, client):
         assert session.exec(select(Correction)).all() == []
 
 
-async def test_try_reads_the_email_with_a_draft_and_saves_nothing(app, client):
+async def test_try_reads_the_email_with_a_draft_and_saves_nothing(app, client, scripted_model):
+    scripted_model.notes = unsure_until_engraving_fact
+    # The model says the draft's new rule is met, and only when the draft has that rule.
+    scripted_model.verdicts = lambda e, c: [
+        RuleVerdict(rule_id="initials", matched=True, quote="initials")
+        for rule in c.rules
+        if rule.id == "initials"
+    ]
     from sqlmodel import Session, select
 
     from herald_server.models import Event
@@ -279,7 +310,9 @@ async def test_try_reads_the_email_with_a_draft_and_saves_nothing(app, client):
     assert (await client.post(url, json={"config": too_many})).status_code == 422
 
 
-async def test_reread_is_409_after_the_owner_moved_it(app, client):
+async def test_reread_is_409_after_the_owner_moved_it(app, client, scripted_model):
+    scripted_model.notes = lambda e, c: plain_notes(e, c, sure=False, question="Which slot?")
+    scripted_model.verdicts = newsletter_closes_it
     ws = await demo_workspace(client)
     email = await send(
         app, client, ws, "Courier pickup slot", "Can our courier collect from your warehouse at 9?"

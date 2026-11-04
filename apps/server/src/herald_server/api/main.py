@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from herald_core.model import TriageModel
 from herald_server.api.routes import (
     emails,
     events,
@@ -23,14 +24,14 @@ from herald_server.services import Services, build_services
 from herald_server.settings import Settings, get_settings
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, model: TriageModel | None = None) -> FastAPI:
     settings = settings or get_settings()
     # After uvicorn's own logging setup, which runs before it imports the app.
     setup_logging(settings.log_level)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        services: Services = build_services(settings)
+        services: Services = build_services(settings, model)
         inline = settings.queue == "inline"
         token = internal_token(settings, allow_random=inline)
         app.state.internal_token = token

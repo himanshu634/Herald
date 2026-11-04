@@ -45,7 +45,7 @@ Coming next:
 - Quiet hours, one reminder for an unopened alert, and a morning summary
 - Corrections that teach the AI your business
 
-**About your data:** Herald stores your email on your own server. With Claude turned on, the text of each email is sent to Anthropic to write its notes. The built-in offline model sends nothing anywhere, which is handy for trying Herald out.
+**About your data:** Herald stores your email on your own server. The text of each email is sent to the AI provider you choose (OpenRouter by default, or Anthropic) to write its notes.
 
 ## Try it
 
@@ -65,9 +65,9 @@ In a second terminal:
 make web
 ```
 
-Open http://localhost:5173 and click **New demo workspace**. This runs with no Docker and an offline model, so it needs no API key.
+Open http://localhost:5173 and click **New demo workspace**. This runs with no Docker. The AI model is OpenRouter by default, so copy `.env.example` to `.env` and set `OPENROUTER_API_KEY` first.
 
-To use Claude, copy `.env.example` to `.env` and set `HERALD_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`.
+To use Claude directly, set `HERALD_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`.
 
 ## For developers
 
@@ -114,7 +114,7 @@ Or run the whole stack in Docker, with hot reload for the API, worker and web ap
 make docker-dev
 ```
 
-Production runs nginx (serving the web app and proxying `/api`), the API, the worker, Postgres and Redis. Copy `.env.example` to `.env`, set `POSTGRES_PASSWORD`, `ANTHROPIC_API_KEY`, `HERALD_WEB_URL` and `HERALD_INTERNAL_TOKEN` (the secret the worker sends to the API; `python -c "import secrets; print(secrets.token_urlsafe(32))"`), then:
+Production runs nginx (serving the web app and proxying `/api`), the API, the worker, Postgres and Redis. Copy `.env.example` to `.env`, set `POSTGRES_PASSWORD`, `ANTHROPIC_API_KEY` (production uses Claude unless `HERALD_MODEL_PROVIDER` says otherwise), `HERALD_WEB_URL` and `HERALD_INTERNAL_TOKEN` (the secret the worker sends to the API; `python -c "import secrets; print(secrets.token_urlsafe(32))"`), then:
 
 ```bash
 make docker-prod

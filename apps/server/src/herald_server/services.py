@@ -8,7 +8,8 @@ from sqlalchemy import Engine
 from sqlmodel import Session, col, create_engine, select
 
 from herald_core.graph import build_graph
-from herald_core.model import AnthropicModel, FakeModel, TriageModel
+from herald_core.model import TriageModel
+from herald_core.providers import load_provider
 from herald_server.bus import EventBus, InMemoryEventBus, RedisEventBus
 from herald_server.connectors import build_connectors
 from herald_server.connectors.base import MailConnector
@@ -60,14 +61,20 @@ def _check_token_key(engine: Engine, secrets: SecretBox) -> None:
         raise RuntimeError("HERALD_TOKEN_KEY cannot decrypt stored mailbox credentials") from None
 
 
-def _anthropic_key(settings: Settings) -> str:
+def build_model(settings: Settings) -> TriageModel:
+    """The configured provider's model. Raises UnknownProvider for a name nothing registers."""
+    provider = load_provider(settings.model_provider)
+    # Only the provider's own variable is read, so another provider's key is never sent to it.
+    key = settings.secret(provider.api_key_env)
     # Without a key every email fails in the model call, so stop here instead.
-    if settings.anthropic_api_key is None or not settings.anthropic_api_key.get_secret_value():
-        raise RuntimeError("HERALD_MODEL_PROVIDER is anthropic but ANTHROPIC_API_KEY is not set")
-    return settings.anthropic_api_key.get_secret_value()
+    if not key:
+        raise RuntimeError(
+            f"HERALD_MODEL_PROVIDER is {provider.name} but {provider.api_key_env} is not set"
+        )
+    return provider.build(settings.model_name or provider.default_model, key)
 
 
-def build_services(settings: Settings) -> Services:
+def build_services(settings: Settings, model: TriageModel | None = None) -> Services:
     connect_args = (
         {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
     )
@@ -82,11 +89,8 @@ def build_services(settings: Settings) -> Services:
     bus: EventBus = (
         RedisEventBus(settings.redis_url) if settings.bus == "redis" else InMemoryEventBus()
     )
-    model: TriageModel = (
-        AnthropicModel(model=settings.model_name, api_key=_anthropic_key(settings))
-        if settings.model_provider == "anthropic"
-        else FakeModel()
-    )
+    # A model passed in (tests) skips the provider and its key.
+    model = build_model(settings) if model is None else model
     tracing = build_tracing(settings)
     model = tracing.wrap_model(model)
     http = httpx.AsyncClient(timeout=20)
