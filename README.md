@@ -106,7 +106,7 @@ make worker
 make web
 ```
 
-Upgrading from an older checkout: there are no migrations yet, so startup does not add new columns to existing tables. Delete `apps/server/herald-dev.db` (lite mode) or run `docker compose down -v` (Postgres) and start again. See "Upgrading an existing dev database" in `docs/architecture.md`.
+After pulling changes, `make migrate` brings your database to the latest schema (`make api`, `make lite` and `make dev` run it for you). The API and worker refuse to start until it has run. See "Database migrations" in `docs/architecture.md`.
 
 Or run the whole stack in Docker, with hot reload for the API, worker and web app (web on :5173, API on :8000):
 

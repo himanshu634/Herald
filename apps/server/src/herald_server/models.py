@@ -11,6 +11,17 @@ from sqlmodel import Field, SQLModel, col
 from herald_core.schema import Email as CoreEmail
 from herald_core.schema import Route
 
+# Constraint names, set before any table class so every constraint gets one. Migrations need
+# names to alter or drop a constraint, and SQLite has none unless SQLAlchemy writes them. The
+# uq, fk and pk patterns are the names Postgres picked for databases made before migrations,
+# so `migrate` can adopt those databases without a rename. ix is SQLAlchemy's default.
+SQLModel.metadata.naming_convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "%(table_name)s_%(column_0_N_name)s_key",
+    "fk": "%(table_name)s_%(column_0_name)s_fkey",
+    "pk": "%(table_name)s_pkey",
+}
+
 
 def _id() -> str:
     return uuid4().hex

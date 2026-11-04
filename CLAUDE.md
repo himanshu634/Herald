@@ -13,6 +13,8 @@ make install        # uv sync + pnpm install
 make lite           # API on :8000 with no Docker: SQLite, in-memory bus, inline pipeline, fake model
 make web            # SvelteKit on :5173, proxies /api to :8000
 make dev            # full stack in one terminal: Postgres + Redis in Docker, then API, worker and web
+make migrate        # bring the database to the latest schema (make api / lite / dev run it first)
+make migration m="…"  # write a migration from model changes, then read it
 make infra && make api && make worker   # full stack: Postgres + Redis, separate arq worker (each in its own terminal)
 make test           # pytest (core + evals + server) and vitest
 make eval           # triage evals on Claude -> score report in packages/evals/results (see docs/evals.md)
@@ -49,7 +51,7 @@ Invariants that span files:
 - **Sync DB in async code:** DB work lives in plain sync functions using `Session(services.engine)` and is called with `asyncify(...)` from async routes and the pipeline.
 - **Swappable backends:** `EventBus` (`redis`/`memory`), `JobQueue` (`arq`/`inline`), `TriageModel` (`anthropic`/`fake`), `MailConnector` (`gmail`; `FakeConnector` in tests). Tests use the in-process set via `apps/server/tests/conftest.py`, so they need no Docker or API key.
 - **Mail connectors are provider-neutral:** only code in `connectors/<provider>/` knows a provider. A mailbox's `cursor` and `provider_state` are opaque everywhere else.
-- **No migrations yet:** tables are created with `SQLModel.metadata.create_all` on startup, which never adds columns to an existing table. Startup fails and names the missing columns when the database is older than the models. After a model change, delete `apps/server/herald-dev.db` (lite mode) or reset Postgres with `docker compose -f infra/docker-compose.yml down -v`.
+- **Migrations:** Alembic, in `herald_server/migrations` (`migrate.py` runs them). `make migrate` brings the database to the latest revision; the API and worker only check it is there and refuse to start otherwise. After a model change, run `make migration m="…"` against a migrated Postgres, read the file (autogenerate misses partial index `WHERE` changes, renames and data moves), then `make migrate-check`. Never call `create_all` outside tests. Keep the naming convention in `models.py`: it matches the constraint names of databases made before migrations. See "Database migrations" in `docs/architecture.md`.
 - **Dev errors:** `make api`, `make lite` and the Docker dev stack set `HERALD_DEBUG=1`, so a 500 carries its traceback to the browser. Leave it off in production.
 - **Auth, when added, must be a cookie** — `EventSource` cannot send an `Authorization` header.
 - After changing API schemas (`api/schemas.py`), run `make gen-api` and commit the regenerated `schema.d.ts`.

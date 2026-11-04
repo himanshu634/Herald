@@ -1,4 +1,6 @@
+import shutil
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
@@ -7,14 +9,26 @@ from httpx import ASGITransport, AsyncClient
 
 from herald_server.api.main import create_app
 from herald_server.internal.client import AgentApi
+from herald_server.migrate import upgrade
 from herald_server.settings import Settings
 
 
+@pytest.fixture(scope="session")
+def migrated_db(tmp_path_factory) -> Path:
+    # Startup refuses a database that is not at the latest revision. Migrate one file per run
+    # and copy it into each test, instead of running every migration for every test.
+    path = tmp_path_factory.mktemp("migrated") / "herald.db"
+    upgrade(f"sqlite:///{path}")
+    return path
+
+
 @pytest.fixture
-def settings(tmp_path) -> Settings:
+def settings(tmp_path, migrated_db) -> Settings:
     # One process, no Redis or Postgres: SQLite file, in-memory bus, inline queue, fake model.
+    db = tmp_path / "herald.db"
+    shutil.copy(migrated_db, db)
     return Settings(
-        database_url=f"sqlite:///{tmp_path / 'herald.db'}",
+        database_url=f"sqlite:///{db}",
         bus="memory",
         queue="inline",
         model_provider="fake",

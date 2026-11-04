@@ -63,11 +63,25 @@ services:
       interval: 5s
       retries: 10
 
-  api:
+  # Brings the schema to the latest revision, then exits. The API and the worker refuse to
+  # start on an older schema, so they wait for it to finish. A failed migration stops the
+  # deploy here, before the new code serves anything.
+  migrate:
     <<: *server
+    command: ["python", "-m", "herald_server.migrate"]
+    restart: "no"
+    # The image healthcheck probes the API port, which this one-shot does not serve.
+    healthcheck:
+      disable: true
     depends_on:
       postgres:
         condition: service_healthy
+
+  api:
+    <<: *server
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
@@ -77,8 +91,8 @@ services:
     # The image healthcheck probes the API port, which the worker does not serve.
     healthcheck:
       disable: true
-    # Both processes run create_all on startup. Waiting for a healthy API means the
-    # tables exist before the worker starts, so the two never race to create them.
+    # Every job calls the API's internal routes, so start once the API is up. The API itself
+    # waits for the migration, so the schema is current by then.
     depends_on:
       api:
         condition: service_healthy

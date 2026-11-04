@@ -1,7 +1,7 @@
 import httpx
 import pytest
 from cryptography.fernet import Fernet
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, create_engine
 
 from herald_server.connectors import build_connectors
 from herald_server.crypto import SecretBox
@@ -29,7 +29,6 @@ def add_sealed_mailbox(
     email_address: str = "owner@shop.in",
 ) -> None:
     engine = create_engine(settings.database_url)
-    SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         workspace = Workspace(name="Shop", config={})
         session.add(workspace)

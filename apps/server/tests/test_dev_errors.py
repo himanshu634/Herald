@@ -1,29 +1,11 @@
-"""Tests for the startup schema check and debug tracebacks."""
+"""Tests for startup checks and debug tracebacks."""
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
-from sqlmodel import create_engine
 
 from herald_server.api.main import create_app
 from herald_server.services import build_services
 from herald_server.settings import Settings
-
-
-def test_startup_names_columns_missing_from_an_old_database(settings):
-    # A workspace table from before the demo column: create_all leaves it as it is.
-    engine = create_engine(settings.database_url)
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "CREATE TABLE workspace (id CHAR(32) PRIMARY KEY, name VARCHAR, config JSON,"
-                " setup_done BOOLEAN, created_at DATETIME)"
-            )
-        )
-    engine.dispose()
-
-    with pytest.raises(RuntimeError, match=r"missing: workspace\.demo\."):
-        build_services(settings)
 
 
 async def _boom_response(settings) -> str:

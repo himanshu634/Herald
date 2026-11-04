@@ -324,17 +324,38 @@ Tracing is for development only. It sends each triage run to a Langfuse that run
 - Real generations (prompts and replies, tokens, cost) show up only with `HERALD_MODEL_PROVIDER=anthropic`. The fake model makes no API call, so you see the spans and scores only.
 - Setup drafts are not traced as runs. Their Claude calls may show up as stray traces.
 
-### Upgrading an existing dev database
+## Database migrations
 
-There are no migrations yet. Startup creates missing tables, but it does not add columns to a table that exists. A database made before the mail connectors gets the `mailbox` table but not the new `email` columns, and every email query fails. The same happens to a database made before the history tools, which added `email.thread_id`, `email.context` and the sender index. A `mailbox` table made before the one-business-per-mailbox rule also lacks the index `uq_mailbox_live_address` (startup does not add indexes to a table that exists); the connect check still applies, but a racing connect is not caught. A database made before owner replies lacks the `email` columns `internet_message_id`, `references` and `reply_to` and the `mailbox` column `can_send`; the `reply` table and its index `uq_reply_one_sending` are created on startup. Start from an empty database:
+The schema is managed with Alembic. The migrations live in `apps/server/src/herald_server/migrations/versions`, so they ship in the server package.
 
-- Lite mode: delete `apps/server/herald-dev.db`.
-- Postgres: run `docker compose down -v`, then `make infra`.
+- `make migrate` (`python -m herald_server.migrate`) brings the database to the latest revision. `make api`, `make lite` and `make dev` run it first. In Docker, a one-shot `migrate` service runs it, and the API waits for it to finish.
+- The API and the worker never change the schema. At startup they check that the database is at the latest revision, and refuse to start when it is not.
+- A database made by `create_all` before migrations has no revision. `make migrate` compares it with the models. When they match exactly, it marks the database as migrated and keeps its data. When anything differs (a missing column, index or enum value), it refuses and names the differences. Start from an empty database then:
+  - Lite mode: delete `apps/server/herald-dev.db`.
+  - Postgres: run `docker compose -f infra/docker-compose.yml down -v`, then `make infra`.
+
+### Changing the schema
+
+1. Change the models in `models.py`.
+2. With Postgres running and migrated (`make infra`, `make migrate`), run `make migration m="what changed"`. Alembic compares the models with the database and writes a new file in `versions/`. Write it against Postgres: enum changes show up only there.
+3. Read the file and fix it. Autogenerate does not see:
+   - a change to the `WHERE` of a partial index (`uq_mailbox_live_address`, `uq_reply_one_sending`): drop and recreate the index by hand;
+   - a renamed column or table: it writes a drop and an add, which loses the data;
+   - data that must move: write it in the migration with `op.execute`.
+4. Run `make migrate`, then `make migrate-check`. The check fails when the models have a change no migration covers.
+5. Run the tests. `test_migrations.py` builds a SQLite database from the migrations and fails if it differs from the models.
+
+Enum columns are native Postgres enums that store the member *name* (`DISCONNECTED`, not `disconnected`). `alembic-postgresql-enum` writes the `ALTER TYPE` for added or removed values. Its operations do nothing on SQLite, where an enum is a plain string.
+
+Constraint names come from the naming convention in `models.py`. It reproduces the names Postgres gave databases made before migrations, so those databases can be adopted. Do not change it: every existing constraint would need a rename.
+
+Two branches that each add a migration leave two heads after both merge. Startup and `test_there_is_one_head` then fail. Run `uv run alembic merge heads -m "merge"` in `apps/server` and commit the file it writes.
+
+Production rolls forward only. Write `downgrade()` where it is cheap; it is for development.
 
 ## Not built yet
 
 - Model-driven tool calls and business-system tools
-- Alembic migrations (tables are created on startup for now; see "Upgrading an existing dev database")
 - Auth and per-workspace limits
 - A settings page for editing a workspace after setup (`PUT /config` is ready for it)
 - The rule test (the score report and the test-email set are in `packages/evals`)
