@@ -5,9 +5,12 @@
 
 The graph is compiled once and shared by every tenant; each run carries its workspace's
 config in the state and its toolbox in the runtime context. `gather_context` runs the history
-tools in code before the model reads the email. `word_check` starts from START and never waits
-on tools; `write_notes` waits on `gather_context`, so a slow tool can delay the alert by at
-most the tool timeout (2 s). Parallel nodes write different state keys.
+tools in code before the model reads the email. Thread and corrections go into the prompt;
+the sender's history does not; the model calls the sender_history tool for it when it needs
+it, and decide always gets it for the repeat count. `word_check` starts from START and never
+waits on tools; `write_notes` waits on `gather_context`, so a slow tool can delay the alert by
+at most the tool timeout (2 s). A model tool call adds one more model call to write_notes or
+judge_rules, which decide also waits on. Parallel nodes write different state keys.
 
 Each node lives in its own file in `nodes/`; this file only wires them together.
 """

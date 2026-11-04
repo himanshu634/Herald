@@ -139,7 +139,7 @@ async def test_saved_guidance_reaches_the_notes_model(app, client):
     seen = []
 
     class RecordingModel(FakeModel):
-        async def write_notes(self, email, business_name, config, history=None):
+        async def write_notes(self, email, business_name, config, history=None, tools=()):
             seen.append((business_name, config.guidance))
             return await super().write_notes(email, business_name, config, history=history)
 

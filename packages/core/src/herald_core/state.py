@@ -25,6 +25,8 @@ class TriageState(TypedDict, total=False):
     business_name: str
     word_flags: set[RiskFlag]
     history: History
+    # The model tools the AI chose to call, as "node:tool", in order.
+    asked: list[str]
     notes: Notes | None
     verdicts: list[RuleVerdict]
     decision: Decision

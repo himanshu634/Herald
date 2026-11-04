@@ -6,12 +6,14 @@ here catches its own errors, and a model error from the inner model passes throu
 """
 
 import logging
+from collections.abc import Sequence
 from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from herald_core.history import History
 from herald_core.model import TriageModel
+from herald_core.model_tools import ModelTool
 from herald_core.schema import Decision, Email, Notes, RuleVerdict, SetupDraft, WorkspaceConfig
 from herald_server.settings import Settings
 
@@ -126,10 +128,11 @@ class TracedModel:
         business_name: str,
         config: WorkspaceConfig,
         history: History | None = None,
+        tools: Sequence[ModelTool] = (),
     ) -> Notes:
         return await self._in_span(
             "model.write_notes",
-            lambda: self._inner.write_notes(email, business_name, config, history),
+            lambda: self._inner.write_notes(email, business_name, config, history, tools),
         )
 
     async def judge_rules(
@@ -138,10 +141,11 @@ class TracedModel:
         business_name: str,
         config: WorkspaceConfig,
         history: History | None = None,
+        tools: Sequence[ModelTool] = (),
     ) -> list[RuleVerdict]:
         return await self._in_span(
             "model.judge_rules",
-            lambda: self._inner.judge_rules(email, business_name, config, history),
+            lambda: self._inner.judge_rules(email, business_name, config, history, tools),
         )
 
     async def suggest_setup(self, name: str, description: str) -> SetupDraft:

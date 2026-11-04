@@ -7,7 +7,7 @@ workspace's config.
 import re
 from importlib.resources import files
 
-from herald_core.history import History
+from herald_core.history import History, SenderHistory
 from herald_core.schema import Email, WorkspaceConfig
 
 # Read once so every call sends the same bytes and the prompt cache stays warm.
@@ -83,33 +83,39 @@ def _day(when) -> str:
     return when.strftime("%Y-%m-%d")
 
 
+def sender_history_text(sender: SenderHistory) -> str:
+    """What the sender_history tool answers. The earlier emails are other people's text, so they
+    get the same cleaning and <history> fence as the history block."""
+    if sender.first_seen is None:
+        return "No earlier emails from this sender."
+    lines = [
+        f"Sender: first seen {_day(sender.first_seen)}. {sender.count_7d} earlier emails "
+        f"in the last 7 days, {sender.count_30d} in the last 30."
+    ]
+    if sender.top_topics:
+        topics = ", ".join(_clean(_line(t)) for t in sender.top_topics)
+        lines.append(f"Usual topics: {topics}.")
+    if sender.recent:
+        lines.append("Recent emails from this sender, newest first:")
+        for past in sender.recent:
+            # An email not triaged yet has no topic, urgency or summary: leave them out.
+            parts = [
+                _day(past.received_at),
+                past.topic,
+                past.urgency.value if past.urgency else None,
+                past.status,
+                past.summary or past.subject,
+            ]
+            lines.append("- " + " · ".join(_clean(_line(p)) for p in parts if p))
+    return "<history>\n" + "\n".join(lines) + "\n</history>"
+
+
 def history_block(history: History) -> str:
-    """The fenced <history> block, or "" when there is nothing to show."""
-    if history.is_empty():
-        return ""
+    """The fenced <history> block, or "" when there is nothing to show.
+
+    The sender's history is not here: the model asks for it with the sender_history tool.
+    """
     sections: list[str] = []
-    sender = history.sender
-    if sender and sender.first_seen:
-        lines = [
-            f"Sender: first seen {_day(sender.first_seen)}. {sender.count_7d} earlier emails "
-            f"in the last 7 days, {sender.count_30d} in the last 30."
-        ]
-        if sender.top_topics:
-            topics = ", ".join(_clean(_line(t)) for t in sender.top_topics)
-            lines.append(f"Usual topics: {topics}.")
-        if sender.recent:
-            lines.append("Recent emails from this sender, newest first:")
-            for past in sender.recent:
-                # An email not triaged yet has no topic, urgency or summary: leave them out.
-                parts = [
-                    _day(past.received_at),
-                    past.topic,
-                    past.urgency.value if past.urgency else None,
-                    past.status,
-                    past.summary or past.subject,
-                ]
-                lines.append("- " + " · ".join(_clean(_line(p)) for p in parts if p))
-        sections.append("\n".join(lines))
     if history.thread and history.thread.messages:
         messages = []
         for m in history.thread.messages:
@@ -134,6 +140,8 @@ def history_block(history: History) -> str:
                 f"the owner changed it to {_clean(_line(c.to_value))}."
             )
         sections.append("\n".join(lines))
+    if not sections:
+        return ""
     return "<history>\n" + "\n\n".join(sections) + "\n</history>"
 
 

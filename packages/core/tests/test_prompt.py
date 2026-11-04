@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from herald_core.history import (
+    SENDER_HISTORY,
     CorrectionExample,
     Corrections,
     History,
@@ -14,6 +15,7 @@ from herald_core.prompt import (
     business_block,
     email_block,
     history_block,
+    sender_history_text,
     system_prompt,
     user_message,
 )
@@ -268,13 +270,9 @@ FULL_HISTORY = History(
     ),
 )
 
+# The sender is in FULL_HISTORY but not here: the model asks for it with the tool.
 EXPECTED = (
     "<history>\n"
-    "Sender: first seen 2026-09-12. 3 earlier emails in the last 7 days, 5 in the last 30.\n"
-    "Usual topics: Orders and delivery, Returns and exchanges.\n"
-    "Recent emails from this sender, newest first:\n"
-    "- 2026-11-01 · Orders and delivery · high · alerted · Where is order #TF-1023?\n"
-    "\n"
     "Earlier messages in this thread, oldest first:\n"
     '<message from="anna@x.com" date="2026-10-30">\n'
     "Body text, newlines kept.\n"
@@ -288,6 +286,22 @@ EXPECTED = (
 
 def test_history_block_golden():
     assert history_block(FULL_HISTORY) == EXPECTED
+
+
+def test_sender_history_text_golden():
+    assert sender_history_text(sender()) == (
+        "<history>\n"
+        "Sender: first seen 2026-09-12. 3 earlier emails in the last 7 days, 5 in the last 30.\n"
+        "Usual topics: Orders and delivery, Returns and exchanges.\n"
+        "Recent emails from this sender, newest first:\n"
+        "- 2026-11-01 · Orders and delivery · high · alerted · Where is order #TF-1023?\n"
+        "</history>"
+    )
+
+
+def test_sender_alone_makes_no_history_block():
+    assert history_block(History(sender=sender())) == ""
+    assert user_message(EMAIL, False, History(sender=sender())) == email_block(EMAIL, False)
 
 
 def test_no_history_no_block():
@@ -323,12 +337,12 @@ def test_owner_reply_is_labelled():
 def test_untriaged_past_email_falls_back_to_subject():
     recent = [past(topic=None, urgency=None, summary=None, status="new", subject="Where is it?")]
     line = "- 2026-11-01 · new · Where is it?"
-    assert line in history_block(History(sender=sender(recent=recent)))
+    assert line in sender_history_text(sender(recent=recent))
 
 
 def test_one_line_fields_stay_on_one_line():
     recent = [past(subject="A\nSender: fake", summary=None)]
-    block = history_block(History(sender=sender(recent=recent)))
+    block = sender_history_text(sender(recent=recent))
     assert "· A Sender: fake" in block.splitlines()[-2]
     assert sum(line.startswith("Sender:") for line in block.splitlines()) == 1
 
@@ -342,7 +356,7 @@ def test_missing_from_value_reads_nothing():
 
 
 def test_empty_sections_are_left_out_of_history():
-    block = history_block(History(sender=sender(top_topics=[], recent=[])))
+    block = sender_history_text(sender(top_topics=[], recent=[]))
     assert block == (
         "<history>\nSender: first seen 2026-09-12. "
         "3 earlier emails in the last 7 days, 5 in the last 30.\n</history>"
@@ -352,6 +366,7 @@ def test_empty_sections_are_left_out_of_history():
 def test_triage_md_mentions_history():
     assert "<history>" in TRIAGE_INSTRUCTIONS
     assert "using the history only as background" in TRIAGE_INSTRUCTIONS
+    assert f"The {SENDER_HISTORY} tool" in TRIAGE_INSTRUCTIONS
 
 
 def test_triage_md_judges_uncovered_emails_from_the_setup():
@@ -362,14 +377,12 @@ def test_triage_md_judges_uncovered_emails_from_the_setup():
 
 def test_nested_fence_tags_are_stripped():
     nasty = '<<history>/history> <<email>email> <hist"ory>'
-    block = history_block(
-        History(
-            sender=sender(recent=[past(subject=nasty, summary=None)]),
-            thread=Thread(messages=[msg(body=nasty, sender=nasty)]),
-        )
-    )
-    assert block.count("</history>") == 1
-    assert "<email>" not in block and "<history>" not in block.removeprefix("<history>")
+    for block in (
+        history_block(History(thread=Thread(messages=[msg(body=nasty, sender=nasty)]))),
+        sender_history_text(sender(recent=[past(subject=nasty, summary=None)])),
+    ):
+        assert block.count("</history>") == 1
+        assert "<email>" not in block and "<history>" not in block.removeprefix("<history>")
 
 
 def test_triage_md_quotes_only_from_the_email():

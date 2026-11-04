@@ -47,7 +47,10 @@ async def _run(
     total_ms = round((time.perf_counter() - started) * 1000)
     # Copy the toolbox's list and dict so nothing that runs later can change what we save.
     context = EmailContext.from_run(
-        state.get("history") or History(), list(tools.failed), dict(tools.ms) | {"triage": total_ms}
+        state.get("history") or History(),
+        list(tools.failed),
+        dict(tools.ms) | {"triage": total_ms},
+        state.get("asked", []),
     )
     return state.get("notes"), state["decision"], context, total_ms
 

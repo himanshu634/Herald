@@ -162,7 +162,7 @@ def test_false_alarms_count_alerts_on_should_not_alert_cases():
 
 
 class FailingModel(FakeModel):
-    async def write_notes(self, email, business_name, config, history=None):
+    async def write_notes(self, email, business_name, config, history=None, tools=()):
         raise ModelError("rate limited")
 
 
@@ -177,7 +177,7 @@ async def test_runner_feeds_recorded_history_to_the_model():
     seen = []
 
     class Spy(FakeModel):
-        async def write_notes(self, email, business_name, config, history=None):
+        async def write_notes(self, email, business_name, config, history=None, tools=()):
             seen.append((email.thread_id, history))
             return await super().write_notes(email, business_name, config, history)
 

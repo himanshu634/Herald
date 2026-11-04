@@ -72,7 +72,7 @@ class CountingModel(FakeModel):
     def __init__(self) -> None:
         self.rule_calls = 0
 
-    async def judge_rules(self, email, business_name, config, history=None):
+    async def judge_rules(self, email, business_name, config, history=None, tools=()):
         self.rule_calls += 1
         return await super().judge_rules(email, business_name, config, history)
 
@@ -146,7 +146,7 @@ async def test_floor_word_in_a_newsletter_still_alerts():
 
 
 class BrokenModel(FakeModel):
-    async def write_notes(self, email, business_name, config, history=None):
+    async def write_notes(self, email, business_name, config, history=None, tools=()):
         raise ModelError("AI service is down")
 
 
@@ -163,10 +163,10 @@ async def test_model_failure_lands_in_needs_a_look():
 
 class CrashingModel(FakeModel):
     # Errors the SDK raises outside APIError, like a missing API key (TypeError).
-    async def write_notes(self, email, business_name, config, history=None):
+    async def write_notes(self, email, business_name, config, history=None, tools=()):
         raise TypeError("Could not resolve authentication method")
 
-    async def judge_rules(self, email, business_name, config, history=None):
+    async def judge_rules(self, email, business_name, config, history=None, tools=()):
         raise TypeError("Could not resolve authentication method")
 
 
@@ -221,13 +221,27 @@ class RecordingModel(FakeModel):
     def __init__(self) -> None:
         self.seen: dict[str, object] = {}
 
-    async def write_notes(self, email, business_name, config, history=None):
+    async def write_notes(self, email, business_name, config, history=None, tools=()):
         self.seen["write_notes"] = history
+        self.seen["write_notes_tools"] = [t.name for t in tools]
         return await super().write_notes(email, business_name, config, history=history)
 
-    async def judge_rules(self, email, business_name, config, history=None):
+    async def judge_rules(self, email, business_name, config, history=None, tools=()):
         self.seen["judge_rules"] = history
+        self.seen["judge_rules_tools"] = [t.name for t in tools]
         return await super().judge_rules(email, business_name, config, history=history)
+
+
+class AskingModel(FakeModel):
+    """Calls sender_history while writing notes, as Claude does when it wants the context."""
+
+    def __init__(self) -> None:
+        self.answers: list[str] = []
+
+    async def write_notes(self, email, business_name, config, history=None, tools=()):
+        (tool,) = tools
+        self.answers.append(await tool.run({}))
+        return await super().write_notes(email, business_name, config, history=history)
 
 
 async def test_history_reaches_both_calls():
@@ -244,6 +258,34 @@ async def test_history_reaches_both_calls():
     assert model.seen["write_notes"].sender == SENDER
     assert model.seen["judge_rules"].corrections == CORRECTIONS
     assert state["history"].thread is None  # the email has no thread_id
+
+
+async def test_both_model_calls_are_offered_sender_history():
+    model = RecordingModel()
+    tools = Toolbox([StaticTool(SENDER_HISTORY, SenderHistoryIn, SENDER)])
+    # The courier newsletter rule makes judge_rules run.
+    state = await triage(
+        build_graph(model), email("Order", "Where?"), CONFIG, business_name="Tripfold", tools=tools
+    )
+    assert model.seen["write_notes_tools"] == [SENDER_HISTORY]
+    assert model.seen["judge_rules_tools"] == [SENDER_HISTORY]
+    assert state["asked"] == []  # offered, not called
+
+
+async def test_model_lookup_is_served_from_the_gathered_history():
+    model = AskingModel()
+    sender_tool = StaticTool(SENDER_HISTORY, SenderHistoryIn, SENDER)
+    state = await triage(
+        build_graph(model),
+        email("Order", "Where?"),
+        CONFIG,
+        business_name="Tripfold",
+        tools=Toolbox([sender_tool]),
+    )
+    # One fetch, in gather_context: the model's call reads that copy.
+    assert len(sender_tool.calls) == 1
+    assert model.answers == ["No earlier emails from this sender."]
+    assert state["asked"] == ["write_notes:sender_history"]
 
 
 async def test_thread_tool_runs_only_with_a_thread_id():
