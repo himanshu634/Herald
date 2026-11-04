@@ -12,6 +12,7 @@ from herald_core.history import History
 from herald_core.model import (
     _SETUP_INSTRUCTIONS,
     MAX_TOOL_ROUNDS,
+    RULES_ASK,
     ModelError,
     TriageModel,
     _Verdicts,
@@ -112,7 +113,7 @@ class AnthropicModel:
         if not config.rules:
             return []
         block = user_message(email, config.is_important(email.sender), history or History())
-        content = f"{block}\n\nAnswer each rule in the <business> block."
+        content = f"{block}\n\n{RULES_ASK}"
         system = system_prompt(business_name, config)
         return (await self._parse(system, content, _Verdicts, tools)).verdicts
 

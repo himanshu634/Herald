@@ -5,7 +5,7 @@ from herald_core.providers.anthropic import AnthropicModel
 
 
 def test_built_in_providers_are_installed():
-    assert "anthropic" in provider_names()  # Task 2 adds "openrouter" here
+    assert {"anthropic", "openrouter"} <= set(provider_names())
 
 
 def test_anthropic_provider_builds_its_model():

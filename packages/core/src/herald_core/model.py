@@ -32,6 +32,9 @@ from herald_core.schema import (
 # round could only repeat the first. Each round is a full model call before decide runs.
 MAX_TOOL_ROUNDS = 1
 
+# The last line of the rules call, after the email.
+RULES_ASK = "Answer each rule in the <business> block."
+
 
 class ModelError(Exception):
     """The model could not produce notes; the email goes to "Needs a look"."""

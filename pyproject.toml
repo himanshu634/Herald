@@ -27,3 +27,4 @@ known-first-party = ["herald_core", "herald_evals", "herald_server"]
 testpaths = ["packages/core/tests", "packages/evals/tests", "apps/server/tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = ["live: calls a real model provider; skipped without its API key"]
