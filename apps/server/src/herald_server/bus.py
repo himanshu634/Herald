@@ -6,7 +6,7 @@ processes share events; the in-memory bus serves tests and single-process runs.
 
 import asyncio
 from collections import defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Protocol
@@ -46,7 +46,7 @@ class InMemoryEventBus:
             queue.put_nowait(event)
 
     @asynccontextmanager
-    async def subscribe(self, workspace_id: str) -> AsyncIterator[AsyncIterator[BusEvent]]:
+    async def subscribe(self, workspace_id: str) -> AsyncGenerator[AsyncIterator[BusEvent]]:
         queue: asyncio.Queue[BusEvent] = asyncio.Queue()
         self._subscribers[workspace_id].add(queue)
 
@@ -71,7 +71,7 @@ class RedisEventBus:
         await self._redis.publish(channel(event.workspace_id), event.model_dump_json())
 
     @asynccontextmanager
-    async def subscribe(self, workspace_id: str) -> AsyncIterator[AsyncIterator[BusEvent]]:
+    async def subscribe(self, workspace_id: str) -> AsyncGenerator[AsyncIterator[BusEvent]]:
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(channel(workspace_id))
 
