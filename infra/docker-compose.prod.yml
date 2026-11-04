@@ -34,6 +34,9 @@ x-server: &server
     # /api, so /internal is never reachable from outside.
     HERALD_INTERNAL_API_URL: http://api:8000
     HERALD_INTERNAL_TOKEN: ${HERALD_INTERNAL_TOKEN:?set HERALD_INTERNAL_TOKEN in .env}
+    # .env.example sets the Langfuse dev keys. Blank them so production never tries to trace.
+    HERALD_LANGFUSE_PUBLIC_KEY: ""
+    HERALD_LANGFUSE_SECRET_KEY: ""
 
 services:
   postgres:
