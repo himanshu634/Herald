@@ -1,16 +1,19 @@
 """The triage pipeline as a LangGraph graph.
 
-    START -> word_check ───────────────────┐
-    START -> gather_context -> write_notes ┴-> judge_rules -> decide -> END
+    START -> word_check ─────────────────────────┐
+    START -> gather_context ┬-> write_notes ─────┼-> decide -> END
+                            └-> judge_rules ─────┘
 
 The graph is compiled once and shared by every tenant; each run carries its workspace's
 config in the state and its toolbox in the runtime context. `gather_context` runs the history
 tools in code before the model reads the email. Thread and corrections go into the prompt;
 the sender's history does not; the model calls the sender_history tool for it when it needs
 it, and decide always gets it for the repeat count. `word_check` starts from START and never
-waits on tools; `write_notes` waits on `gather_context`, so a slow tool can delay the alert by
-at most the tool timeout (2 s). A model tool call adds one more model call to write_notes or
-judge_rules, which decide also waits on. Parallel nodes write different state keys.
+waits on tools; both model nodes wait on `gather_context`, so a slow tool can delay the alert
+by at most the tool timeout (2 s). The two model calls run side by side: the rules prompt never
+reads the notes, and running them one after the other doubled the time to decide. A model tool
+call adds one more model call to write_notes or judge_rules, which decide also waits on. Only
+`asked` is written by two parallel nodes; it has a reducer in `state.py`.
 
 Each node lives in its own file in `nodes/`; this file only wires them together.
 """
@@ -41,8 +44,8 @@ def build_graph(model: TriageModel) -> CompiledStateGraph:
     graph.add_edge(START, "word_check")
     graph.add_edge(START, "gather_context")
     graph.add_edge("gather_context", "write_notes")
-    graph.add_edge(["word_check", "write_notes"], "judge_rules")
-    graph.add_edge("judge_rules", "decide")
+    graph.add_edge("gather_context", "judge_rules")
+    graph.add_edge(["word_check", "write_notes", "judge_rules"], "decide")
     graph.add_edge("decide", END)
     return graph.compile()
 

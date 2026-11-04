@@ -6,7 +6,7 @@ The AI suggests (notes, rule verdicts); this function decides. Order, first matc
    filed as spam that the AI is also sure is not for the business goes to needs a look.
 2. Not for the business (see `not_for_business`) -> closed.
 3. The owner's rules; the most urgent result wins (alert > close). A set-urgency rule never
-   lowers an urgent email.
+   lowers an urgent email. Without notes the verdicts are not used (see `decide`).
 4. Urgent, or anger 5 -> alert.
 5. Anger 4 from an important contact, about to cancel, or the third email about the same
    thing this week (see `repeat_count`) -> alert.
@@ -44,9 +44,10 @@ def not_for_business(notes: Notes | None, config: WorkspaceConfig, sender: str) 
 
     Such mail (promotions, newsletters, app notifications) closes before the owner's rules
     and the urgent / anger / cancel defaults, which would otherwise read "sale ends today" as
-    urgent or "cancel anytime" as a customer leaving. The graph uses the same check to skip
-    judging rules, so the two must not drift. An unsure verdict, or an important contact,
-    takes the normal path: a customer email filed here by mistake would be closed unseen.
+    urgent or "cancel anytime" as a customer leaving. Rules are judged beside the notes, so
+    such mail still gets verdicts; this check runs first and they are never read. An unsure
+    verdict, or an important contact, takes the normal path: a customer email filed here by
+    mistake would be closed unseen.
     """
     return (
         notes is not None
@@ -126,6 +127,11 @@ def decide(
     if not_for_business(notes, config, sender):
         return Decision(route=Route.CLOSED, urgency=urgency, reason=SPAM_TOPIC)
 
+    # The rules are judged in parallel with the notes, so verdicts can arrive when the notes
+    # failed. They are dropped: an email the AI could not read goes to needs a look, and only
+    # the safety floor above may alert on it. A matched close rule must not hide it unseen.
+    if notes is None:
+        verdicts = []
     rules_by_id = {r.id: r for r in config.rules}
     fired = [rules_by_id[v.rule_id] for v in verdicts if v.matched and v.rule_id in rules_by_id]
     fired_ids = [r.id for r in fired]

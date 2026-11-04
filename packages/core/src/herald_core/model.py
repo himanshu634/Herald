@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 from anthropic import APIError, AsyncAnthropic
 from anthropic.types import ToolResultBlockParam, ToolUseBlock
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from herald_core.history import History
 from herald_core.model_tools import ModelTool
@@ -193,7 +193,10 @@ def _result(call: ToolUseBlock, text: str, *, error: bool = False) -> ToolResult
 
 
 class _Verdicts(BaseModel):
-    verdicts: list[RuleVerdict]
+    # Matched rules only. Writing a "no" and a quote for every rule was most of the call's
+    # output tokens, and so most of its time; decide reads only the matches, and a missing
+    # rule is a "no".
+    verdicts: list[RuleVerdict] = Field(description="Only the rules the email meets.")
 
 
 _SETUP_INSTRUCTIONS = """A small business owner is setting up email triage. From their business
@@ -230,8 +233,9 @@ class AnthropicModel:
         self, system: str, content: str, output: type[T], tools: Sequence[ModelTool] = ()
     ) -> T:
         by_name = {tool.name: tool for tool in tools}
-        # The same tool list for the notes and rules calls: tools sit before the system prompt
-        # in the cache key, so the two calls keep sharing one cache entry.
+        # The same tool list for the notes and rules calls, so tools never change a workspace's
+        # prompt prefix. Each call's output schema is part of the prefix, so each has its own
+        # cache entry.
         offered: dict[str, Any] = {"tools": [tool.definition for tool in tools]} if tools else {}
         messages: list[dict[str, Any]] = [{"role": "user", "content": content}]
         for round_ in range(MAX_TOOL_ROUNDS + 1):

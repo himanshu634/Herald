@@ -66,19 +66,21 @@ flowchart LR
     S((start)) --> WC[word_check<br/>regex safety terms]
     S --> G[gather_context<br/>history tools, no AI]
     G --> N[write_notes<br/>AI: topic, urgency, anger, flags, quotes]
-    WC --> R[judge_rules<br/>AI: yes or no per owner rule]
-    N --> R
-    R --> D[decide<br/>plain Python]
+    G --> R[judge_rules<br/>AI: the owner rules the email meets]
+    WC --> D[decide<br/>plain Python]
+    N --> D
+    R --> D
     D --> E((end))
 ```
 
 - Each node is one file in `herald_core/nodes/`. `graph.py` only wires them, and `state.py` holds the state they share.
 - The graph is compiled once and shared by all tenants. Each run carries its workspace's config in the state.
-- `word_check` and `write_notes` run in parallel and write different state keys.
-- `write_notes` waits on `gather_context`. `word_check` does not.
-- If the AI fails (outage, refusal, bad output), the notes are empty and the email goes to "Needs a look". A safety-floor match from the word check still alerts.
+- `word_check`, `write_notes` and `judge_rules` run in parallel. They write different state keys, except `asked`, which both model nodes write and a reducer joins.
+- `write_notes` and `judge_rules` wait on `gather_context`. `word_check` does not.
+- The two model calls run side by side because the rules prompt never reads the notes. Run one after the other, they took about 9 s; side by side, the slower one sets the time. `judge_rules` lists only the rules the email meets, with the line that decided each. A missing rule is a "no". Writing a "no" for every rule was most of that call's output, and so most of its time.
+- If the AI fails (outage, refusal, bad output), the notes are empty and the email goes to "Needs a look". A safety-floor match from the word check still alerts. Rule verdicts that arrive without notes are not used, so a matched close rule cannot hide an email the AI could not read.
 - `decide` order, first match wins: safety floor (one exception, below) → not for the business → owner rules (alert beats close; a set-urgency rule never lowers an urgent email) → urgent or anger 5 → anger 4 from an important contact, or about to cancel → unsure → spam → inbox.
-- "Not for the business" means the AI filed the email under "Spam or not for me", is sure, and the sender is not an important contact. That mail closes before the rules and defaults, so a promotion that reads as urgent or names a rule's words stays quiet. `judge_rules` skips it, which saves one model call. Unsure spam and spam from an important contact take the normal path. The safety floor still comes first.
+- "Not for the business" means the AI filed the email under "Spam or not for me", is sure, and the sender is not an important contact. That mail closes before the rules and defaults, so a promotion that reads as urgent or names a rule's words stays quiet. `judge_rules` still runs on it, because it cannot see the notes; `decide` closes the email before it reads the verdicts. Unsure spam and spam from an important contact take the normal path. The safety floor still comes first.
 - The one exception to the floor: mail read from the provider's Spam folder (`in_spam`) that the AI also files as not for the business goes to "Needs a look" with its floor flags, instead of alerting. Phishing is full of floor words. A Spam email the AI reads as real mail, or is unsure about, still alerts.
 
 ## History
@@ -103,13 +105,13 @@ The model may call a tool while it writes notes or judges rules. `herald_core/mo
 - It answers from the sender history `gather_context` already fetched (`SenderLookup`). `decide` needs that history for the repeat count whatever the model does, so the fetch stays in code. The model's lookup costs no second request, and the model and `decide` see the same data.
 - It takes no input. The sender is always this email's own, so text in the email cannot steer the model into another customer's mail. It is `strict`, with a fixed description.
 - Its answer is the sender section, cleaned and fenced in `<history>` like the history block. A new sender gets "No earlier emails from this sender." A failed fetch goes back as an error result, so the model answers without it.
-- `write_notes` and `judge_rules` both offer it, with the same tool list. Tools come before the system prompt in the cache key, so the two calls still share one cache entry.
+- `write_notes` and `judge_rules` both offer it, with the same tool list, so the tools never change a workspace's prompt prefix.
 - The model gets one round of tool calls (`MAX_TOOL_ROUNDS`). The next request sends `tool_choice: none`, so the structured answer comes back. Every call in a round gets its result, in one user message, and the assistant turn goes back unchanged, thinking blocks included.
 - A tool round is one more model call before `decide`, so it delays every route, the safety floor's alerts included. `FakeModel` never calls a tool.
 
 ## The prompt
 
-Claude gets one system prompt for each business and one user message for each email. `herald_core/prompt.py` builds both. `write_notes` and `judge_rules` send the same system prompt, so they share one cache entry. Each call's output schema decides what Claude answers.
+Claude gets one system prompt for each business and one user message for each email. `herald_core/prompt.py` builds both. `write_notes` and `judge_rules` send the same system prompt. Each call's output schema decides what Claude answers. The schema is part of the cached prefix, so each call keeps its own cache entry for the workspace.
 
 | Layer | Changes when | Where it goes |
 | --- | --- | --- |

@@ -295,3 +295,15 @@ def test_repeats_need_the_time_of_the_email():
 def test_repeat_contact_beats_unsure():
     history = sender_history(earlier(1), earlier(2))
     assert run(notes(sure=False), history=history).route is Route.ALERT
+
+
+def test_without_notes_rule_verdicts_are_not_used():
+    # Rules are judged beside the notes; when the notes fail, a matched close rule must not
+    # hide the email and an alert rule must not stand in for the AI's read.
+    assert run(None, matched=["r-close"]).route is Route.NEEDS_A_LOOK
+    assert run(None, matched=["r-travel"]).route is Route.NEEDS_A_LOOK
+    assert run(None, matched=["r-close"]).fired_rule_ids == []
+
+
+def test_without_notes_the_safety_floor_still_alerts():
+    assert run(None, word_flags={RiskFlag.LEGAL_THREAT}, matched=["r-close"]).route is Route.ALERT

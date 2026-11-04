@@ -6,6 +6,7 @@ Herald ships as a multi-tenant framework, and the demo shows one business: Tripf
 
 | Date | Decision | Why |
 | --- | --- | --- |
+| 2026-11-04 | **The notes call and the rules call run side by side, and the rules call lists only the rules the email meets.** Mail that is not for the business is judged against the rules too; `decide` closes it before reading them. Verdicts that arrive without notes are not used. | The two calls ran one after the other and took about 9 s per email. The rules prompt never needed the notes. Side by side, the slower call sets the time. Writing a "no" for every rule was most of the rules call's output. The extra rules call on spam costs about $0.0006. |
 | 2026-11-03 | **Herald is a multi-tenant framework, not an app for one company.** Each business is a workspace. Its profile, topics, contacts and rules are data. | Many businesses use the same product. Adding one is an API call, not new code. |
 | 2026-11-03 | **The demo ships one business: Tripfold**, an online luggage and travel-bag brand modelled on brands like Mokobara. | Keeps the build small. Using a made-up name avoids presenting a real company's data. |
 | 2026-11-03 | **No starter templates.** With one demo business there is nothing to choose between. Setup (profile, topics, contacts, rules) stays. | Setup is what keeps the product general. |

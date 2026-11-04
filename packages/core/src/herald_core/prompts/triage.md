@@ -52,8 +52,9 @@ bought from a stockist?"). Write fact_draft only when one plain fact would settl
 fact as the owner might write it, under 200 characters. It is a guess the owner checks before
 saving, so keep it to what the question asks. When sure is true, leave both empty.
 
-Rules: for each rule, answer yes or no from the email,
-using the history only as background, and quote the line that decided it.
+Rules: list only the rules the email meets, each with the line that decided it. Leave out
+every rule it does not meet; an empty list is a fine answer. Judge from the email,
+using the history only as background.
 Answer from what the condition means, not only its exact words. A rule matches only when the
 email meets its condition: an email that is merely like the rule's case is a no, and its
 weight goes into the notes instead.
