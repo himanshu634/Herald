@@ -10,9 +10,11 @@ DEV_TOKEN := HERALD_INTERNAL_TOKEN=$${HERALD_INTERNAL_TOKEN:-herald-dev-internal
 # and the browser reconnects with Last-Event-ID.
 UVICORN := uv run uvicorn herald_server.api.main:app --port 8000 \
 	--reload --reload-dir src --reload-dir ../../packages/core/src --timeout-graceful-shutdown 2
+# Run from apps/server. Brings the database to the latest schema; the API and worker only check.
+MIGRATE := uv run python -m herald_server.migrate
 
-.PHONY: help install infra infra-down dev api worker web lite docker-dev docker-prod docker-prod-down \
-	test eval lint format gen-api langfuse langfuse-down
+.PHONY: help install infra infra-down migrate migration migrate-check dev api worker web lite \
+	docker-dev docker-prod docker-prod-down test eval lint format gen-api langfuse langfuse-down
 
 help: ## List tasks
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -27,25 +29,36 @@ infra: ## Start Postgres and Redis (Docker)
 infra-down: ## Stop Postgres and Redis
 	docker compose -f infra/docker-compose.yml down
 
+migrate: ## Bring the database to the latest schema (Postgres, or HERALD_DATABASE_URL)
+	$(SERVER) $(MIGRATE)
+
+# m says what changed, e.g. make migration m="add email priority". Autogenerate compares the
+# models with the database, so migrate first. Read the file it writes before you commit it:
+# it misses partial index conditions, renames and data changes.
+migration: ## Write a migration from model changes (needs make infra and make migrate)
+	@test -n "$(m)" || { echo 'usage: make migration m="what changed"'; exit 1; }
+	$(SERVER) uv run alembic revision --autogenerate -m "$(m)"
+
+migrate-check: ## Fail when the models have a change that no migration covers
+	$(SERVER) uv run alembic check
+
 langfuse: ## Start local Langfuse on :3000 (dev tracing, Docker)
 	docker compose -f infra/docker-compose.langfuse.yml up -d --wait
 
 langfuse-down: ## Stop local Langfuse (keeps its data)
 	docker compose -f infra/docker-compose.langfuse.yml down
 
-# --wait holds until the healthchecks pass, so the API and worker never start before
-# Postgres accepts connections. The API and worker each run create_all on startup; on an
-# empty database they race to create the same enum types and one crashes, so create the
-# tables once first and their create_all finds nothing to do. Ctrl-C reaches all three
-# processes (same process group); the containers keep running, stop them with make infra-down.
+# --wait holds until the healthchecks pass, so the migration never runs before Postgres
+# accepts connections. It runs once, before the API and worker, which only check the schema.
+# Ctrl-C reaches all three processes (same process group); the containers keep running, stop
+# them with make infra-down.
 dev: ## Start Postgres and Redis (Docker), then the API, worker and web app together
 	docker compose -f infra/docker-compose.yml up -d --wait
-	$(SERVER) uv run python -c "from sqlmodel import SQLModel, create_engine; \
-		import herald_server.models; from herald_server.settings import get_settings; \
-		SQLModel.metadata.create_all(create_engine(get_settings().database_url))"
+	$(SERVER) $(MIGRATE)
 	$(MAKE) -j3 api worker web
 
-api: ## Run the API on :8000 (needs make infra)
+api: ## Migrate, then run the API on :8000 (needs make infra)
+	$(SERVER) $(MIGRATE)
 	$(SERVER) $(DEV_TOKEN) HERALD_DEBUG=1 $(UVICORN)
 
 worker: ## Run the pipeline worker (needs make infra)
@@ -55,6 +68,7 @@ web: ## Run the web app on :5173 (proxies /api to :8000)
 	pnpm -C apps/web dev
 
 lite: ## Run the API with no Docker: SQLite, in-memory bus, inline pipeline
+	$(SERVER) $(LITE) $(MIGRATE)
 	$(SERVER) $(LITE) HERALD_DEBUG=1 $(UVICORN)
 
 docker-dev: ## Run the full stack in Docker with hot reload (web :5173, API :8000)
