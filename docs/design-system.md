@@ -6,13 +6,13 @@ The design has one job: show the owner that their support agent is keeping the m
 
 The web app styles everything with **Tailwind CSS v4**, and the tokens below are Tailwind's theme.
 
-| Where | What |
-| --- | --- |
-| `apps/web/src/lib/styles/tokens.css` | The Tailwind theme (`@theme`): every colour, type size, radius, size and shadow, plus the dark values |
-| `apps/web/src/app.css` | Imports Tailwind, the font and the tokens; page basics (font, background, focus ring, reduced motion) |
-| `apps/web/src/lib/ui/` | The components (`Button`, `Tag`, `StatusTag`, `AngerMeter`, `Tabs`, `FilterChip`, `Panel`, `Kbd`, `Toast`, `Icon`, `Logo`) and `tones.ts` |
-| `apps/web/src/lib/inbox/` | The inbox built from them: `EmailTable`, `EmailPanel` and `inbox.ts` (views, order, actions, proof highlighting) |
-| `/design-system` in the web app | The gallery: every token and component, with a light and dark switch |
+| Where                                | What                                                                                                                                      |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/lib/styles/tokens.css` | The Tailwind theme (`@theme`): every colour, type size, radius, size and shadow, plus the dark values                                     |
+| `apps/web/src/app.css`               | Imports Tailwind, the font and the tokens; page basics (font, background, focus ring, reduced motion)                                     |
+| `apps/web/src/lib/ui/`               | The components (`Button`, `Tag`, `StatusTag`, `AngerMeter`, `Tabs`, `FilterChip`, `Panel`, `Kbd`, `Toast`, `Icon`, `Logo`) and `tones.ts` |
+| `apps/web/src/lib/inbox/`            | The inbox built from them: `EmailTable`, `EmailPanel` and `inbox.ts` (views, order, actions, proof highlighting)                          |
+| `/design-system` in the web app      | The gallery: every token and component, with a light and dark switch                                                                      |
 
 ## Principles
 
@@ -38,40 +38,40 @@ The web app styles everything with **Tailwind CSS v4**, and the tokens below are
 
 ### Colour
 
-| Utility (`bg-`, `text-`, `border-`) | Light | Dark | Use for |
-| --- | --- | --- | --- |
-| `canvas` | `#E6E8EC` concrete | `#121418` | The page behind panels |
-| `surface` | `#FFFFFF` | `#1A1D22` | Panels, tables, side panels |
-| `sunken` | `#F6F7F9` | `#16181C` | The icon rail, table headers |
-| `subtle` | `#EEF0F3` | `#23272E` | Inactive tabs, hover on quiet buttons |
-| `ink` | `#15171C` | `#ECEEF1` | Headings, names, labels |
-| `body` | ink at 88% | light at 88% | Paragraphs and email text |
-| `muted` | `#5B606B` | `#A3A9B4` | Times, meta, captions |
-| `line` | `#D9DCE2` | `#2C3038` | Solid edges of panels, tables, tabs |
-| `line-dashed` | `#CDD1D8` | `#3A3F48` | Dashed dividers inside a panel, table row rules |
-| `control` | `#7B818B` | `#6A707B` | Edges of inputs, filter chips, secondary buttons (3:1) |
-| `accent` | `#C5EE3F` chartreuse | same | Primary button face, selected tab, selection |
-| `accent-base`, `accent-edge` | `#7E9A1E`, `#4F6312` | `#6E8719`, `#3E4E0E` | The base and outline under a primary button |
-| `accent-soft` | `#FBFDF3` | `#1D2312` | Background of the selected row |
-| `accent-tint` | `#F3FAD9` | `#263015` | Highlighted proof in an email, important contact tag |
-| `on-accent` | ink | ink | Text on chartreuse: always ink, never white |
-| `focus` | ink | chartreuse | The focus ring |
-| `live` | `#1F9D6A` | same | The "Herald is reading" dot only |
-| `logo-tile`, `logo-edge`, `logo-row` | `#15171C`, `#15171C`, white at 40% | `#23272E`, `#3A3F48`, same | The logo only (`Logo`). Nothing else uses them |
+| Utility (`bg-`, `text-`, `border-`)  | Light                              | Dark                       | Use for                                                |
+| ------------------------------------ | ---------------------------------- | -------------------------- | ------------------------------------------------------ |
+| `canvas`                             | `#E6E8EC` concrete                 | `#121418`                  | The page behind panels                                 |
+| `surface`                            | `#FFFFFF`                          | `#1A1D22`                  | Panels, tables, side panels                            |
+| `sunken`                             | `#F6F7F9`                          | `#16181C`                  | The icon rail, table headers                           |
+| `subtle`                             | `#EEF0F3`                          | `#23272E`                  | Inactive tabs, hover on quiet buttons                  |
+| `ink`                                | `#15171C`                          | `#ECEEF1`                  | Headings, names, labels                                |
+| `body`                               | ink at 88%                         | light at 88%               | Paragraphs and email text                              |
+| `muted`                              | `#5B606B`                          | `#A3A9B4`                  | Times, meta, captions                                  |
+| `line`                               | `#D9DCE2`                          | `#2C3038`                  | Solid edges of panels, tables, tabs                    |
+| `line-dashed`                        | `#CDD1D8`                          | `#3A3F48`                  | Dashed dividers inside a panel, table row rules        |
+| `control`                            | `#7B818B`                          | `#6A707B`                  | Edges of inputs, filter chips, secondary buttons (3:1) |
+| `accent`                             | `#C5EE3F` chartreuse               | same                       | Primary button face, selected tab, selection           |
+| `accent-base`, `accent-edge`         | `#7E9A1E`, `#4F6312`               | `#6E8719`, `#3E4E0E`       | The base and outline under a primary button            |
+| `accent-soft`                        | `#FBFDF3`                          | `#1D2312`                  | Background of the selected row                         |
+| `accent-tint`                        | `#F3FAD9`                          | `#263015`                  | Highlighted proof in an email, important contact tag   |
+| `on-accent`                          | ink                                | ink                        | Text on chartreuse: always ink, never white            |
+| `focus`                              | ink                                | chartreuse                 | The focus ring                                         |
+| `live`                               | `#1F9D6A`                          | same                       | The "Herald is reading" dot only                       |
+| `logo-tile`, `logo-edge`, `logo-row` | `#15171C`, `#15171C`, white at 40% | `#23272E`, `#3A3F48`, same | The logo only (`Logo`). Nothing else uses them         |
 
 ### Tones: status, urgency and flags
 
 Each tone is a `-bg` and `-fg` pair (`bg-danger-bg text-danger-fg`). The mapping lives in `apps/web/src/lib/ui/tones.ts`. Use `StatusTag`, or the `STATUS`, `URGENCY` and `TONE_CLASSES` maps; don't pick a tone by hand for an email.
 
-| Tone | Status | Urgency | Other |
-| --- | --- | --- | --- |
-| `danger` | Alerts (`alerted`) | Urgent | |
-| `warning` | Needs a look (`needs_a_look`) | High | |
-| `success` | In progress (`in_progress`) | | |
-| `neutral` | Inbox (`inbox`) | Normal | About to cancel |
-| `muted` | Done, Closed quietly, Reading (`new`) | Low | |
-| `floor` | | | Safety floor flags only |
-| `accent` | | | Important contact only |
+| Tone      | Status                                | Urgency | Other                   |
+| --------- | ------------------------------------- | ------- | ----------------------- |
+| `danger`  | Alerts (`alerted`)                    | Urgent  |                         |
+| `warning` | Needs a look (`needs_a_look`)         | High    |                         |
+| `success` | In progress (`in_progress`)           |         |                         |
+| `neutral` | Inbox (`inbox`)                       | Normal  | About to cancel         |
+| `muted`   | Done, Closed quietly, Reading (`new`) | Low     |                         |
+| `floor`   |                                       |         | Safety floor flags only |
+| `accent`  |                                       |         | Important contact only  |
 
 The status words are fixed: **Alerts, Needs a look, Inbox, In progress, Done, Closed quietly, Reading.** Use them in tags, tabs, filters and copy alike.
 
@@ -85,16 +85,16 @@ Figures are proportional by default. Add `tabular-nums` only where a column hold
 
 A replacement face must have tabular figures (`tnum`), its own ₹ and weights up to 800. Albert Sans was dropped because it has no tabular figures at all.
 
-| Utility | Size | Weight | Use for |
-| --- | --- | --- | --- |
-| `text-4xl` | 42 | `font-extrabold tracking-display` | Display. At most once per screen, often never |
-| `text-3xl` | 30 | `font-extrabold tracking-display` | Hero numbers ("3 need you now") |
-| `text-2xl` | 24 | `font-extrabold` | Page titles |
-| `text-xl` | 18 | `font-extrabold` | Side panel titles (the open email's subject) |
-| `text-lg` | 16 | `font-bold` | Row titles in cards and lists |
-| `text-md` | 14 | regular to bold | Body, buttons. The default |
-| `text-sm` | 13 | regular to bold | Table cells, meta, filter chips |
-| `text-xs` | 12 | `font-semibold` or `font-bold` | Tags, table headers, kbd |
+| Utility    | Size | Weight                            | Use for                                       |
+| ---------- | ---- | --------------------------------- | --------------------------------------------- |
+| `text-4xl` | 42   | `font-extrabold tracking-display` | Display. At most once per screen, often never |
+| `text-3xl` | 30   | `font-extrabold tracking-display` | Hero numbers ("3 need you now")               |
+| `text-2xl` | 24   | `font-extrabold`                  | Page titles                                   |
+| `text-xl`  | 18   | `font-extrabold`                  | Side panel titles (the open email's subject)  |
+| `text-lg`  | 16   | `font-bold`                       | Row titles in cards and lists                 |
+| `text-md`  | 14   | regular to bold                   | Body, buttons. The default                    |
+| `text-sm`  | 13   | regular to bold                   | Table cells, meta, filter chips               |
+| `text-xs`  | 12   | `font-semibold` or `font-bold`    | Tags, table headers, kbd                      |
 
 - Sentence case everywhere: headings, buttons, tabs, table headers. No all-caps labels.
 - Body text uses `text-body` (ink at 88%), not a third grey. Prefer opacity to new colours.
@@ -113,11 +113,11 @@ A replacement face must have tabular figures (`tnum`), its own ₹ and weights u
 
 A raised face sits `--press-depth` (3 px) above a darker base. On click it drops to 1 px. On hover nothing moves: snappy in, eased out on release, as PostHog does it.
 
-| Variant | Use | Rule |
-| --- | --- | --- |
-| `primary` | The one main action in the current view (**On it** for an alerted email, **Save rule**) | At most one per view. Chartreuse face, ink text |
-| `secondary` | Every other action (**Not urgent**, **Done**, **Test on past emails**) | White face, 3:1 edge |
-| `quiet` | Low-stakes actions and links in toolbars (**Open thread**) | No base, no press |
+| Variant     | Use                                                                                     | Rule                                            |
+| ----------- | --------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `primary`   | The one main action in the current view (**On it** for an alerted email, **Save rule**) | At most one per view. Chartreuse face, ink text |
+| `secondary` | Every other action (**Not urgent**, **Done**, **Test on past emails**)                  | White face, 3:1 edge                            |
+| `quiet`     | Low-stakes actions and links in toolbars (**Open thread**)                              | No base, no press                               |
 
 - Pass `kbd` to show the shortcut. The owner actions are fixed: **O** On it, **N** Not urgent, **I** Move to Inbox, **D** Done, **E** read the whole email, **R** Reply (in the composer, **Esc** goes back to the list and **⌘↵** or Ctrl+Enter is Send and mark done), **/** Search, **J** and **K** next and previous email. Wiring the key is the screen's job; the button only shows it. The key is hidden on touch screens, which have no keyboard.
 - Labels say what happens, and the result uses the same words: the button **Not urgent** gives the message "Moved to Inbox. Herald saved this as a correction."
@@ -155,7 +155,7 @@ An optional `aside` docks a side panel to the right edge for editing one item wh
 
 ### Toast
 
-A short message after an owner action, bottom centre, ink on canvas. It uses the action's own words ("Moved to In progress.") and clears itself after 5 seconds. It sits in a `role="status"` region so screen readers hear it. Errors are not toasts: they stay on screen as a `role="alert"` banner until dismissed.
+A short message after an owner action, top centre, ink on canvas. It drops in from above and lifts away (no movement under reduced motion), and stays clear of the action bar at the bottom, where the next press goes. It uses the action's own words ("Moved to In progress.") and clears itself after 5 seconds. It sits in a `role="status"` region so screen readers hear it. Errors are not toasts: they stay on screen as a `role="alert"` banner until dismissed.
 
 ### ThemeSwitch
 
