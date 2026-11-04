@@ -97,6 +97,7 @@ async def test_notes_call_sends_schema_and_routing():
     assert schema["strict"] is True
     assert schema["schema"] == to_strict_json_schema(Notes)
     assert call["model"] == "openai/gpt-oss-20b"
+    assert call["max_tokens"] == 4096
     assert call["provider"] == {"require_parameters": True}
     assert call["reasoning"] == {"effort": "low"}
     assert call["messages"][0] == {"role": "system", "content": system_prompt("Tripfold", CONFIG)}

@@ -20,6 +20,7 @@ from pydantic import BaseModel, ValidationError
 from herald_core.history import History
 from herald_core.model import (
     _SETUP_INSTRUCTIONS,
+    MAX_OUTPUT_TOKENS,
     MAX_TOOL_ROUNDS,
     REQUEST_RETRIES,
     REQUEST_TIMEOUT,
@@ -206,6 +207,7 @@ class OpenRouterModel:
             try:
                 response = await self._client.chat.completions.create(
                     model=self._model,
+                    max_tokens=MAX_OUTPUT_TOKENS,
                     # A copy: the list grows after the call.
                     messages=list(messages),
                     # `create`, not `parse`: `parse` runs json.loads on tool arguments inside the

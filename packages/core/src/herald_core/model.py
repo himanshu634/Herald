@@ -26,6 +26,11 @@ from herald_core.schema import (
 # round could only repeat the first. Each round is a full model call before decide runs.
 MAX_TOOL_ROUNDS = 1
 
+# Output tokens per request. Notes and a setup draft fit well inside it. OpenRouter also holds
+# this much of the account's credit per request, and without a cap it holds the model's whole
+# context window, which a small balance cannot cover.
+MAX_OUTPUT_TOKENS = 4096
+
 # The last line of the rules call, after the email.
 RULES_ASK = "Answer each rule in the <business> block."
 
