@@ -612,6 +612,18 @@ async def test_connect_with_spam_saves_the_choice_and_reads_spam(app, client, fa
     assert sorted(e["in_spam"] for e in listed) == [False, True]
 
 
+async def test_reconnect_from_the_web_sends_no_spam_choice(app, client, fake_connector):
+    # The web's request() always sets the JSON content type, even with no body.
+    ws = await demo_workspace(client)
+    response = await client.post(
+        f"/api/workspaces/{ws}/mailboxes/fake/connect",
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 200
+    state = parse_qs(urlsplit(response.json()["authorization_url"]).query)["state"][0]
+    assert "read_spam" not in app.state.services.secrets.open(state)
+
+
 async def test_connect_without_a_choice_leaves_spam_off(app, client, fake_connector):
     ws = await demo_workspace(client)
     await connect_with(app, client, ws, read_spam=None)
