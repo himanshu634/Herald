@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 from herald_core.history import History
 from herald_core.model import (
     _SETUP_INSTRUCTIONS,
+    MAX_OUTPUT_TOKENS,
     MAX_TOOL_ROUNDS,
     REQUEST_RETRIES,
     REQUEST_TIMEOUT,
@@ -92,7 +93,7 @@ class AnthropicModel:
                 # Marked cacheable: the same brand prompt is sent for every email of a workspace.
                 response = await self._client.messages.parse(
                     model=self._model,
-                    max_tokens=4096,
+                    max_tokens=MAX_OUTPUT_TOKENS,
                     system=[
                         {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
                     ],

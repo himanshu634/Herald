@@ -15,6 +15,7 @@ from herald_core.providers import load_provider
 from herald_core.providers.openrouter import BASE_URL, OpenRouterModel
 from herald_core.schema import (
     Email,
+    FailureKind,
     Notes,
     Rule,
     RuleAction,
@@ -96,6 +97,7 @@ async def test_notes_call_sends_schema_and_routing():
     assert schema["strict"] is True
     assert schema["schema"] == to_strict_json_schema(Notes)
     assert call["model"] == "openai/gpt-oss-20b"
+    assert call["max_tokens"] == 4096
     assert call["provider"] == {"require_parameters": True}
     assert call["reasoning"] == {"effort": "low"}
     assert call["messages"][0] == {"role": "system", "content": system_prompt("Tripfold", CONFIG)}
@@ -195,8 +197,6 @@ async def test_a_tool_request_on_the_last_round_raises():
     "body",
     [
         completion(None, refusal="No."),
-        completion(None),
-        completion("", finish="stop"),
         completion("not json"),
         completion('{"topic": "Orders and delivery"}'),
         completion(NOTES.model_dump_json(), finish="length"),
@@ -207,8 +207,6 @@ async def test_a_tool_request_on_the_last_round_raises():
     ],
     ids=[
         "refusal",
-        "null content",
-        "empty content",
         "not json",
         "fails validation",
         "length",
@@ -222,6 +220,80 @@ async def test_bad_replies_raise_model_error(body):
     model, _ = stub_model(body)
     with pytest.raises(ModelError):
         await model.write_notes(EMAIL, "Tripfold", CONFIG)
+
+
+@pytest.mark.parametrize("empty", [completion(None), completion("")], ids=["null", "blank"])
+async def test_an_empty_reply_is_asked_again_once(empty):
+    model, calls = stub_model(empty, answer(NOTES))
+    assert await model.write_notes(EMAIL, "Tripfold", CONFIG) == NOTES
+    assert len(calls) == 2
+    assert calls[0] == calls[1]  # no host named, so nothing to leave out
+
+
+async def test_the_retry_leaves_out_the_host_that_sent_nothing():
+    model, calls = stub_model(completion(None, provider="Darkbloom"), answer(NOTES))
+    assert await model.write_notes(EMAIL, "Tripfold", CONFIG) == NOTES
+    assert "ignore" not in calls[0]["provider"]
+    assert calls[1]["provider"] == {"require_parameters": True, "ignore": ["Darkbloom"]}
+    assert calls[1]["reasoning"] == {"effort": "low"}
+
+
+async def test_two_empty_replies_are_unavailable():
+    # Seen live: one host returns only the reasoning. The worker retries an unavailable AI.
+    reasoning_only = completion(None, message_extra={"reasoning": "Topic: orders."})
+    model, calls = stub_model(reasoning_only, reasoning_only)
+    with pytest.raises(ModelError) as raised:
+        await model.write_notes(EMAIL, "Tripfold", CONFIG)
+    assert raised.value.kind is FailureKind.UNAVAILABLE
+    assert len(calls) == 2
+
+
+NO_ENDPOINTS_BODY = {
+    "error": {
+        "code": 404,
+        "message": "No endpoints found that can handle the requested parameters. To learn more "
+        "about provider routing, visit: https://openrouter.ai/docs/provider-routing",
+    }
+}
+
+
+def stub_responses(*replies: tuple[int, dict]) -> tuple[OpenRouterModel, list[dict]]:
+    """Like stub_model, with a status per reply."""
+    requests: list[dict] = []
+    queue = list(replies)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(json.loads(request.content))
+        status, body = queue.pop(0)
+        return httpx2.Response(status, json=body)
+
+    client = AsyncOpenAI(
+        base_url=BASE_URL,
+        api_key="sk-test",
+        max_retries=0,
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
+    )
+    return OpenRouterModel(client=client), requests
+
+
+async def test_a_model_without_reasoning_is_asked_again_without_it():
+    ok = (200, answer(NOTES))
+    model, calls = stub_responses((404, NO_ENDPOINTS_BODY), ok, ok)
+    assert await model.write_notes(EMAIL, "Tripfold", CONFIG) == NOTES
+    assert calls[0]["reasoning"] == {"effort": "low"}
+    assert "reasoning" not in calls[1]
+    assert calls[1]["provider"] == {"require_parameters": True}
+    # Remembered: the next call does not try reasoning again.
+    await model.write_notes(EMAIL, "Tripfold", CONFIG)
+    assert "reasoning" not in calls[2]
+
+
+async def test_no_endpoints_without_reasoning_raises():
+    model, calls = stub_responses((404, NO_ENDPOINTS_BODY), (404, NO_ENDPOINTS_BODY))
+    with pytest.raises(ModelError) as raised:
+        await model.write_notes(EMAIL, "Tripfold", CONFIG)
+    assert raised.value.kind is FailureKind.SETUP
+    assert len(calls) == 2
 
 
 async def test_http_error_raises_model_error():
