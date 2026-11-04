@@ -100,7 +100,7 @@ The thread and the corrections go into the prompt. The sender history does not: 
 
 ## Model tools
 
-The model may call a tool while it writes notes or judges rules. `herald_core/model_tools.py` holds them; `AnthropicModel` runs the loop. There is one so far, `sender_history`.
+The model may call a tool while it writes notes or judges rules. `herald_core/model_tools.py` holds them; each provider (`AnthropicModel`, `OpenRouterModel`) runs the loop. There is one so far, `sender_history`.
 
 - It answers from the sender history `gather_context` already fetched (`SenderLookup`). `decide` needs that history for the repeat count whatever the model does, so the fetch stays in code. The model's lookup costs no second request, and the model and `decide` see the same data.
 - It takes no input. The sender is always this email's own, so text in the email cannot steer the model into another customer's mail. It is `strict`, with a fixed description.

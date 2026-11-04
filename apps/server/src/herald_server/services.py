@@ -90,7 +90,7 @@ def build_services(settings: Settings, model: TriageModel | None = None) -> Serv
         RedisEventBus(settings.redis_url) if settings.bus == "redis" else InMemoryEventBus()
     )
     # A model passed in (tests) skips the provider and its key.
-    model = model or build_model(settings)
+    model = build_model(settings) if model is None else model
     tracing = build_tracing(settings)
     model = tracing.wrap_model(model)
     http = httpx.AsyncClient(timeout=20)
