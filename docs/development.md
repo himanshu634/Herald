@@ -1,6 +1,6 @@
 # Herald: Development
 
-How to set up, run, test and debug Herald on your machine. How to propose a change is in [CONTRIBUTING.md](../CONTRIBUTING.md). How the parts fit together is in [architecture.md](architecture.md).
+How to set up, run, test and debug Herald on your machine, and how to run it on a server. How to propose a change is in [CONTRIBUTING.md](../CONTRIBUTING.md). How the parts fit together is in [architecture.md](architecture.md).
 
 ## What you need
 
@@ -159,6 +159,24 @@ Connecting Gmail needs a Google Cloud project. Do this once:
 Restart the API and the worker. The connect screen now offers Gmail.
 
 Google cannot push to `localhost`. Without a tunnel, new mail arrives on the 15-minute catch-up, or when you ask for a sync with `POST /api/workspaces/{id}/mailboxes/{mailbox_id}/sync`. The catch-up is an arq cron job, so it runs only with the worker (`make dev`), not in lite mode. For live push, expose the API with a tunnel, set `HERALD_PUBLIC_API_URL` to the tunnel URL, and point the OAuth redirect URI and the push subscription at it.
+
+## Run it on your server
+
+Production runs nginx (serving the web app and proxying `/api`), the API, the worker, Postgres and Redis, all in Docker. Copy `.env.example` to `.env` and set:
+
+- `POSTGRES_PASSWORD`
+- `ANTHROPIC_API_KEY`. Production uses Claude unless `HERALD_MODEL_PROVIDER` says otherwise.
+- `HERALD_WEB_URL`, the public URL of the web app, and `HERALD_PUBLIC_API_URL`, the public URL of its API. Gmail sign-in and push are built from it.
+- `HERALD_INTERNAL_TOKEN`, the secret the worker sends to the API. Make one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+- The Gmail settings, if you connect Gmail (see [Gmail on your machine](#gmail-on-your-machine))
+
+Then:
+
+```bash
+make docker-prod
+```
+
+It listens on `HERALD_PORT` (default 8080). Put TLS in front of it. Stop it with `make docker-prod-down`. There is no sign-in yet: anyone who can reach it can read your mail. Keep it behind a VPN or a sign-in proxy. Google's push must still reach `/api/webhooks/gmail`; without it, new mail arrives only on the 15-minute catch-up.
 
 ## Where things are
 

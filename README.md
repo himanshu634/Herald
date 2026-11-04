@@ -58,65 +58,10 @@ Coming next:
 
 **About your data:** Herald stores your email on your own server. The text of each email is sent to the AI provider you choose (OpenRouter by default, or Anthropic) to write its notes. The only mail that leaves Herald is a reply you write and send, through your own Gmail.
 
-## Try it
+## Try it, run it, help build it
 
-Needs [uv](https://docs.astral.sh/uv/), [pnpm](https://pnpm.io) 11 and Node 22+. No Docker.
-
-Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`. To use Claude directly instead, set `HERALD_MODEL_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`.
-
-```bash
-make install
-```
-
-```bash
-make lite
-```
-
-In a second terminal:
-
-```bash
-make web
-```
-
-Open http://localhost:5173 and click **Open the Tripfold demo**.
-
-To connect a real Gmail inbox, you need a Google Cloud project first. See [Gmail on your machine](docs/development.md#gmail-on-your-machine).
-
-## Run it on your server
-
-Production runs nginx (serving the web app and proxying `/api`), the API, the worker, Postgres and Redis, all in Docker. Copy `.env.example` to `.env` and set:
-
-- `POSTGRES_PASSWORD`
-- `ANTHROPIC_API_KEY`. Production uses Claude unless `HERALD_MODEL_PROVIDER` says otherwise.
-- `HERALD_WEB_URL`, the public URL of the web app, and `HERALD_PUBLIC_API_URL`, the public URL of its API. Gmail sign-in and push are built from it.
-- `HERALD_INTERNAL_TOKEN`, the secret the worker sends to the API. Make one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
-- The Gmail settings, if you connect Gmail (see [Gmail on your machine](docs/development.md#gmail-on-your-machine))
-
-Then:
-
-```bash
-make docker-prod
-```
-
-It listens on `HERALD_PORT` (default 8080). Put TLS in front of it. Stop it with `make docker-prod-down`. There is no sign-in yet: anyone who can reach it can read your mail. Keep it behind a VPN or a sign-in proxy. Google's push must still reach `/api/webhooks/gmail`; without it, new mail arrives only on the 15-minute catch-up.
-
-## Contributing
-
-Herald is multi-tenant: each business is a workspace, and its setup is data. A LangGraph pipeline writes the notes. A plain Python step applies the safety floor and the rules.
-
-**Stack:** SvelteKit (Svelte 5) · FastAPI with SSE · LangGraph · Postgres · Redis (arq + pub/sub).
-
-```
-apps/web         SvelteKit single-page app
-apps/server      FastAPI API + arq pipeline worker (herald_server)
-packages/core    LangGraph pipeline, decide step, safety floor, model providers (herald_core)
-packages/evals   labelled test emails and the score report (herald_evals)
-tests_support    the scripted model the tests use
-docs             scope, decisions, architecture, design system, evals
-```
-
+- [docs/development.md](docs/development.md): run Herald on your machine with the Tripfold demo, connect Gmail, or run it on your own server
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to propose a change
-- [docs/development.md](docs/development.md): set up, run, test and debug Herald
 - [docs/](docs/README.md): scope, decisions, architecture, design system and evals
 
 ## License
