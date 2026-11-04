@@ -160,7 +160,11 @@ def address_live_in_other_workspace(
 
 
 def upsert_connected(
-    services: Services, workspace_id: str, provider: str, account: ConnectedAccount
+    services: Services,
+    workspace_id: str,
+    provider: str,
+    account: ConnectedAccount,
+    read_spam: bool | None = None,
 ) -> tuple[Mailbox, BusEvent]:
     """Save a freshly authorized account as an ACTIVE mailbox, reusing its row on reconnect.
 
@@ -197,6 +201,9 @@ def upsert_connected(
         # Set on every connect, so a reconnect that grants send turns it on and one that drops
         # it turns it off.
         mailbox.can_send = account.can_send
+        # None (a reconnect from the menu or the composer) keeps the owner's earlier choice.
+        if read_spam is not None:
+            mailbox.read_spam = read_spam
         session.add(mailbox)
         event = stage_status_event(session, mailbox)
         try:
@@ -234,7 +241,9 @@ async def subscribe_mailbox(services: Services, mailbox: Mailbox) -> None:
     if connector is None or credentials is None:
         return
     try:
-        subscription = await connector.subscribe(credentials, mailbox.provider_state)
+        subscription = await connector.subscribe(
+            credentials, mailbox.provider_state, include_spam=mailbox.read_spam
+        )
     except Exception as exc:
         # Only the type and id: provider errors can carry request headers with tokens.
         log.warning("%s on subscribe of mailbox %s", type(exc).__name__, mailbox.id)
@@ -263,7 +272,9 @@ async def renew_subscriptions(services: Services) -> int:
             # BadSecret: the credentials no longer decrypt (e.g. token_key changed), so only
             # a reconnect can fix this mailbox, the same as a revoke.
             credentials = services.secrets.open(mailbox.credentials_enc)
-            subscription = await connector.subscribe(credentials, mailbox.provider_state)
+            subscription = await connector.subscribe(
+                credentials, mailbox.provider_state, include_spam=mailbox.read_spam
+            )
             await asyncify(_save_subscription)(services, mailbox_id, subscription)
         except (AuthRevoked, BadSecret) as exc:
             # Only the type and id: provider errors can carry request headers with tokens.
@@ -299,7 +310,11 @@ async def unsubscribe_mailbox(services: Services, mailbox: Mailbox) -> None:
 
 
 async def connect_mailbox(
-    services: Services, workspace_id: str, connector: MailConnector, code: str
+    services: Services,
+    workspace_id: str,
+    connector: MailConnector,
+    code: str,
+    read_spam: bool | None = None,
 ) -> Mailbox:
     """Finish OAuth: save the account as an ACTIVE mailbox, publish the status, subscribe.
 
@@ -314,7 +329,7 @@ async def connect_mailbox(
     # same account as the other workspace's live grant, and a revoke ends the account's grant
     # to Herald as a whole, which would break that workspace's mailbox.
     mailbox, event = await asyncify(upsert_connected)(
-        services, workspace_id, connector.provider, account
+        services, workspace_id, connector.provider, account, read_spam
     )
     # Publish before subscribing: the change is committed, and a slow provider should not
     # hold back the status the owner's open tabs are waiting for.

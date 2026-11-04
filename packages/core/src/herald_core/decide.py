@@ -2,7 +2,8 @@
 
 The AI suggests (notes, rule verdicts); this function decides. Order, first match wins:
 
-1. Safety floor (from the AI or the word check) -> alert, always.
+1. Safety floor (from the AI or the word check) -> alert. The one exception: mail the provider
+   filed as spam that the AI is also sure is not for the business goes to needs a look.
 2. Not for the business (see `not_for_business`) -> closed.
 3. The owner's rules; the most urgent result wins (alert > close). A set-urgency rule never
    lowers an urgent email.
@@ -96,10 +97,22 @@ def decide(
     config: WorkspaceConfig,
     sender: str,
     history: History | None = None,
+    in_spam: bool = False,
 ) -> Decision:
     ai_flags = set(notes.risk_flags) if notes else set()
     floor = sorted((ai_flags | word_flags) & FLOOR_FLAGS)
     urgency = notes.urgency if notes else None
+
+    # Phishing is full of floor words ("legal action", "chargeback"), so reading Spam would
+    # alert on junk. Only when the provider AND the AI both call it spam does a floor hit drop
+    # to needs a look: still shown, never closed. A real customer in Spam still alerts.
+    if floor and in_spam and not_for_business(notes, config, sender):
+        return Decision(
+            route=Route.NEEDS_A_LOOK,
+            urgency=urgency,
+            reason="Safety floor in Spam: " + ", ".join(floor),
+            floor_flags=floor,
+        )
 
     if floor:
         return Decision(

@@ -352,6 +352,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/mailboxes/{mailbox_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect */
+        delete: operations["disconnect_api_workspaces__workspace_id__mailboxes__mailbox_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Mailbox */
+        patch: operations["update_mailbox_api_workspaces__workspace_id__mailboxes__mailbox_id__patch"];
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/mailboxes/{mailbox_id}/sync": {
         parameters: {
             query?: never;
@@ -398,23 +416,6 @@ export interface paths {
         /** Resume */
         post: operations["resume_api_workspaces__workspace_id__mailboxes__mailbox_id__resume_post"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/mailboxes/{mailbox_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Disconnect */
-        delete: operations["disconnect_api_workspaces__workspace_id__mailboxes__mailbox_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -475,6 +476,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ConnectIn */
+        ConnectIn: {
+            /**
+             * Read Spam
+             * @description Read the Spam folder too. Leave it out on a reconnect to keep the mailbox's current choice.
+             */
+            read_spam?: boolean | null;
+        };
         /** ConnectOut */
         ConnectOut: {
             /** Authorization Url */
@@ -571,6 +580,11 @@ export interface components {
              * Format: date-time
              */
             received_at: string;
+            /**
+             * In Spam
+             * @description Read from the mail provider's Spam folder.
+             */
+            in_spam: boolean;
         };
         /**
          * EmailStatus
@@ -599,6 +613,8 @@ export interface components {
             status: components["schemas"]["MailboxStatus"];
             /** Can Send */
             can_send: boolean;
+            /** Read Spam */
+            read_spam: boolean;
             /** Subscription Expires At */
             subscription_expires_at: string | null;
             /** Last Synced At */
@@ -608,6 +624,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** MailboxPatch */
+        MailboxPatch: {
+            /** Read Spam */
+            read_spam: boolean;
         };
         /**
          * MailboxStatus
@@ -1523,7 +1544,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ConnectIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1532,6 +1557,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_api_workspaces__workspace_id__mailboxes__mailbox_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mailbox_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_mailbox_api_workspaces__workspace_id__mailboxes__mailbox_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mailbox_id: string;
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailboxPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxOut"];
                 };
             };
             /** @description Validation Error */
@@ -1610,38 +1703,6 @@ export interface operations {
         };
     };
     resume_api_workspaces__workspace_id__mailboxes__mailbox_id__resume_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mailbox_id: string;
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MailboxOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    disconnect_api_workspaces__workspace_id__mailboxes__mailbox_id__delete: {
         parameters: {
             query?: never;
             header?: never;

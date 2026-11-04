@@ -51,6 +51,9 @@
 								onselect(email.id);
 							}}>{senderName(email.sender)}</button
 						>
+						{#if email.in_spam}<span class="ml-1.5"
+								><Tag tone="muted" icon="shield">From Spam</Tag></span
+							>{/if}
 					</td>
 					<td class={[td, 'max-w-60 truncate']} title={email.notes?.summary ?? email.subject}>
 						{email.notes?.summary ?? email.subject}

@@ -53,7 +53,15 @@ def notes(**overrides) -> Notes:
     return Notes(**base | overrides)
 
 
-def run(n, *, word_flags=frozenset(), matched=(), sender="a@customer.in", history=None):
+def run(
+    n,
+    *,
+    word_flags=frozenset(),
+    matched=(),
+    sender="a@customer.in",
+    history=None,
+    in_spam=False,
+):
     verdicts = [RuleVerdict(rule_id=r, matched=True) for r in matched]
     return decide(
         notes=n,
@@ -62,6 +70,7 @@ def run(n, *, word_flags=frozenset(), matched=(), sender="a@customer.in", histor
         config=CONFIG,
         sender=sender,
         history=history,
+        in_spam=in_spam,
     )
 
 
@@ -194,6 +203,36 @@ def test_spam_topic_matches_loosely():
 
 def test_safety_floor_still_alerts_on_spam():
     decision = run(notes(topic=SPAM_TOPIC), word_flags={RiskFlag.LEGAL_THREAT})
+    assert decision.route is Route.ALERT
+
+
+def test_floor_word_in_spam_mail_the_ai_calls_spam_needs_a_look():
+    # Phishing in Gmail's Spam folder: both Gmail and the AI say spam, so no alert.
+    decision = run(notes(topic=SPAM_TOPIC), word_flags={RiskFlag.LEGAL_THREAT}, in_spam=True)
+    assert decision.route is Route.NEEDS_A_LOOK
+    assert decision.floor_flags == [RiskFlag.LEGAL_THREAT]
+
+
+@pytest.mark.parametrize(
+    "n",
+    [
+        notes(),  # a real customer Gmail filed as spam
+        notes(topic=SPAM_TOPIC, sure=False),
+        None,  # the AI failed
+    ],
+)
+def test_floor_word_in_spam_mail_still_alerts_unless_the_ai_is_sure_it_is_spam(n):
+    decision = run(n, word_flags={RiskFlag.LEGAL_THREAT}, in_spam=True)
+    assert decision.route is Route.ALERT
+
+
+def test_floor_word_in_spam_mail_from_an_important_contact_alerts():
+    decision = run(
+        notes(topic=SPAM_TOPIC),
+        word_flags={RiskFlag.LEGAL_THREAT},
+        sender="ceo@bigcorp.com",
+        in_spam=True,
+    )
     assert decision.route is Route.ALERT
 
 

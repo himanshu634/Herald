@@ -60,7 +60,7 @@ class WatchResult(NamedTuple):
 
 class HistoryRecord(NamedTuple):
     id: str
-    message_ids: list[str]  # inbox mail only; may be empty
+    message_ids: list[str]  # mail Herald reads (see is_received_mail); may be empty
 
 
 class HistoryPage(NamedTuple):
@@ -82,10 +82,19 @@ class RawMessage(NamedTuple):
     thread_id: str | None = None
 
 
-def is_inbox_mail(label_ids: list[str]) -> bool:
+def read_labels(include_spam: bool) -> set[str]:
+    """The labels whose mail Herald reads: the inbox, and Spam when the owner chose it."""
+    return {"INBOX", "SPAM"} if include_spam else {"INBOX"}
+
+
+def is_received_mail(label_ids: list[str], include_spam: bool = False) -> bool:
     # Herald triages mail the owner received, not the owner's own sent mail or drafts
     # (mail sent to yourself carries both INBOX and SENT).
-    return "INBOX" in label_ids and "SENT" not in label_ids and "DRAFT" not in label_ids
+    return (
+        not read_labels(include_spam).isdisjoint(label_ids)
+        and "SENT" not in label_ids
+        and "DRAFT" not in label_ids
+    )
 
 
 def _json(response: httpx.Response) -> dict[str, Any]:
@@ -204,12 +213,17 @@ class GmailClient:
         data = await self._api("GET", "/profile", access)
         return Profile(data["emailAddress"], str(data["historyId"]))
 
-    async def watch(self, access: str, topic: str) -> WatchResult:
+    async def watch(self, access: str, topic: str, include_spam: bool = False) -> WatchResult:
+        # A new watch replaces the account's current one, so this also changes the labels.
         data = await self._api(
             "POST",
             "/watch",
             access,
-            json={"topicName": topic, "labelIds": ["INBOX"], "labelFilterBehavior": "include"},
+            json={
+                "topicName": topic,
+                "labelIds": sorted(read_labels(include_spam)),
+                "labelFilterBehavior": "include",
+            },
         )
         return WatchResult(str(data["historyId"]), _ms_to_datetime(data["expiration"]))
 
@@ -217,12 +231,19 @@ class GmailClient:
         await self._api("POST", "/stop", access)
 
     async def list_history(
-        self, access: str, start_history_id: str, page_token: str | None = None
+        self,
+        access: str,
+        start_history_id: str,
+        page_token: str | None = None,
+        include_spam: bool = False,
     ) -> HistoryPage:
-        params = {
+        # No labelId filter: Gmail takes only one, and Herald may read two (INBOX and SPAM).
+        # The labels are checked per message below instead.
+        params: dict[str, str | list[str]] = {
             "startHistoryId": start_history_id,
-            "historyTypes": "messageAdded",
-            "labelId": "INBOX",
+            # labelAdded too: mail marked "not spam", or moved back to the inbox, is not a new
+            # message to Gmail, only a new label. Without it that mail would never be read.
+            "historyTypes": ["messageAdded", "labelAdded"],
             "maxResults": "500",
         }
         if page_token:
@@ -232,14 +253,24 @@ class GmailClient:
             raise HistoryExpired("start history id is too old")
         response.raise_for_status()
         data = _json(response)
+        wanted = read_labels(include_spam)
         records: list[HistoryRecord] = []
         for record in data.get("history", []):
             ids = [
                 added["message"]["id"]
                 for added in record.get("messagesAdded", [])
-                if is_inbox_mail(added["message"].get("labelIds", []))
+                if is_received_mail(added["message"].get("labelIds", []), include_spam)
             ]
-            # A record left with no inbox mail is kept: the cursor may still move past it.
+            # Only a label Herald reads counts (a star or a custom label does not), and only
+            # while the message still carries it. A message Herald already stored is dropped
+            # by the sync's dedupe on provider_message_id.
+            ids += [
+                change["message"]["id"]
+                for change in record.get("labelsAdded", [])
+                if not wanted.isdisjoint(change.get("labelIds", []))
+                and is_received_mail(change["message"].get("labelIds", []), include_spam)
+            ]
+            # A record left with no mail Herald reads is kept: the cursor may still move past it.
             records.append(HistoryRecord(str(record["id"]), ids))
         return HistoryPage(records, str(data["historyId"]), data.get("nextPageToken"))
 

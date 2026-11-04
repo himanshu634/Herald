@@ -75,6 +75,8 @@ class Mailbox(SQLModel, table=True):
     status: MailboxStatus = Field(default=MailboxStatus.ACTIVE, index=True)
     credentials_enc: str | None = None  # SecretBox token; None once disconnected.
     can_send: bool = False  # Set at every connect; false for mailboxes connected read-only.
+    # The owner chose to have Herald read the provider's Spam folder as well as the inbox.
+    read_spam: bool = False
     cursor: str | None = None  # Opaque to everything but the connector.
     provider_state: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON, nullable=False)
@@ -125,6 +127,8 @@ class Email(SQLModel, table=True):
     internet_message_id: str | None = None
     references: str | None = None
     reply_to: str | None = None
+    # Read from the provider's Spam folder. Herald never moves it out of Spam.
+    in_spam: bool = False
 
     def to_core(self) -> CoreEmail:
         return CoreEmail(
@@ -134,6 +138,7 @@ class Email(SQLModel, table=True):
             subject=self.subject,
             body=self.body,
             thread_id=self.thread_id,
+            in_spam=self.in_spam,
         )
 
 

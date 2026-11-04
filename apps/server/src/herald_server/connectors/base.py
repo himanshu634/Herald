@@ -18,6 +18,7 @@ class InboundMessage(BaseModel):
     internet_message_id: str | None = None  # Message-ID, with its angle brackets
     references: str | None = None  # space-separated ids, newest last
     reply_to: str | None = None  # one bare lower-case address
+    in_spam: bool = False  # the provider filed it as spam
 
 
 class FetchResult(BaseModel):
@@ -94,6 +95,9 @@ class MailConnector(Protocol):
     A connector that finds its cursor too old falls back to that same path itself,
     and never raises for an expired cursor. A provider without push raises
     `PushIgnored` from `parse_push`.
+
+    Mail is read from the inbox, and from the Spam folder too when `include_spam` is true.
+    Mail that moves into the inbox later (marked "not spam", or moved back) counts as new.
     """
 
     provider: str
@@ -103,7 +107,11 @@ class MailConnector(Protocol):
     async def complete_authorization(self, code: str) -> ConnectedAccount: ...
 
     async def subscribe(
-        self, credentials: dict[str, str], provider_state: dict[str, Any]
+        self,
+        credentials: dict[str, str],
+        provider_state: dict[str, Any],
+        *,
+        include_spam: bool = False,
     ) -> Subscription: ...
 
     async def unsubscribe(
@@ -111,8 +119,12 @@ class MailConnector(Protocol):
     ) -> None: ...
 
     async def fetch_changes(
-        self, credentials: dict[str, str], cursor: str | None
+        self, credentials: dict[str, str], cursor: str | None, *, include_spam: bool = False
     ) -> FetchResult: ...
+
+    async def fetch_recent_spam(self, credentials: dict[str, str]) -> list[InboundMessage]:
+        """Recent mail in the Spam folder, for when the owner turns Spam on. Moves no cursor."""
+        ...
 
     async def revoke(self, credentials: dict[str, str]) -> None: ...
 

@@ -75,9 +75,72 @@ async def test_list_history_sends_cursor_and_filters():
     await make_client(handler).list_history("tok", "100")
     assert seen["url"].startswith(f"{API}/history")
     assert seen["params"]["startHistoryId"] == "100"
-    assert seen["params"]["historyTypes"] == "messageAdded"
-    assert seen["params"]["labelId"] == "INBOX"
+    assert httpx.URL(seen["url"]).params.get_list("historyTypes") == [
+        "messageAdded",
+        "labelAdded",
+    ]
+    # Herald may read two labels and Gmail filters on one, so labels are checked per message.
+    assert "labelId" not in seen["params"]
     assert seen["auth"] == "Bearer tok"
+
+
+SPAM_HISTORY = {
+    "historyId": "300",
+    "history": [
+        {"id": "201", "messagesAdded": [{"message": {"id": "s1", "labelIds": ["SPAM"]}}]},
+        # Marked "not spam": the message gains INBOX.
+        {
+            "id": "202",
+            "labelsAdded": [
+                {"message": {"id": "s2", "labelIds": ["INBOX"]}, "labelIds": ["INBOX"]}
+            ],
+        },
+        # A star is a new label too, but not one Herald reads.
+        {
+            "id": "203",
+            "labelsAdded": [
+                {"message": {"id": "m4", "labelIds": ["INBOX", "STARRED"]}, "labelIds": ["STARRED"]}
+            ],
+        },
+        # Moved to the inbox and archived again before the sync ran.
+        {
+            "id": "204",
+            "labelsAdded": [{"message": {"id": "m5", "labelIds": []}, "labelIds": ["INBOX"]}],
+        },
+    ],
+}
+
+
+async def test_list_history_reads_mail_moved_into_the_inbox_but_not_spam():
+    def handler(request):
+        return httpx.Response(200, json=SPAM_HISTORY)
+
+    page = await make_client(handler).list_history("tok", "100")
+    assert page.records == [
+        HistoryRecord("201", []),
+        HistoryRecord("202", ["s2"]),
+        HistoryRecord("203", []),
+        HistoryRecord("204", []),
+    ]
+
+
+async def test_list_history_reads_spam_when_asked():
+    def handler(request):
+        return httpx.Response(200, json=SPAM_HISTORY)
+
+    page = await make_client(handler).list_history("tok", "100", include_spam=True)
+    assert [r.message_ids for r in page.records] == [["s1"], ["s2"], [], []]
+
+
+async def test_watch_includes_spam_when_asked():
+    seen = {}
+
+    def handler(request):
+        seen["json"] = json.loads(request.read())
+        return httpx.Response(200, json={"historyId": "5", "expiration": "1762790400000"})
+
+    await make_client(handler).watch("tok", "projects/p/topics/t", include_spam=True)
+    assert seen["json"]["labelIds"] == ["INBOX", "SPAM"]
 
 
 async def test_watch_sends_topic_and_inbox_filter():

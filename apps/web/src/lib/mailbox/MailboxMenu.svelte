@@ -11,6 +11,7 @@
 		onsync,
 		onpause,
 		onresume,
+		onspam,
 		ondisconnect,
 		onreconnect
 	}: {
@@ -19,6 +20,8 @@
 		onsync: () => void;
 		onpause: () => void;
 		onresume: () => void;
+		/** Flip `read_spam`. */
+		onspam: () => void;
 		ondisconnect: () => void;
 		onreconnect: () => void;
 	} = $props();
@@ -113,6 +116,32 @@
 				<button type="button" class={item} disabled={busy} onclick={() => run(onsync)}>
 					<Icon name="redo" size={16} />Check for new mail now
 				</button>
+			{/if}
+			<button
+				type="button"
+				role="switch"
+				aria-checked={mailbox.read_spam}
+				class={item}
+				disabled={busy}
+				onclick={() => run(onspam)}
+			>
+				<Icon name="shield" size={16} /><span class="flex-1">Read Spam folder too</span>
+				<span
+					aria-hidden="true"
+					class={[
+						'relative h-5 w-8.5 flex-none rounded-full',
+						mailbox.read_spam ? 'bg-ink' : 'bg-line-strong'
+					]}
+				>
+					<span
+						class={[
+							'absolute top-0.5 size-4 rounded-full',
+							mailbox.read_spam ? 'left-4 bg-accent' : 'left-0.5 bg-surface'
+						]}
+					></span>
+				</span>
+			</button>
+			{#if mailbox.status !== 'paused'}
 				<button type="button" class={item} disabled={busy} onclick={() => run(onpause)}>
 					<Icon name="pause" size={16} /><span class="flex-1">Pause</span>
 					<span class="text-sm text-muted">mail waits</span>

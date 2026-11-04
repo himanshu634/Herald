@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from herald_server.bus import BusEvent
-from herald_server.connectors.base import AuthRevoked, FetchResult
+from herald_server.connectors.base import AuthRevoked, InboundMessage
 from herald_server.crypto import BadSecret
 from herald_server.events import EMAIL_RECEIVED, add_event, to_bus
 from herald_server.mailboxes import get_mailbox, mark_needs_reauth
@@ -26,19 +26,20 @@ class SyncOutcome(NamedTuple):
 
 
 def _store(
-    services: Services, mailbox_id: str, result: FetchResult
+    services: Services, mailbox_id: str, messages: list[InboundMessage], cursor: str | None
 ) -> tuple[list[str], list[BusEvent]]:
     """Save the new emails and the new cursor in one transaction.
 
     They commit together so that a crash cannot move the cursor past mail that was never
     stored (lost mail), or store mail without moving the cursor (refetched, then deduped).
+    A `cursor` of None stores the emails and leaves the cursor alone (the Spam backfill).
     """
     with Session(services.engine) as session:
         # By id alone: the job holds a trusted mailbox id. Routes filter on workspace_id first.
         mailbox = session.get(Mailbox, mailbox_id)
         if mailbox is None:
             return [], []
-        incoming = [m.provider_message_id for m in result.messages]
+        incoming = [m.provider_message_id for m in messages]
         # Dedupe: a cursor can overlap the last sync, so some messages may be stored already.
         seen = set(
             session.exec(
@@ -51,7 +52,7 @@ def _store(
         )
         ids: list[str] = []
         events = []
-        for message in result.messages:
+        for message in messages:
             # `seen` also drops a repeat inside this batch. Inserting both copies would hit
             # the unique constraint, roll back the batch and block the cursor on every sync.
             if message.provider_message_id in seen:
@@ -68,6 +69,7 @@ def _store(
                 internet_message_id=message.internet_message_id,
                 references=message.references,
                 reply_to=message.reply_to,
+                in_spam=message.in_spam,
                 # A provider's thread id is unique only inside one account, and a workspace
                 # can hold several mailboxes, so the mailbox id keeps two threads apart.
                 thread_id=f"{mailbox_id}:{message.thread_id}" if message.thread_id else None,
@@ -82,8 +84,9 @@ def _store(
                     {"email_id": email.id, "sender": email.sender, "subject": email.subject},
                 )
             )
-        mailbox.cursor = result.cursor
-        mailbox.last_synced_at = datetime.now(UTC)
+        if cursor is not None:
+            mailbox.cursor = cursor
+            mailbox.last_synced_at = datetime.now(UTC)
         try:
             session.commit()
         except IntegrityError:
@@ -126,14 +129,16 @@ async def sync_mailbox(services: Services, mailbox_id: str) -> SyncOutcome:
         # BadSecret: the credentials no longer decrypt (e.g. token_key changed), so only a
         # reconnect can fix this mailbox, the same as a revoke.
         credentials = services.secrets.open(mailbox.credentials_enc)
-        result = await connector.fetch_changes(credentials, mailbox.cursor)
+        result = await connector.fetch_changes(
+            credentials, mailbox.cursor, include_spam=mailbox.read_spam
+        )
     except (AuthRevoked, BadSecret) as exc:
         # Log only the type and id: the exception may carry provider responses or tokens.
         log.warning("%s on mailbox %s", type(exc).__name__, mailbox_id)
         await mark_needs_reauth(services, mailbox_id)
         return SyncOutcome([], has_more=False)
 
-    ids, events = await asyncify(_store)(services, mailbox_id, result)
+    ids, events = await asyncify(_store)(services, mailbox_id, result.messages, result.cursor)
     log.info(
         "mailbox %s synced: %d fetched, %d new%s",
         mailbox_id,
@@ -146,3 +151,36 @@ async def sync_mailbox(services: Services, mailbox_id: str) -> SyncOutcome:
     for event in events:
         await services.bus.publish(event)
     return SyncOutcome(ids, has_more=result.has_more)
+
+
+async def backfill_spam(services: Services, mailbox_id: str) -> list[str]:
+    """Store the last few days of Spam once the owner turns Spam on. Returns the new email ids.
+
+    The history sync reads only changes after the cursor, so Spam that arrived before the
+    switch would never be read. The cursor is left alone: the sync owns it, and moving it here
+    could skip inbox mail the sync has not read yet. Mail already stored is deduped as usual.
+    """
+    mailbox = await asyncify(get_mailbox)(services, mailbox_id)
+    if (
+        mailbox is None
+        or mailbox.status != MailboxStatus.ACTIVE
+        or not mailbox.read_spam
+        or not mailbox.credentials_enc
+        or services.secrets is None
+    ):
+        return []
+    connector = services.connectors.get(mailbox.provider)
+    if connector is None:
+        return []
+    try:
+        credentials = services.secrets.open(mailbox.credentials_enc)
+        messages = await connector.fetch_recent_spam(credentials)
+    except (AuthRevoked, BadSecret) as exc:
+        log.warning("%s on Spam backfill of mailbox %s", type(exc).__name__, mailbox_id)
+        await mark_needs_reauth(services, mailbox_id)
+        return []
+    ids, events = await asyncify(_store)(services, mailbox_id, messages, None)
+    log.info("mailbox %s Spam backfill: %d fetched, %d new", mailbox_id, len(messages), len(ids))
+    for event in events:
+        await services.bus.publish(event)
+    return ids
