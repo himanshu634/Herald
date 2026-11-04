@@ -96,7 +96,9 @@ class History(BaseModel):
 
 
 class EmailContext(BaseModel):
-    """What the agent looked up for one email: counts, the ids it saw, failures and timings."""
+    """What triage looked up for one email: counts, the ids it fetched, the tools the model
+    chose to call, failures and timings. The sender's ids reached the model only when `asked`
+    holds a sender_history call."""
 
     repeat_7d: int = 0
     repeat_30d: int = 0
@@ -105,9 +107,17 @@ class EmailContext(BaseModel):
     correction_ids: list[str] = Field(default_factory=list)
     failed: list[str] = Field(default_factory=list)
     ms: dict[str, int] = Field(default_factory=dict)
+    # "node:tool" for each model tool call, e.g. "write_notes:sender_history".
+    asked: list[str] = Field(default_factory=list)
 
     @classmethod
-    def from_run(cls, history: History, failed: list[str], ms: dict[str, int]) -> "EmailContext":
+    def from_run(
+        cls,
+        history: History,
+        failed: list[str],
+        ms: dict[str, int],
+        asked: list[str] | None = None,
+    ) -> "EmailContext":
         sender, thread, corrections = history.sender, history.thread, history.corrections
         return cls(
             repeat_7d=sender.count_7d if sender else 0,
@@ -117,4 +127,5 @@ class EmailContext(BaseModel):
             correction_ids=[c.id for c in corrections.items] if corrections else [],
             failed=failed,
             ms=ms,
+            asked=asked or [],
         )

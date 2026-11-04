@@ -41,6 +41,8 @@ class Trial(BaseModel):
     word_flags: list[RiskFlag]
     decision: Decision
     errors: list[str] = Field(default_factory=list)
+    # The model tools the AI chose to call, as "node:tool" (see EmailContext.asked).
+    asked: list[str] = Field(default_factory=list)
     ms: int
     # Set when the run was traced; the CLI scores the trace with `passed` once labels are checked.
     trace_id: str | None = None
@@ -58,16 +60,18 @@ class RecordingModel:
         self._inner = inner
         self.errors: list[str] = []
 
-    async def write_notes(self, email, business_name, config, history=None) -> Notes:
+    async def write_notes(self, email, business_name, config, history=None, tools=()) -> Notes:
         try:
-            return await self._inner.write_notes(email, business_name, config, history)
+            return await self._inner.write_notes(email, business_name, config, history, tools)
         except ModelError as exc:
             self.errors.append(f"write_notes: {exc}")
             raise
 
-    async def judge_rules(self, email, business_name, config, history=None) -> list[RuleVerdict]:
+    async def judge_rules(
+        self, email, business_name, config, history=None, tools=()
+    ) -> list[RuleVerdict]:
         try:
-            return await self._inner.judge_rules(email, business_name, config, history)
+            return await self._inner.judge_rules(email, business_name, config, history, tools)
         except ModelError as exc:
             self.errors.append(f"judge_rules: {exc}")
             raise
@@ -144,6 +148,7 @@ async def run_case(
         word_flags=sorted(state.get("word_flags", set())),
         decision=state["decision"],
         errors=recorder.errors,
+        asked=state.get("asked", []),
         ms=round((time.perf_counter() - started) * 1000),
         trace_id=traced.trace_id,
     )

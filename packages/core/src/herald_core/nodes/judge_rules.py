@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 
 from herald_core.decide import not_for_business
 from herald_core.model import TriageModel
+from herald_core.model_tools import SenderLookup, asked
 from herald_core.nodes.log_names import names
 from herald_core.state import TriageState
 
@@ -28,20 +29,25 @@ def make_judge_rules(model: TriageModel) -> Callable[[TriageState], Awaitable[Tr
             log.info("email %s judge_rules: skipped (%s)", email_id, skip)
             return {"verdicts": []}
         started = time.perf_counter()
+        history = state.get("history")
+        lookup = SenderLookup(history.sender if history else None)
+        # write_notes ran first and wrote its own lookups: add to them, not over them.
+        before = state.get("asked", [])
         try:
             verdicts = await model.judge_rules(
-                state["email"], state["business_name"], config, history=state.get("history")
+                state["email"], state["business_name"], config, history=history, tools=[lookup]
             )
         except Exception:
             log.exception("judge_rules failed for email %s", email_id)
-            return {"verdicts": []}
+            return {"verdicts": [], "asked": before + asked("judge_rules", lookup)}
         log.info(
-            "email %s judge_rules: %d rules, matched=%s in %d ms",
+            "email %s judge_rules: %d rules, matched=%s asked=%s in %d ms",
             email_id,
             len(config.rules),
             names(v.rule_id for v in verdicts if v.matched),
+            lookup.calls,
             round((time.perf_counter() - started) * 1000),
         )
-        return {"verdicts": verdicts}
+        return {"verdicts": verdicts, "asked": before + asked("judge_rules", lookup)}
 
     return judge_rules

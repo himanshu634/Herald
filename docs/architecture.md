@@ -85,14 +85,27 @@ flowchart LR
 
 Before the model reads an email, `gather_context` runs three tools in code: `sender_history` (recent emails from the same sender), `thread` (earlier messages in the thread) and `recent_corrections` (emails the owner moved to the inbox from an alert or from closed). This is a pre-fetch, not a model loop. The tools read Herald's own data through the API's internal routes (see Internal routes), never the mail provider.
 
+The thread and the corrections go into the prompt. The sender history does not: the model gets a `sender_history` tool and calls it only when it needs the sender's earlier emails (see Model tools).
+
 - Each tool is one file in `herald_server/tools/` and calls one internal route. They share the email they are bound to in `tools/bound.py`. The queries behind them are in `herald_server/internal/history.py`.
 - The email is bound when the toolbox is built, and the API derives the workspace from it. No tool input has a workspace or email id.
 - A tool sees only emails received before the current one.
 - A tool that fails or takes over 2 s gives nothing, and its name goes into `email.context.failed`. Triage goes on.
 - `word_check` never waits on the tools. A slow tool can delay the alert by at most the tool timeout (2 s).
 - History goes into the user message inside a fenced `<history>` block. Its text is untrusted, so Herald strips `<history>`, `<message>`, `<email>` and `<business>` tags from it.
-- `email.context` saves what the model saw: repeat counts, the ids it was shown, failed tools and timings.
+- `email.context` saves what triage looked up: repeat counts, the ids it fetched, the model tools the AI called (`asked`, as `node:tool`), failed tools and timings. The sender's ids reached the model only when `asked` has a `sender_history` call.
 - `decide` also reads the sender history: the third email about the same thing this week alerts, after "about to cancel" and before "unsure". It counts this email plus earlier ones from the sender on the same topic in the 7 days before it (`SenderHistory.as_of` places the window) that are not done or closed.
+
+## Model tools
+
+The model may call a tool while it writes notes or judges rules. `herald_core/model_tools.py` holds them; `AnthropicModel` runs the loop. There is one so far, `sender_history`.
+
+- It answers from the sender history `gather_context` already fetched (`SenderLookup`). `decide` needs that history for the repeat count whatever the model does, so the fetch stays in code. The model's lookup costs no second request, and the model and `decide` see the same data.
+- It takes no input. The sender is always this email's own, so text in the email cannot steer the model into another customer's mail. It is `strict`, with a fixed description.
+- Its answer is the sender section, cleaned and fenced in `<history>` like the history block. A new sender gets "No earlier emails from this sender." A failed fetch goes back as an error result, so the model answers without it.
+- `write_notes` and `judge_rules` both offer it, with the same tool list. Tools come before the system prompt in the cache key, so the two calls still share one cache entry.
+- The model gets one round of tool calls (`MAX_TOOL_ROUNDS`). The next request sends `tool_choice: none`, so the structured answer comes back. Every call in a round gets its result, in one user message, and the assistant turn goes back unchanged, thinking blocks included.
+- A tool round is one more model call before `decide`, so it delays every route, the safety floor's alerts included. `FakeModel` never calls a tool.
 
 ## The prompt
 
@@ -102,7 +115,8 @@ Claude gets one system prompt for each business and one user message for each em
 | --- | --- | --- |
 | Herald: role, scales, flag definitions, fences | A Herald release | System prompt, first, from `triage.md` |
 | Brand: name, profile, topics, facts, guidance, rules | The owner edits setup | System prompt, in `<business>` |
-| History: sender history, thread, past corrections | Every email | User message, in `<history>`, before `<email>` |
+| History: thread, past corrections | Every email | User message, in `<history>`, before `<email>` |
+| Sender history | When the model calls `sender_history` | A tool result, in `<history>` |
 | Email: sender, important marker, subject, body | Every email | User message, in `<email>` |
 
 Building rules:
@@ -293,6 +307,7 @@ Google Cloud setup (consent screen, OAuth client, Pub/Sub topic and push subscri
 | `EventBus` | `herald_server.bus` | `RedisEventBus`, `InMemoryEventBus` |
 | `JobQueue` | `herald_server.queue` | `ArqQueue`, `InlineQueue` |
 | `Tool` / `Toolbox` | `herald_core.tools` (types), `herald_server.tools` (tools that call the internal routes) | `SenderHistoryTool`, `ThreadTool`, `CorrectionsTool` |
+| `ModelTool` | `herald_core.model_tools` | `SenderLookup` (the model's `sender_history`) |
 
 ## Configuration
 
@@ -360,7 +375,7 @@ Production rolls forward only. Write `downgrade()` where it is cheap; it is for 
 
 ## Not built yet
 
-- Model-driven tool calls and business-system tools
+- Business-system tools, and model tools other than `sender_history`
 - Auth and per-workspace limits
 - A settings page for editing a workspace after setup (`PUT /config` is ready for it)
 - The rule test (the score report and the test-email set are in `packages/evals`)

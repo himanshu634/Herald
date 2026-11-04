@@ -63,11 +63,13 @@ def test_context_from_run():
         thread=Thread(messages=[MESSAGE]),
         corrections=Corrections(items=[CORRECTION]),
     )
-    ctx = EmailContext.from_run(history, failed=["thread"], ms={"sender_history": 4})
+    asked = ["write_notes:sender_history"]
+    ctx = EmailContext.from_run(history, failed=["thread"], ms={"sender_history": 4}, asked=asked)
     assert (ctx.repeat_7d, ctx.repeat_30d) == (SENDER.count_7d, SENDER.count_30d)
     assert ctx.recent_ids == [e.id for e in SENDER.recent]
     assert ctx.thread_ids == [MESSAGE.id] and ctx.correction_ids == [CORRECTION.id]
     assert ctx.failed == ["thread"] and ctx.ms == {"sender_history": 4}
+    assert ctx.asked == asked
 
 
 def test_context_from_empty_run():
