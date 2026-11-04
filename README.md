@@ -132,7 +132,7 @@ make test
 make lint
 ```
 
-To see what the model was asked and what it said, run `make langfuse` (Langfuse on :3000, dev only), put the dev keys from `.env.example` in `.env`, and restart. `make langfuse-down` stops it. See "Tracing (dev)" in `docs/architecture.md`.
+To see what the model was asked and what it said, run `make langfuse` (Langfuse on :3000, dev only), and restart the API and worker (`.env.example` already has the dev keys). `make langfuse-down` stops it. See "Tracing (dev)" in `docs/architecture.md`.
 
 Run `make gen-api` after changing API schemas to regenerate the web app's types.
 

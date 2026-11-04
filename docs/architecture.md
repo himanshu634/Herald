@@ -321,7 +321,8 @@ Settings are read from `HERALD_*` environment variables or `.env` (see `.env.exa
 Tracing is for development only. It sends each triage run to a Langfuse that runs on your machine, so you can see what the model was asked and what it said. The Langfuse packages are in the dev dependency group, so the production image cannot trace. Traces hold customer emails, so they never leave your machine.
 
 - `make langfuse` starts Langfuse on `http://localhost:3000` (Docker). Log in with `dev@herald.test`. The dev keys are in `.env.example`. `make langfuse-down` stops it and keeps its data.
-- Put the two keys in `.env` and restart the API and worker. Tracing turns on only when both keys are set and Langfuse accepts them. If it is down, Herald logs a warning and runs without tracing. Tracing never changes a triage result.
+- `.env.example` sets both keys, so a `.env` copied from it traces. Restart the API and worker after you change them: settings are read at startup. Tracing turns on only when both keys are set and Langfuse accepts them. At startup Herald logs whether tracing is on. If Langfuse is down, it logs a warning and runs without tracing. Blank both keys to turn it off. Tracing never changes a triage result.
+- `docker-compose.prod.yml` blanks the keys, and the production image has no Langfuse package.
 - A live email is one trace named `triage`, with the email id as the session. A Try run (`trial-read`) is a trace of its own. An eval trial is a trace named `eval`, and all trials of one `herald-evals` run share a session, which the run record keeps as `langfuse_session`.
 - Under the trace root, the model-call spans (`model.write_notes`, `model.judge_rules`) sit beside the LangGraph node spans.
 - Each trace gets four outcome scores: `route`, `floor` (a safety-floor word matched), `unsure` and `ai_failed`. An eval trace also gets `passed`, set after the labels are checked. Use them to filter runs.

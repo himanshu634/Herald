@@ -86,8 +86,10 @@ def keyed(settings, **extra):
     )
 
 
-def test_tracing_is_off_without_keys(settings):
+def test_tracing_is_off_without_keys(settings, caplog):
+    caplog.set_level(logging.INFO, logger="herald_server.tracing")
     assert build_tracing(settings) is NO_TRACING
+    assert "Langfuse keys are not set; tracing is off" in caplog.text
 
 
 def test_tracing_is_off_with_empty_keys(settings):
@@ -411,3 +413,10 @@ def test_auth_failure_warning_says_why(settings, monkeypatch, caplog):
     _stub_langfuse(monkeypatch, auth_ok=False)
     assert build_tracing(keyed(settings)) is NO_TRACING
     assert "auth_check returned False" in caplog.text
+
+
+def test_build_tracing_logs_where_it_traces(settings, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="herald_server.tracing")
+    _stub_langfuse(monkeypatch)
+    assert build_tracing(keyed(settings, langfuse_base_url="http://lf.test")).enabled
+    assert "Tracing to Langfuse at http://lf.test" in caplog.text

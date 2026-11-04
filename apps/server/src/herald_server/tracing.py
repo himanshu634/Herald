@@ -243,6 +243,7 @@ def build_tracing(settings: Settings) -> Tracing:
     public_key = settings.langfuse_public_key
     secret = settings.langfuse_secret_key.get_secret_value() if settings.langfuse_secret_key else ""
     if not public_key or not secret:
+        log.info("Langfuse keys are not set; tracing is off")
         return NO_TRACING
 
     # Lazy: the production image has no dev group, so these imports must not run at module load.
@@ -288,6 +289,7 @@ def build_tracing(settings: Settings) -> Tracing:
     # The tag names the model that runs. Fake runs (lite mode, evals) must not carry the
     # Claude name from settings.
     model_name = settings.model_name if settings.model_provider == "anthropic" else "fake"
+    log.info("Tracing to Langfuse at %s", settings.langfuse_base_url)
     return LangfuseTracing(
         client, model_name, propagate_attributes, CallbackHandler, public_key=public_key
     )
